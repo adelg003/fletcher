@@ -1,0 +1,39 @@
+name: Docker
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Just
+        run: sudo apt install just
+      - name: Image Build Check
+        run: just docker-build
+
+  docker-healthcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Just
+        run: sudo apt install just
+      - name: Setup Docker Network
+        run: just pg-init-network
+      - name: Startup PostgreSQL
+        run: just pg-start
+      - name: Install SQLx cli
+        run: just sqlx-install
+      - name: Run SQLx Migration
+        run: just sqlx-migrate
+      - name: Image Build
+        run: just docker-build
+      - name: Container Startup
+        run: just docker-run
+      - name: Container Healthcheck
+        run: just docker-healthcheck
+      - name: Container Stop
+        run: just docker-kill

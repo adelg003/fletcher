@@ -1,0 +1,17 @@
+exit-code: 1
+
+scan:
+  scanners:
+    - misconfig
+    - vuln
+    - secret
+  skip-dirs:
+    - ./gitignore
+    - ./target
+
+severity:
+ - CRITICAL
+ - HIGH
+ - MEDIUM
+ - LOW
+ - UNKNOWN
