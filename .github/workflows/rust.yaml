@@ -1,0 +1,92 @@
+name: Rust
+
+on:
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Just
+        run: sudo apt install just
+      - name: Check
+        run: just check_w_sqlx_cache
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Just
+        run: sudo apt install just
+      - name: Clippy
+        run: just clippy_w_sqlx_cache
+
+  fmt-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Just
+        run: sudo apt install just
+      - name: Format
+        run: just fmt-check
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_DB: fletcher_db
+          POSTGRES_USER: fletcher_user
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Just
+        run: sudo apt install just
+      - name: Install SQLx cli
+        run: just sqlx-install
+      - name: Run SQLx Migration
+        run: just sqlx-migrate
+      - name: Tests
+        run: just test
+
+  sqlx-check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_DB: fletcher_db
+          POSTGRES_USER: fletcher_user
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Just
+        run: sudo apt install just
+      - name: Install SQLx cli
+        run: just sqlx-install
+      - name: Run SQLx Migration
+        run: just sqlx-migrate
+      - name: SQLx Cache Check
+        run: just sqlx-check
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Just
+        run: sudo apt install just
+      - name: Install Cargo Deny
+        run: just deny-install
+      - name: Cargo Deny Checks
+        run: just deny
