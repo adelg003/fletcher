@@ -175,3 +175,87 @@ async fn data_product_upsert(
 
     Ok(data_product)
 }
+
+/// Update the State of a Data Product
+async fn state_update(
+    tx: &mut Transaction<'_, Postgres>,
+    param: &StateDbParam,
+    username: &str,
+) -> Result<DataProduct, sqlx::Error> {
+    // Update the state
+    let data_product = query_as!(
+        DataProduct,
+        r#"UPDATE
+            data_product
+        SET
+            state = $3,
+            run_id = $4,
+            link = $5,
+            passback = $6,
+            modified_by = $7,
+            modified_date = $8
+        WHERE
+            dataset_id = $1
+            AND data_product_id = $2
+        RETURNING
+            dataset_id,
+            data_product_id,
+            compute AS "compute: Compute",
+            name,
+            version,
+            eager,
+            passthrough,
+            state AS "state: State",
+            run_id,
+            link,
+            passback,
+            modified_by,
+            modified_date"#,
+        param.dataset_id,
+        param.data_product_id,
+        param.state as State,
+        param.run_id,
+        param.link,
+        param.passback,
+        username,
+        Utc::now(),
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(data_product)
+}
+
+/// Retrieve all Data Products for a Dataset
+async fn data_products_by_dataset_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: Uuid,
+) -> Result<Vec<DataProduct>, sqlx::Error> {
+    // Upsert a data product
+    let data_products = query_as!(
+        DataProduct,
+        r#"SELECT
+            dataset_id,
+            data_product_id,
+            compute AS "compute: Compute",
+            name,
+            version,
+            eager,
+            passthrough,
+            state AS "state: State",
+            run_id,
+            link,
+            passback,
+            modified_by,
+            modified_date
+        FROM
+            data_product
+        WHERE
+            dataset_id = $1"#,
+        dataset_id,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    Ok(data_products)
+}
