@@ -46,8 +46,8 @@ CREATE TABLE node (
 -- Edge Details Table
 CREATE TABLE edge (
   dag_id UUID NOT NULL,
-  source_id UUID NOT NULL,
-  dest_id UUID NOT NULL,
+  source_id TEXT NOT NULL,
+  dest_id TEXT NOT NULL,
   PRIMARY KEY(dag_id, source_id, dest_id),
   FOREIGN KEY(dag_id) REFERENCES dag(dag_id),
   FOREIGN KEY(dag_id, source_id) REFERENCES node(dag_id, node_id),
