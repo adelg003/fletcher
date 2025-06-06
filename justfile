@@ -56,6 +56,10 @@ sqlx-install:
 sqlx-migrate:
   sqlx migrate run
 
+# SQLx DB Revert
+sqlx-revert:
+  sqlx migrate revert
+
 # Refresh SQLx Cache
 sqlx-prepare:
   cargo sqlx prepare
