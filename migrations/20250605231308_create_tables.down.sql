@@ -1,5 +1,8 @@
 -- Add down migration script here
 
+-- Drop Edge Table
+DROP TABLE edge;
+
 -- Drop Node table and types
 DROP TABLE node;
 DROP TYPE state_type;
