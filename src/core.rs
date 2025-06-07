@@ -47,3 +47,12 @@ pub struct DataProduct {
     modified_by: String,
     modified_date: DateTime<Utc>,
 }
+
+/// Dependency from one Data Product to another Data Product
+pub struct Dependency {
+    dataset_id: Uuid,
+    parent_id: String,
+    child_id: String,
+    modified_by: String,
+    modified_date: DateTime<Utc>,
+}

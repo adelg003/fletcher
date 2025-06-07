@@ -46,10 +46,12 @@ CREATE TABLE data_product (
 -- Dependencies between Data Products Table
 CREATE TABLE dependency (
   dataset_id UUID NOT NULL,
-  source_id TEXT NOT NULL,
-  dest_id TEXT NOT NULL,
-  PRIMARY KEY(dataset_id, source_id, dest_id),
+  parent_id TEXT NOT NULL,
+  child_id TEXT NOT NULL,
+  modified_by TEXT NOT NULL,
+  modified_date TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY(dataset_id, parent_id, child_id),
   FOREIGN KEY(dataset_id) REFERENCES dataset(dataset_id),
-  FOREIGN KEY(dataset_id, source_id) REFERENCES data_product(dataset_id, data_product_id),
-  FOREIGN KEY(dataset_id, dest_id) REFERENCES data_product(dataset_id, data_product_id)
+  FOREIGN KEY(dataset_id, parent_id) REFERENCES data_product(dataset_id, data_product_id),
+  FOREIGN KEY(dataset_id, child_id) REFERENCES data_product(dataset_id, data_product_id)
 );

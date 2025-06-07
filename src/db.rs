@@ -1,4 +1,4 @@
-use crate::core::{Compute, DataProduct, Dataset, State};
+use crate::core::{Compute, DataProduct, Dataset, Dependency, State};
 use chrono::Utc;
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, query_as};
@@ -31,13 +31,19 @@ struct StateDbParam {
     passback: Value,
 }
 
+/// Input for adding a Dependency
+struct DependencyDbParam {
+    dataset_id: Uuid,
+    parent_id: String,
+    child_id: String,
+}
+
 /// Insert or Update a Dataset
 async fn dataset_upsert(
     tx: &mut Transaction<'_, Postgres>,
     param: &DatasetDbParam,
     username: &str,
 ) -> Result<Dataset, sqlx::Error> {
-    // Upsert a dataset
     let dataset = query_as!(
         Dataset,
         "INSERT INTO dataset (
@@ -102,7 +108,6 @@ async fn data_product_upsert(
     param: &DataProductDbParam,
     username: &str,
 ) -> Result<DataProduct, sqlx::Error> {
-    // Upsert a data product
     let data_product = query_as!(
         DataProduct,
         r#"INSERT INTO data_product (
@@ -182,7 +187,6 @@ async fn state_update(
     param: &StateDbParam,
     username: &str,
 ) -> Result<DataProduct, sqlx::Error> {
-    // Update the state
     let data_product = query_as!(
         DataProduct,
         r#"UPDATE
@@ -231,7 +235,6 @@ async fn data_products_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,
 ) -> Result<Vec<DataProduct>, sqlx::Error> {
-    // Upsert a data product
     let data_products = query_as!(
         DataProduct,
         r#"SELECT
@@ -258,4 +261,67 @@ async fn data_products_by_dataset_select(
     .await?;
 
     Ok(data_products)
+}
+
+/// Insert a new Dependency between Data Products
+async fn dependency_insert(
+    tx: &mut Transaction<'_, Postgres>,
+    param: &DependencyDbParam,
+    username: &str,
+) -> Result<Dependency, sqlx::Error> {
+    let dependency = query_as!(
+        Dependency,
+        "INSERT INTO dependency (
+            dataset_id,
+            parent_id,
+            child_id,
+            modified_by,
+            modified_date
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5
+        ) RETURNING
+            dataset_id,
+            parent_id,
+            child_id,
+            modified_by,
+            modified_date",
+        param.dataset_id,
+        param.parent_id,
+        param.child_id,
+        username,
+        Utc::now(),
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(dependency)
+}
+
+/// Retrieve all Dependencies for a Dataset
+async fn dependencies_by_dataset_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: Uuid,
+) -> Result<Vec<Dependency>, sqlx::Error> {
+    let dependencies = query_as!(
+        Dependency,
+        "SELECT
+            dataset_id,
+            parent_id,
+            child_id,
+            modified_by,
+            modified_date
+        FROM
+            dependency
+        WHERE
+            dataset_id = $1",
+        dataset_id,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    Ok(dependencies)
 }
