@@ -60,6 +60,10 @@ sqlx-migrate:
 sqlx-revert:
   sqlx migrate revert
 
+# SQLx DB Reset
+sqlx-reset:
+  sqlx database reset
+
 # Refresh SQLx Cache
 sqlx-prepare:
   cargo sqlx prepare

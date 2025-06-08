@@ -8,6 +8,7 @@ use uuid::Uuid;
 struct DatasetDbParam {
     dataset_id: Uuid,
     paused: bool,
+    extra: Value,
 }
 
 /// Input parameters for a Data Product
@@ -49,25 +50,30 @@ async fn dataset_upsert(
         "INSERT INTO dataset (
             dataset_id,
             paused,
+            extra,
             modified_by,
             modified_date
         ) VALUES (
             $1,
             $2,
             $3,
-            $4
+            $4,
+            $5
         ) ON CONFLICT (dataset_id) DO
         UPDATE SET
             paused = $2,
-            modified_by = $3,
-            modified_date = $4
+            extra = $3,
+            modified_by = $4,
+            modified_date = $5
         RETURNING
             dataset_id,
             paused,
+            extra,
             modified_by,
             modified_date",
         param.dataset_id,
         param.paused,
+        param.extra,
         username,
         Utc::now(),
     )
@@ -88,6 +94,7 @@ async fn dataset_select(
         "SELECT
             dataset_id,
             paused,
+            extra,
             modified_by,
             modified_date
         FROM

@@ -1,18 +1,28 @@
 use chrono::{DateTime, Utc};
+use poem_openapi::Enum;
 use serde_json::Value;
 use sqlx::Type;
 use uuid::Uuid;
 
+/// Plan Dag Details
+struct PlanDag {
+    dataset: Dataset,
+    data_products: Vec<DataProduct>,
+    dependencies: Vec<Dependency>,
+}
+
 /// Dataset details
 pub struct Dataset {
-    dataset_id: Uuid,
-    paused: bool,
-    modified_by: String,
-    modified_date: DateTime<Utc>,
+    pub dataset_id: Uuid,
+    pub paused: bool,
+    pub extra: Value,
+    pub modified_by: String,
+    pub modified_date: DateTime<Utc>,
 }
 
 /// The Types of compute OaaS can call
-#[derive(Clone, Copy, Type)]
+#[derive(Clone, Copy, Enum, Type)]
+#[oai(rename_all = "lowercase")]
 #[sqlx(type_name = "compute", rename_all = "lowercase")]
 pub enum Compute {
     Cams,
@@ -20,7 +30,8 @@ pub enum Compute {
 }
 
 /// States a Data Product can be in
-#[derive(Clone, Copy, Type)]
+#[derive(Clone, Copy, Enum, Type)]
+#[oai(rename_all = "lowercase")]
 #[sqlx(type_name = "state", rename_all = "lowercase")]
 pub enum State {
     Waiting,
@@ -33,26 +44,26 @@ pub enum State {
 
 /// Data Product details
 pub struct DataProduct {
-    dataset_id: Uuid,
-    data_product_id: String,
-    compute: Compute,
-    name: String,
-    version: String,
-    eager: bool,
-    passthrough: Value,
-    state: State,
-    run_id: Option<Uuid>,
-    link: Option<String>,
-    passback: Value,
-    modified_by: String,
-    modified_date: DateTime<Utc>,
+    pub dataset_id: Uuid,
+    pub data_product_id: String,
+    pub compute: Compute,
+    pub name: String,
+    pub version: String,
+    pub eager: bool,
+    pub passthrough: Value,
+    pub state: State,
+    pub run_id: Option<Uuid>,
+    pub link: Option<String>,
+    pub passback: Value,
+    pub modified_by: String,
+    pub modified_date: DateTime<Utc>,
 }
 
 /// Dependency from one Data Product to another Data Product
 pub struct Dependency {
-    dataset_id: Uuid,
-    parent_id: String,
-    child_id: String,
-    modified_by: String,
-    modified_date: DateTime<Utc>,
+    pub dataset_id: Uuid,
+    pub parent_id: String,
+    pub child_id: String,
+    pub modified_by: String,
+    pub modified_date: DateTime<Utc>,
 }

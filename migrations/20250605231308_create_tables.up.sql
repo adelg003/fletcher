@@ -4,6 +4,7 @@
 CREATE TABLE dataset (
   dataset_id UUID PRIMARY KEY,
   paused BOOL NOT NULL,
+  extra JSONB,
   modified_by TEXT NOT NULL,
   modified_date TIMESTAMPTZ NOT NULL
 );

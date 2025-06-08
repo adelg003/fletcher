@@ -1337,6 +1337,7 @@ dependencies = [
  "serde_yaml",
  "thiserror",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
