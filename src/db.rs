@@ -1,18 +1,33 @@
-use crate::core::{Compute, DataProduct, Dataset, Dependency, State};
+use crate::{
+    api::{DataProductApiParam, DependencyApiParam, PlanDagApiParam},
+    core::{Compute, DataProduct, Dataset, Dependency, State},
+};
 use chrono::Utc;
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, query_as};
+use std::convert::From;
 use uuid::Uuid;
 
 /// Input parameters for a Dataset
-struct DatasetDbParam {
+pub struct DatasetDbParam {
     dataset_id: Uuid,
     paused: bool,
     extra: Value,
 }
 
+impl From<&PlanDagApiParam> for DatasetDbParam {
+    /// From API Plan Dag to DB Dataset
+    fn from(plan_dag: &PlanDagApiParam) -> Self {
+        Self {
+            dataset_id: plan_dag.dataset_id,
+            paused: plan_dag.paused,
+            extra: plan_dag.extra.clone(),
+        }
+    }
+}
+
 /// Input parameters for a Data Product
-struct DataProductDbParam {
+pub struct DataProductDbParam {
     dataset_id: Uuid,
     data_product_id: String,
     compute: Compute,
@@ -20,6 +35,21 @@ struct DataProductDbParam {
     version: String,
     eager: bool,
     passthrough: Value,
+}
+
+impl DataProductDbParam {
+    /// From API to DB
+    pub fn from_api(dataset_id: &Uuid, api_param: &DataProductApiParam) -> Self {
+        Self {
+            dataset_id: *dataset_id,
+            data_product_id: api_param.data_product_id.clone(),
+            compute: api_param.compute,
+            name: api_param.name.clone(),
+            version: api_param.version.clone(),
+            eager: api_param.eager,
+            passthrough: api_param.passthrough.clone(),
+        }
+    }
 }
 
 /// Input parameters for State
@@ -33,14 +63,25 @@ struct StateDbParam {
 }
 
 /// Input for adding a Dependency
-struct DependencyDbParam {
+pub struct DependencyDbParam {
     dataset_id: Uuid,
     parent_id: String,
     child_id: String,
 }
 
+impl DependencyDbParam {
+    /// From API to DB
+    pub fn from_api(dataset_id: &Uuid, api_param: &DependencyApiParam) -> Self {
+        Self {
+            dataset_id: *dataset_id,
+            parent_id: api_param.parent_id.clone(),
+            child_id: api_param.child_id.clone(),
+        }
+    }
+}
+
 /// Insert or Update a Dataset
-async fn dataset_upsert(
+pub async fn dataset_upsert(
     tx: &mut Transaction<'_, Postgres>,
     param: &DatasetDbParam,
     username: &str,
@@ -110,7 +151,7 @@ async fn dataset_select(
 }
 
 /// Insert or Update a Data Product
-async fn data_product_upsert(
+pub async fn data_product_upsert(
     tx: &mut Transaction<'_, Postgres>,
     param: &DataProductDbParam,
     username: &str,
