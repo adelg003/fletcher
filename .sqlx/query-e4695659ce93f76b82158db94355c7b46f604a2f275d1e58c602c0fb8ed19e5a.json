@@ -1,0 +1,118 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            data_product_id AS id,\n            compute AS \"compute: Compute\",\n            name,\n            version,\n            eager,\n            passthrough,\n            state AS \"state: State\",\n            run_id,\n            link,\n            passback,\n            extra,\n            modified_by,\n            modified_date\n        FROM\n            data_product\n        WHERE\n            dataset_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "compute: Compute",
+        "type_info": {
+          "Custom": {
+            "name": "compute",
+            "kind": {
+              "Enum": [
+                "cams",
+                "dbxaas"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "eager",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "passthrough",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "state: State",
+        "type_info": {
+          "Custom": {
+            "name": "state",
+            "kind": {
+              "Enum": [
+                "waiting",
+                "queued",
+                "running",
+                "success",
+                "failed",
+                "disabled"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "link",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "passback",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "extra",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "modified_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "modified_date",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "e4695659ce93f76b82158db94355c7b46f604a2f275d1e58c602c0fb8ed19e5a"
+}

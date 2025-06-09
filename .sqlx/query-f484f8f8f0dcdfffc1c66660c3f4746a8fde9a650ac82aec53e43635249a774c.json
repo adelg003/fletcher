@@ -1,0 +1,51 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dependency (\n            dataset_id,\n            parent_id,\n            child_id,\n            extra,\n            modified_by,\n            modified_date\n        ) VALUES (\n            $1,\n            $2,\n            $3,\n            $4,\n            $5,\n            $6\n        ) ON CONFLICT (dataset_id, parent_id, child_id) DO\n        UPDATE SET\n            extra = $4,\n            modified_by = $5,\n            modified_date = $6\n        RETURNING\n            parent_id,\n            child_id,\n            extra,\n            modified_by,\n            modified_date",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "parent_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "child_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "extra",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "modified_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "modified_date",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "f484f8f8f0dcdfffc1c66660c3f4746a8fde9a650ac82aec53e43635249a774c"
+}
