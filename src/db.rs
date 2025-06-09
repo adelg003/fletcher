@@ -14,7 +14,30 @@ pub struct PlanDagParam {
 }
 
 impl PlanDagParam {
-    /// Write the Plan Dag to the DB
+    /// Inserts or updates a complete Plan Dag—including dataset, data products, and dependencies—within a database transaction.
+    ///
+    /// Sequentially upserts the dataset, all associated data products, and their dependencies into the database. Returns the fully constructed `PlanDag` on success.
+    ///
+    /// # Arguments
+    ///
+    /// * `username` - The user performing the operation, recorded for modification metadata.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `PlanDag` containing the upserted dataset, data products, and dependencies.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `sqlx::Error` if any database operation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let plan_dag_param = PlanDagParam { /* ... */ };
+    /// let mut tx = pool.begin().await?;
+    /// let plan_dag = plan_dag_param.upsert(&mut tx, "alice").await?;
+    /// assert_eq!(plan_dag.dataset.id, plan_dag_param.dataset.id);
+    /// ```
     pub async fn upsert(
         self,
         tx: &mut Transaction<'_, Postgres>,
@@ -78,7 +101,20 @@ struct DependencyParam {
     extra: Option<Value>,
 }
 
-/// Insert up Update a Dataset
+/// Inserts or updates a dataset in the database by its ID.
+///
+/// If a dataset with the given ID already exists, its `paused`, `extra`, `modified_by`, and `modified_date` fields are updated; otherwise, a new dataset is inserted.
+/// 
+/// # Returns
+/// The upserted `Dataset` record.
+///
+/// # Examples
+///
+/// ```
+/// let param = DatasetParam { id, paused: false, extra: None };
+/// let dataset = dataset_upsert(&mut tx, param, "alice").await?;
+/// assert_eq!(dataset.id, id);
+/// ```
 async fn dataset_upsert(
     tx: &mut Transaction<'_, Postgres>,
     param: DatasetParam,
@@ -122,7 +158,16 @@ async fn dataset_upsert(
     Ok(dataset)
 }
 
-/// Pull a Dataset
+/// Retrieves a dataset by its unique identifier.
+///
+/// Queries the database for a dataset with the specified ID and returns the corresponding `Dataset` if found.
+///
+/// # Examples
+///
+/// ```
+/// let dataset = dataset_select(&mut tx, dataset_id).await?;
+/// assert_eq!(dataset.id, dataset_id);
+/// ```
 async fn dataset_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,
@@ -148,7 +193,20 @@ async fn dataset_select(
     Ok(dataset)
 }
 
-/// Insert or Update a Data Product
+/// Inserts or updates a data product associated with a dataset.
+///
+/// If a data product with the given dataset and data product IDs exists, its fields are updated; otherwise, a new data product is created. The state is set to `Waiting`, and certain fields are initialized to default values.
+///
+/// # Returns
+/// The upserted `DataProduct`.
+///
+/// # Examples
+///
+/// ```
+/// let param = DataProductParam { /* fields */ };
+/// let data_product = data_product_upsert(&mut tx, dataset_id, param, "alice").await?;
+/// assert_eq!(data_product.name, "example");
+/// ```
 async fn data_product_upsert(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,
@@ -232,7 +290,20 @@ async fn data_product_upsert(
     Ok(data_product)
 }
 
-/// Retrieve all Data Products for a Dataset
+/// Retrieves all data products associated with the specified dataset.
+///
+/// # Parameters
+/// - `dataset_id`: The unique identifier of the dataset whose data products are to be fetched.
+///
+/// # Returns
+/// A vector of `DataProduct` instances belonging to the given dataset.
+///
+/// # Examples
+///
+/// ```
+/// let products = data_products_by_dataset_select(&mut tx, dataset_id).await?;
+/// assert!(!products.is_empty());
+/// ```
 async fn data_products_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,
@@ -265,7 +336,20 @@ async fn data_products_by_dataset_select(
     Ok(data_products)
 }
 
-/// Upsert a new Dependency between Data Products
+/// Inserts or updates a dependency between two data products within a dataset.
+///
+/// If a dependency with the same dataset ID, parent ID, and child ID exists, its metadata and extra fields are updated; otherwise, a new dependency is created.
+///
+/// # Returns
+///
+/// The upserted `Dependency` object.
+///
+/// # Examples
+///
+/// ```
+/// let dependency = dependency_upsert(&mut tx, dataset_id, param, "alice").await?;
+/// assert_eq!(dependency.parent_id, param.parent_id);
+/// ```
 async fn dependency_upsert(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,
@@ -312,7 +396,20 @@ async fn dependency_upsert(
     Ok(dependency)
 }
 
-/// Retrieve all Dependencies for a Dataset
+/// Retrieves all dependencies associated with a given dataset.
+///
+/// # Parameters
+/// - `dataset_id`: The unique identifier of the dataset whose dependencies are to be fetched.
+///
+/// # Returns
+/// A vector of `Dependency` objects representing all dependencies for the specified dataset.
+///
+/// # Examples
+///
+/// ```
+/// let dependencies = dependencies_by_dataset_select(&mut tx, dataset_id).await?;
+/// assert!(!dependencies.is_empty());
+/// ```
 async fn dependencies_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,
@@ -337,7 +434,17 @@ async fn dependencies_by_dataset_select(
     Ok(dependencies)
 }
 
-/// Read a Plan Dag from the DB
+/// Retrieves a complete Plan Dag for the specified dataset from the database.
+///
+/// Fetches the dataset, all associated data products, and their dependencies, returning them as a `PlanDag`.
+///
+/// # Examples
+///
+/// ```
+/// let mut tx = pool.begin().await?;
+/// let dag = plan_dag_select(&mut tx, dataset_id).await?;
+/// assert_eq!(dag.dataset.id, dataset_id);
+/// ```
 pub async fn plan_dag_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,

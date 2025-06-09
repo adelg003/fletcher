@@ -74,7 +74,9 @@ pub struct Dependency {
     pub modified_date: DateTime<Utc>,
 }
 
-/// Map SQLx to Poem Errors
+/// Converts a SQLx database error into an appropriate Poem web framework error.
+///
+/// Maps `RowNotFound` to a `NotFound` error, constraint violations to `BadRequest`, and all other errors to `InternalServerError`.
 fn sqlx_to_poem_error(err: sqlx::Error) -> poem::Error {
     match err {
         sqlx::Error::RowNotFound => NotFound(err),
@@ -83,7 +85,19 @@ fn sqlx_to_poem_error(err: sqlx::Error) -> poem::Error {
     }
 }
 
-/// Add a Plan Dag to the DB
+/// Inserts or updates a Plan Dag in the database within a transaction.
+///
+/// Returns the resulting `PlanDag` after the operation completes, or a Poem error if the database operation fails.
+///
+/// # Examples
+///
+/// ```
+/// let mut tx = pool.begin().await.unwrap();
+/// let plan_dag_param = PlanDagParam::default();
+/// let username = "user1";
+/// let plan_dag = plan_dag_add(&mut tx, plan_dag_param, username).await.unwrap();
+/// assert_eq!(plan_dag.dataset.paused, false);
+/// ```
 pub async fn plan_dag_add(
     tx: &mut Transaction<'_, Postgres>,
     plan_dag_param: PlanDagParam,
@@ -96,7 +110,21 @@ pub async fn plan_dag_add(
         .map_err(sqlx_to_poem_error)
 }
 
-/// Read a Plan Dag from the DB
+/// Retrieves a Plan Dag by dataset ID from the database within a transaction.
+///
+/// Returns the corresponding `PlanDag` if found; otherwise, returns a Poem error if the dataset does not exist or a database error occurs.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use sqlx::{Postgres, Transaction};
+/// # use your_crate::{plan_dag_read, PlanDag};
+/// # async fn example(mut tx: Transaction<'_, Postgres>, dataset_id: Uuid) {
+/// let result: Result<PlanDag, _> = plan_dag_read(&mut tx, dataset_id).await;
+/// assert!(result.is_ok() || result.is_err());
+/// # }
+/// ```
 pub async fn plan_dag_read(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,
