@@ -10,10 +10,8 @@ use uuid::Uuid;
 /// Tags to show in Swagger Page
 #[derive(Tags)]
 pub enum Tag {
-    Auth,
     #[oai(rename = "Plan DAG")]
     PlanDag,
-    State,
 }
 
 /// Struct we will use to build our REST API

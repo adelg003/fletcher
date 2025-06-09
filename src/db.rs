@@ -70,17 +70,6 @@ struct DataProductParam {
     extra: Option<Value>,
 }
 
-/// Input parameters for State
-struct StateParam {
-    dataset_id: Uuid,
-    data_product_id: String,
-    state: State,
-    run_id: Option<Uuid>,
-    link: Option<String>,
-    passback: Option<Value>,
-    extra: Option<Value>,
-}
-
 /// Input for adding a Dependency
 #[derive(Object)]
 struct DependencyParam {
@@ -233,57 +222,6 @@ async fn data_product_upsert(
         None::<Uuid>,
         None::<String>,
         None::<Value>,
-        param.extra,
-        username,
-        Utc::now(),
-    )
-    .fetch_one(&mut **tx)
-    .await?;
-
-    Ok(data_product)
-}
-
-/// Update the State of a Data Product
-async fn state_update(
-    tx: &mut Transaction<'_, Postgres>,
-    param: StateParam,
-    username: &str,
-) -> Result<DataProduct, sqlx::Error> {
-    let data_product = query_as!(
-        DataProduct,
-        r#"UPDATE
-            data_product
-        SET
-            state = $3,
-            run_id = $4,
-            link = $5,
-            passback = $6,
-            extra = $7,
-            modified_by = $8,
-            modified_date = $9
-        WHERE
-            dataset_id = $1
-            AND data_product_id = $2
-        RETURNING
-            data_product_id AS id,
-            compute AS "compute: Compute",
-            name,
-            version,
-            eager,
-            passthrough,
-            state AS "state: State",
-            run_id,
-            link,
-            passback,
-            extra,
-            modified_by,
-            modified_date"#,
-        param.dataset_id,
-        param.data_product_id,
-        param.state as State,
-        param.run_id,
-        param.link,
-        param.passback,
         param.extra,
         username,
         Utc::now(),
