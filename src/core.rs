@@ -1,4 +1,4 @@
-use crate::{api::PlanDagApiParam, db::PlanDagDbParam};
+use crate::db::PlanDagParam;
 use chrono::{DateTime, Utc};
 use poem::error::InternalServerError;
 use poem_openapi::{Enum, Object};
@@ -17,7 +17,7 @@ pub struct PlanDag {
 /// Dataset details
 #[derive(Object)]
 pub struct Dataset {
-    pub dataset_id: Uuid,
+    pub id: Uuid,
     pub paused: bool,
     pub extra: Option<Value>,
     pub modified_by: String,
@@ -49,7 +49,7 @@ pub enum State {
 /// Data Product details
 #[derive(Object)]
 pub struct DataProduct {
-    pub data_product_id: String,
+    pub id: String,
     pub compute: Compute,
     pub name: String,
     pub version: String,
@@ -77,14 +77,11 @@ pub struct Dependency {
 /// Add a Plan Dag to the DB
 pub async fn plan_dag_add(
     tx: &mut Transaction<'_, Postgres>,
-    plan_dag_api: PlanDagApiParam,
+    plan_dag_param: PlanDagParam,
     username: &str,
 ) -> Result<PlanDag, poem::Error> {
-    // Map Plan Dag from API to DB format
-    let plan_dag_db: PlanDagDbParam = plan_dag_api.into();
-
     // Write our Plan Dag to the DB
-    plan_dag_db
+    plan_dag_param
         .upsert(tx, username)
         .await
         .map_err(InternalServerError)

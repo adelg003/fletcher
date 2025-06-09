@@ -1,34 +1,35 @@
-use crate::{
-    api::{DataProductApiParam, DependencyApiParam, PlanDagApiParam},
-    core::{Compute, DataProduct, Dataset, Dependency, PlanDag, State},
-};
+use crate::core::{Compute, DataProduct, Dataset, Dependency, PlanDag, State};
 use chrono::Utc;
+use poem_openapi::Object;
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, query_as};
-use std::convert::From;
 use uuid::Uuid;
 
 /// Input for a Plan Dag
-pub struct PlanDagDbParam {
-    dataset: DatasetDbParam,
-    data_products: Vec<DataProductDbParam>,
-    dependencies: Vec<DependencyDbParam>,
+#[derive(Object)]
+pub struct PlanDagParam {
+    dataset: DatasetParam,
+    data_products: Vec<DataProductParam>,
+    dependencies: Vec<DependencyParam>,
 }
 
-impl PlanDagDbParam {
+impl PlanDagParam {
     /// Write the Plan Dag to the DB
     pub async fn upsert(
         self,
         tx: &mut Transaction<'_, Postgres>,
         username: &str,
     ) -> Result<PlanDag, sqlx::Error> {
+        let dataset_id: Uuid = self.dataset.id;
+
         // Write our data to the DB for a Dataset
         let dataset: Dataset = dataset_upsert(tx, self.dataset, username).await?;
 
         // Write our data to the DB for Data Products
         let mut data_products: Vec<DataProduct> = Vec::new();
         for param in self.data_products {
-            let data_product: DataProduct = data_product_upsert(tx, param, username).await?;
+            let data_product: DataProduct =
+                data_product_upsert(tx, dataset_id, param, username).await?;
 
             data_products.push(data_product);
         }
@@ -36,7 +37,7 @@ impl PlanDagDbParam {
         // Write our data to the DB for Dependencies
         let mut dependencies: Vec<Dependency> = Vec::new();
         for param in self.dependencies {
-            let dependency: Dependency = dependency_upsert(tx, param, username).await?;
+            let dependency: Dependency = dependency_upsert(tx, dataset_id, param, username).await?;
 
             dependencies.push(dependency);
         }
@@ -49,63 +50,18 @@ impl PlanDagDbParam {
     }
 }
 
-impl From<PlanDagApiParam> for PlanDagDbParam {
-    /// Convert a API Plan Dag Param to a DB Plan Dag Param
-    fn from(dag: PlanDagApiParam) -> Self {
-        // Convert Dataset params from API to DB format
-        let dataset = DatasetDbParam {
-            dataset_id: dag.dataset.dataset_id,
-            paused: dag.dataset.paused,
-            extra: dag.dataset.extra,
-        };
-
-        // Convert Data Product params from API to DB format
-        let data_products: Vec<DataProductDbParam> = dag
-            .data_products
-            .into_iter()
-            .map(|data_product: DataProductApiParam| DataProductDbParam {
-                dataset_id: dag.dataset.dataset_id,
-                data_product_id: data_product.data_product_id,
-                compute: data_product.compute,
-                name: data_product.name,
-                version: data_product.version,
-                eager: data_product.eager,
-                passthrough: data_product.passthrough,
-                extra: data_product.extra,
-            })
-            .collect();
-
-        // Convert Dependency params from API to DB format
-        let dependencies: Vec<DependencyDbParam> = dag
-            .dependencies
-            .into_iter()
-            .map(|dependency: DependencyApiParam| DependencyDbParam {
-                dataset_id: dag.dataset.dataset_id,
-                parent_id: dependency.parent_id,
-                child_id: dependency.child_id,
-                extra: dependency.extra,
-            })
-            .collect();
-
-        Self {
-            dataset,
-            data_products,
-            dependencies,
-        }
-    }
-}
-
 /// Input parameters for a Dataset
-struct DatasetDbParam {
-    dataset_id: Uuid,
+#[derive(Object)]
+struct DatasetParam {
+    id: Uuid,
     paused: bool,
     extra: Option<Value>,
 }
 
 /// Input parameters for a Data Product
-struct DataProductDbParam {
-    dataset_id: Uuid,
-    data_product_id: String,
+#[derive(Object)]
+struct DataProductParam {
+    id: String,
     compute: Compute,
     name: String,
     version: String,
@@ -115,7 +71,7 @@ struct DataProductDbParam {
 }
 
 /// Input parameters for State
-struct StateDbParam {
+struct StateParam {
     dataset_id: Uuid,
     data_product_id: String,
     state: State,
@@ -126,8 +82,8 @@ struct StateDbParam {
 }
 
 /// Input for adding a Dependency
-struct DependencyDbParam {
-    dataset_id: Uuid,
+#[derive(Object)]
+struct DependencyParam {
     parent_id: String,
     child_id: String,
     extra: Option<Value>,
@@ -136,7 +92,7 @@ struct DependencyDbParam {
 /// Insert up Update a Dataset
 async fn dataset_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    param: DatasetDbParam,
+    param: DatasetParam,
     username: &str,
 ) -> Result<Dataset, sqlx::Error> {
     let dataset = query_as!(
@@ -160,12 +116,12 @@ async fn dataset_upsert(
             modified_by = $4,
             modified_date = $5
         RETURNING
-            dataset_id,
+            dataset_id AS id,
             paused,
             extra,
             modified_by,
             modified_date",
-        param.dataset_id,
+        param.id,
         param.paused,
         param.extra,
         username,
@@ -186,7 +142,7 @@ async fn dataset_select(
     let dataset = query_as!(
         Dataset,
         "SELECT
-            dataset_id,
+            dataset_id AS id,
             paused,
             extra,
             modified_by,
@@ -206,7 +162,8 @@ async fn dataset_select(
 /// Insert or Update a Data Product
 async fn data_product_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    param: DataProductDbParam,
+    dataset_id: Uuid,
+    param: DataProductParam,
     username: &str,
 ) -> Result<DataProduct, sqlx::Error> {
     let data_product = query_as!(
@@ -252,7 +209,7 @@ async fn data_product_upsert(
             modified_by = $13,
             modified_date = $14
         RETURNING
-            data_product_id,
+            data_product_id AS id,
             compute AS "compute: Compute",
             name,
             version,
@@ -265,8 +222,8 @@ async fn data_product_upsert(
             extra,
             modified_by,
             modified_date"#,
-        param.dataset_id,
-        param.data_product_id,
+        dataset_id,
+        param.id,
         param.compute as Compute,
         param.name,
         param.version,
@@ -289,7 +246,7 @@ async fn data_product_upsert(
 /// Update the State of a Data Product
 async fn state_update(
     tx: &mut Transaction<'_, Postgres>,
-    param: StateDbParam,
+    param: StateParam,
     username: &str,
 ) -> Result<DataProduct, sqlx::Error> {
     let data_product = query_as!(
@@ -308,7 +265,7 @@ async fn state_update(
             dataset_id = $1
             AND data_product_id = $2
         RETURNING
-            data_product_id,
+            data_product_id AS id,
             compute AS "compute: Compute",
             name,
             version,
@@ -345,7 +302,7 @@ async fn data_products_by_dataset_select(
     let data_products = query_as!(
         DataProduct,
         r#"SELECT
-            data_product_id,
+            data_product_id AS id,
             compute AS "compute: Compute",
             name,
             version,
@@ -373,7 +330,8 @@ async fn data_products_by_dataset_select(
 /// Upsert a new Dependency between Data Products
 async fn dependency_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    param: DependencyDbParam,
+    dataset_id: Uuid,
+    param: DependencyParam,
     username: &str,
 ) -> Result<Dependency, sqlx::Error> {
     let dependency = query_as!(
@@ -403,7 +361,7 @@ async fn dependency_upsert(
             extra,
             modified_by,
             modified_date",
-        param.dataset_id,
+        dataset_id,
         param.parent_id,
         param.child_id,
         param.extra,
