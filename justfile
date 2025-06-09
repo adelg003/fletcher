@@ -150,7 +150,6 @@ docker-build:
   docker build \
   . \
   --file Containerfile \
-  --secret id=ssh_key,src=$HOME/.ssh/id_rsa \
   --tag localhost/fletcher:latest
 
 # Run the Docker container in Detached mode
@@ -185,7 +184,6 @@ podman-build:
   podman build \
   . \
   --file Containerfile \
-  --secret id=ssh_key,src=$HOME/.ssh/id_rsa \
   --tag localhost/fletcher:latest
 
 # Run the Docker container in Detached mode via Podman
