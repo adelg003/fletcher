@@ -1,5 +1,4 @@
-use crate::core::{Compute, State, plan_dag_add};
-use chrono::{DateTime, Utc};
+use crate::core::{Compute, PlanDag, State, plan_dag_add};
 use poem::{error::InternalServerError, web::Data};
 use poem_openapi::{Object, OpenApi, Tags, payload::Json};
 use serde_json::Value;
@@ -18,11 +17,17 @@ pub enum Tag {
 /// Format we will receiving the Plan Dag
 #[derive(Object)]
 pub struct PlanDagApiParam {
-    pub dataset_id: Uuid,
-    pub paused: bool,
-    pub extra: Value,
+    pub dataset: DatasetApiParam,
     pub data_products: Vec<DataProductApiParam>,
     pub dependencies: Vec<DependencyApiParam>,
+}
+
+/// Format we will receiving the Dataset
+#[derive(Object)]
+pub struct DatasetApiParam {
+    pub dataset_id: Uuid,
+    pub paused: bool,
+    pub extra: Option<Value>,
 }
 
 /// Formate we will receive the Data Product
@@ -33,7 +38,8 @@ pub struct DataProductApiParam {
     pub name: String,
     pub version: String,
     pub eager: bool,
-    pub passthrough: Value,
+    pub passthrough: Option<Value>,
+    pub extra: Option<Value>,
 }
 
 /// Formate we will receive Dependencies between Data Products
@@ -41,6 +47,7 @@ pub struct DataProductApiParam {
 pub struct DependencyApiParam {
     pub parent_id: String,
     pub child_id: String,
+    pub extra: Option<Value>,
 }
 
 /// Formate we will receive updates to State
@@ -49,45 +56,7 @@ struct StateApiParam {
     state: State,
     run_id: Option<Uuid>,
     link: Option<String>,
-    passback: Value,
-}
-
-/// Format we will return the Plan Dag
-#[derive(Object)]
-pub struct PlanDagApiResponse {
-    dataset_id: Uuid,
-    paused: bool,
-    extra: Value,
-    modified_by: String,
-    modified_date: DateTime<Utc>,
-    data_products: Vec<DataProductApiResponse>,
-    dependency: Vec<DependencyApiResponse>,
-}
-
-/// Formate we will return the Data Product
-#[derive(Object)]
-struct DataProductApiResponse {
-    data_product_id: String,
-    compute: Compute,
-    name: String,
-    version: String,
-    eager: bool,
-    passthrough: Value,
-    state: State,
-    run_id: Option<Uuid>,
-    link: Option<String>,
-    passback: Value,
-    modified_by: String,
-    modified_date: DateTime<Utc>,
-}
-
-/// Formate we will receive Dependencies between Data Products
-#[derive(Object)]
-struct DependencyApiResponse {
-    parent_id: String,
-    child_id: String,
-    modified_by: String,
-    modified_date: DateTime<Utc>,
+    passback: Option<Value>,
 }
 
 /// Struct we will use to build our REST API
@@ -100,17 +69,17 @@ impl Api {
     async fn plan_dag_post(
         &self,
         Data(pool): Data<&PgPool>,
-        Json(param): Json<PlanDagApiParam>,
-    ) -> Result<Json<PlanDagApiResponse>, poem::Error> {
+        Json(plan_dag): Json<PlanDagApiParam>,
+    ) -> Result<Json<PlanDag>, poem::Error> {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Add the plan dag to the DB
-        let response: PlanDagApiResponse = plan_dag_add(&mut tx, &param, "dev_user").await?;
+        let plan_dag: PlanDag = plan_dag_add(&mut tx, plan_dag, "dev_user").await?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;
 
-        todo!()
+        Ok(Json(plan_dag))
     }
 }
