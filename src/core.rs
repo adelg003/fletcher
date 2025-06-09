@@ -1,6 +1,6 @@
-use crate::db::PlanDagParam;
+use crate::db::{PlanDagParam, plan_dag_select};
 use chrono::{DateTime, Utc};
-use poem::error::InternalServerError;
+use poem::error::{InternalServerError, NotFound};
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, Type};
@@ -85,4 +85,17 @@ pub async fn plan_dag_add(
         .upsert(tx, username)
         .await
         .map_err(InternalServerError)
+}
+
+/// Read a Plan Dag from the DB
+pub async fn plan_dag_read(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: Uuid,
+) -> Result<PlanDag, poem::Error> {
+    // Map sqlx error to poem error
+    match plan_dag_select(tx, dataset_id).await {
+        Ok(plan_dag) => Ok(plan_dag),
+        Err(sqlx::Error::RowNotFound) => Err(NotFound(sqlx::Error::RowNotFound)),
+        Err(err) => Err(InternalServerError(err)),
+    }
 }

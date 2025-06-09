@@ -398,3 +398,20 @@ async fn dependencies_by_dataset_select(
 
     Ok(dependencies)
 }
+
+/// Read a Plan Dag from the DB
+pub async fn plan_dag_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: Uuid,
+) -> Result<PlanDag, sqlx::Error> {
+    // Pull data elements
+    let dataset: Dataset = dataset_select(tx, dataset_id).await?;
+    let data_products: Vec<DataProduct> = data_products_by_dataset_select(tx, dataset_id).await?;
+    let dependencies: Vec<Dependency> = dependencies_by_dataset_select(tx, dataset_id).await?;
+
+    Ok(PlanDag {
+        dataset,
+        data_products,
+        dependencies,
+    })
+}

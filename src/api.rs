@@ -1,10 +1,11 @@
 use crate::{
-    core::{PlanDag, plan_dag_add},
+    core::{PlanDag, plan_dag_add, plan_dag_read},
     db::PlanDagParam,
 };
 use poem::{error::InternalServerError, web::Data};
-use poem_openapi::{OpenApi, Tags, payload::Json};
+use poem_openapi::{OpenApi, Tags, param::Path, payload::Json};
 use sqlx::PgPool;
+use uuid::Uuid;
 
 /// Tags to show in Swagger Page
 #[derive(Tags)]
@@ -35,6 +36,22 @@ impl Api {
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan_dag))
+    }
+
+    /// Read a Plan DAG
+    #[oai(path = "/plan_dag/:dataset_id", method = "get", tag = Tag::PlanDag)]
+    async fn plan_dag_get(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<Uuid>,
+    ) -> Result<Json<PlanDag>, poem::Error> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Read the plan dag from the DB
+        let plan_dag: PlanDag = plan_dag_read(&mut tx, dataset_id).await?;
 
         Ok(Json(plan_dag))
     }
