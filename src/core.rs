@@ -1,6 +1,6 @@
 use crate::db::{PlanDagParam, plan_dag_select};
 use chrono::{DateTime, Utc};
-use poem::error::{InternalServerError, NotFound};
+use poem::error::{BadRequest, InternalServerError, NotFound};
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, Type};
@@ -74,6 +74,15 @@ pub struct Dependency {
     pub modified_date: DateTime<Utc>,
 }
 
+/// Map SQLx to Poem Errors
+fn sqlx_to_poem_error(err: sqlx::Error) -> poem::Error {
+    match err {
+        sqlx::Error::RowNotFound => NotFound(err),
+        sqlx::Error::Database(err) if err.constraint().is_some() => BadRequest(err),
+        err => InternalServerError(err),
+    }
+}
+
 /// Add a Plan Dag to the DB
 pub async fn plan_dag_add(
     tx: &mut Transaction<'_, Postgres>,
@@ -84,7 +93,7 @@ pub async fn plan_dag_add(
     plan_dag_param
         .upsert(tx, username)
         .await
-        .map_err(InternalServerError)
+        .map_err(sqlx_to_poem_error)
 }
 
 /// Read a Plan Dag from the DB
@@ -93,9 +102,7 @@ pub async fn plan_dag_read(
     dataset_id: Uuid,
 ) -> Result<PlanDag, poem::Error> {
     // Map sqlx error to poem error
-    match plan_dag_select(tx, dataset_id).await {
-        Ok(plan_dag) => Ok(plan_dag),
-        Err(sqlx::Error::RowNotFound) => Err(NotFound(sqlx::Error::RowNotFound)),
-        Err(err) => Err(InternalServerError(err)),
-    }
+    plan_dag_select(tx, dataset_id)
+        .await
+        .map_err(sqlx_to_poem_error)
 }

@@ -56,5 +56,6 @@ CREATE TABLE dependency (
   PRIMARY KEY(dataset_id, parent_id, child_id),
   FOREIGN KEY(dataset_id) REFERENCES dataset(dataset_id),
   FOREIGN KEY(dataset_id, parent_id) REFERENCES data_product(dataset_id, data_product_id),
-  FOREIGN KEY(dataset_id, child_id) REFERENCES data_product(dataset_id, data_product_id)
+  FOREIGN KEY(dataset_id, child_id) REFERENCES data_product(dataset_id, data_product_id),
+  CONSTRAINT parent_child_id CHECK (parent_id IS DISTINCT FROM child_id)
 );
