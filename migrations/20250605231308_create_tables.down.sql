@@ -1,12 +1,12 @@
 -- Add down migration script here
 
--- Drop Edge Table
-DROP TABLE edge;
+-- Drop dependency table
+DROP TABLE dependency;
 
--- Drop Node table and types
-DROP TABLE node;
-DROP TYPE state_type;
-DROP TYPE compute_type;
+-- Drop Data Product table and types
+DROP TABLE data_product;
+DROP TYPE state;
+DROP TYPE compute;
 
--- Drop Plan Dag Table
-DROP TABLE dag;
+-- Drop Dataset Table
+DROP TABLE dataset;
