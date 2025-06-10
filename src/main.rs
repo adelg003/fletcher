@@ -1,6 +1,7 @@
 mod api;
 mod core;
 mod db;
+mod model;
 
 use api::Api;
 use color_eyre::eyre;

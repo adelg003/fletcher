@@ -1,88 +1,18 @@
-use crate::core::{Compute, DataProduct, Dataset, Dependency, PlanDag, State};
-use chrono::Utc;
-use poem_openapi::Object;
+use crate::model::{
+    Compute, DataProduct, DataProductParam, Dataset, DatasetParam, Dependency, DependencyParam,
+    PlanDag, PlanDagParam, State, StateParam,
+};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, query_as};
 use uuid::Uuid;
-
-/// Input for a Plan Dag
-#[derive(Object)]
-pub struct PlanDagParam {
-    dataset: DatasetParam,
-    data_products: Vec<DataProductParam>,
-    dependencies: Vec<DependencyParam>,
-}
-
-impl PlanDagParam {
-    /// Write the Plan Dag to the DB
-    pub async fn upsert(
-        self,
-        tx: &mut Transaction<'_, Postgres>,
-        username: &str,
-    ) -> Result<PlanDag, sqlx::Error> {
-        let dataset_id: Uuid = self.dataset.id;
-
-        // Write our data to the DB for a Dataset
-        let dataset: Dataset = dataset_upsert(tx, self.dataset, username).await?;
-
-        // Write our data to the DB for Data Products
-        let mut data_products: Vec<DataProduct> = Vec::new();
-        for param in self.data_products {
-            let data_product: DataProduct =
-                data_product_upsert(tx, dataset_id, param, username).await?;
-
-            data_products.push(data_product);
-        }
-
-        // Write our data to the DB for Dependencies
-        let mut dependencies: Vec<Dependency> = Vec::new();
-        for param in self.dependencies {
-            let dependency: Dependency = dependency_upsert(tx, dataset_id, param, username).await?;
-
-            dependencies.push(dependency);
-        }
-
-        Ok(PlanDag {
-            dataset,
-            data_products,
-            dependencies,
-        })
-    }
-}
-
-/// Input parameters for a Dataset
-#[derive(Object)]
-struct DatasetParam {
-    id: Uuid,
-    paused: bool,
-    extra: Option<Value>,
-}
-
-/// Input parameters for a Data Product
-#[derive(Object)]
-struct DataProductParam {
-    id: String,
-    compute: Compute,
-    name: String,
-    version: String,
-    eager: bool,
-    passthrough: Option<Value>,
-    extra: Option<Value>,
-}
-
-/// Input for adding a Dependency
-#[derive(Object)]
-struct DependencyParam {
-    parent_id: String,
-    child_id: String,
-    extra: Option<Value>,
-}
 
 /// Insert up Update a Dataset
 async fn dataset_upsert(
     tx: &mut Transaction<'_, Postgres>,
     param: DatasetParam,
     username: &str,
+    modified_date: &DateTime<Utc>,
 ) -> Result<Dataset, sqlx::Error> {
     let dataset = query_as!(
         Dataset,
@@ -114,7 +44,7 @@ async fn dataset_upsert(
         param.paused,
         param.extra,
         username,
-        Utc::now(),
+        modified_date,
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -127,7 +57,7 @@ async fn dataset_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,
 ) -> Result<Dataset, sqlx::Error> {
-    // Upsert a dataset row
+    // Select a dataset row
     let dataset = query_as!(
         Dataset,
         "SELECT
@@ -154,6 +84,7 @@ async fn data_product_upsert(
     dataset_id: Uuid,
     param: DataProductParam,
     username: &str,
+    modified_date: &DateTime<Utc>,
 ) -> Result<DataProduct, sqlx::Error> {
     let data_product = query_as!(
         DataProduct,
@@ -224,7 +155,59 @@ async fn data_product_upsert(
         None::<Value>,
         param.extra,
         username,
-        Utc::now(),
+        modified_date,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(data_product)
+}
+
+/// Update the State of a Data Product
+async fn state_update(
+    tx: &mut Transaction<'_, Postgres>,
+    param: StateParam,
+    username: &str,
+    modified_date: &DateTime<Utc>,
+) -> Result<DataProduct, sqlx::Error> {
+    let data_product = query_as!(
+        DataProduct,
+        r#"UPDATE
+            data_product
+        SET
+            state = $3,
+            run_id = $4,
+            link = $5,
+            passback = $6,
+            extra = $7,
+            modified_by = $8,
+            modified_date = $9
+        WHERE
+            dataset_id = $1
+            AND data_product_id = $2
+        RETURNING
+            data_product_id AS id,
+            compute AS "compute: Compute",
+            name,
+            version,
+            eager,
+            passthrough,
+            state AS "state: State",
+            run_id,
+            link,
+            passback,
+            extra,
+            modified_by,
+            modified_date"#,
+        param.dataset_id,
+        param.data_product_id,
+        param.state as State,
+        param.run_id,
+        param.link,
+        param.passback,
+        param.extra,
+        username,
+        modified_date,
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -271,6 +254,7 @@ async fn dependency_upsert(
     dataset_id: Uuid,
     param: DependencyParam,
     username: &str,
+    modified_date: &DateTime<Utc>,
 ) -> Result<Dependency, sqlx::Error> {
     let dependency = query_as!(
         Dependency,
@@ -304,7 +288,7 @@ async fn dependency_upsert(
         param.child_id,
         param.extra,
         username,
-        Utc::now(),
+        modified_date,
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -335,6 +319,43 @@ async fn dependencies_by_dataset_select(
     .await?;
 
     Ok(dependencies)
+}
+
+/// Write the Plan Dag to the DB
+pub async fn plan_dag_upsert(
+    tx: &mut Transaction<'_, Postgres>,
+    param: PlanDagParam,
+    username: &str,
+) -> Result<PlanDag, sqlx::Error> {
+    let dataset_id: Uuid = param.dataset.id;
+    let modified_date: DateTime<Utc> = Utc::now();
+
+    // Write our data to the DB for a Dataset
+    let dataset: Dataset = dataset_upsert(tx, param.dataset, username, &modified_date).await?;
+
+    // Write our data to the DB for Data Products
+    let mut data_products: Vec<DataProduct> = Vec::new();
+    for param in param.data_products {
+        let data_product: DataProduct =
+            data_product_upsert(tx, dataset_id, param, username, &modified_date).await?;
+
+        data_products.push(data_product);
+    }
+
+    // Write our data to the DB for Dependencies
+    let mut dependencies: Vec<Dependency> = Vec::new();
+    for param in param.dependencies {
+        let dependency: Dependency =
+            dependency_upsert(tx, dataset_id, param, username, &modified_date).await?;
+
+        dependencies.push(dependency);
+    }
+
+    Ok(PlanDag {
+        dataset,
+        data_products,
+        dependencies,
+    })
 }
 
 /// Read a Plan Dag from the DB

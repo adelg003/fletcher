@@ -1,6 +1,6 @@
 use crate::{
-    core::{PlanDag, plan_dag_add, plan_dag_read},
-    db::PlanDagParam,
+    core::{plan_dag_add, plan_dag_read},
+    model::{PlanDag, PlanDagParam},
 };
 use poem::{error::InternalServerError, web::Data};
 use poem_openapi::{OpenApi, Tags, param::Path, payload::Json};
@@ -10,8 +10,10 @@ use uuid::Uuid;
 /// Tags to show in Swagger Page
 #[derive(Tags)]
 pub enum Tag {
+    Auth,
     #[oai(rename = "Plan DAG")]
     PlanDag,
+    State,
 }
 
 /// Struct we will use to build our REST API
@@ -50,6 +52,9 @@ impl Api {
 
         // Read the plan dag from the DB
         let plan_dag: PlanDag = plan_dag_read(&mut tx, dataset_id).await?;
+
+        // Rollback transaction (read-only operation)
+        tx.rollback().await.map_err(InternalServerError)?;
 
         Ok(Json(plan_dag))
     }
