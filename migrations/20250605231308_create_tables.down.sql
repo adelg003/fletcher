@@ -1,6 +1,6 @@
 -- Add down migration script here
 
--- Drop Dependencies between Data Products Table
+-- Drop dependency table
 DROP TABLE dependency;
 
 -- Drop Data Product table and types

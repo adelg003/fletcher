@@ -25,8 +25,7 @@ reviews:
   auto_assign_reviewers: false
   poem: true
   labeling_instructions: []
-  path_filters:
-    - "!.sqlx/**"
+  path_filters: []
   path_instructions: []
   abort_on_close: true
   disable_cache: false
