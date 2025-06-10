@@ -30,7 +30,7 @@ RUN apk add --no-cache \
   alpine-conf \
   curl
 
-# Setup fletcher user
+# Setup Fletcher user
 RUN setup-user fletcher
 USER fletcher
 WORKDIR /home/fletcher
@@ -41,8 +41,8 @@ COPY --from=builder \
   /usr/local/bin/fletcher
 
 # Setup Healthcheck
-HEALTHCHECK CMD curl --fail http://localhost:3000
+HEALTHCHECK CMD curl --fail http://localhost:3000/spec
 
-# Run Catalog2
+# Run Fletcher
 ENV RUST_BACKTRACE=full
 ENTRYPOINT ["fletcher"]
