@@ -1,5 +1,5 @@
 # Fletcher
-Fletcher is s proof of concert where in memory graphs are used to orchestrate the triggering of
+Fletcher is a proof of concert where in memory graphs are used to orchestrate the triggering of
     compute jobs.
 With its precise orchestration, your data products won’t rush or drag — no one can say "Not quite
     my tempo."
