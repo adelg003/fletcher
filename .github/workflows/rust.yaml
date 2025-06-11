@@ -52,7 +52,7 @@ jobs:
       - name: Install Just
         run: sudo apt install just
       - name: Install SQLx cli
-        run: cargo install sqlx-cli --no-default-features --features postgres
+        run: cargo install sqlx-cli --debug --no-default-features --features postgres --locked
       - name: Run SQLx Migration
         run: just sqlx-migrate
       - name: Tests
