@@ -53,7 +53,7 @@ jobs:
         run: sudo apt install just
       - uses: cargo-bins/cargo-binstall@main
       - name: Install SQLx cli
-        run: cargo binstall sqlx-cli
+        run: cargo binstall sqlx-cli --features postgres
       - name: Run SQLx Migration
         run: just sqlx-migrate
       - name: Tests
