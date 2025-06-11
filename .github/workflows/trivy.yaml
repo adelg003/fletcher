@@ -38,4 +38,4 @@ jobs:
       - name: Image Build
         run: just docker-build-debug
       - name: Trivy Image Scan
-        run: just trivy-image
+        run: just trivy-image-debug

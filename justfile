@@ -207,6 +207,9 @@ trivy-repo:
 trivy-image mode="release":
   trivy image localhost/fletcher:{{ mode }}
 
+# Trivy Scan the debug Docker image
+trivy-image-debug: (trivy-image "debug")
+
 
 ############
 ## Github ##
