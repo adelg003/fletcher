@@ -17,11 +17,8 @@ COPY ./src ./src
 # Accept compile mode as an argument (default: release)
 ARG BUILD_MODE=release
 
-# Compile relevant environmental variables
-ENV BUILD_MODE=${BUILD_MODE}
-ENV SQLX_OFFLINE=true
-
 # Build Rust Application
+ENV SQLX_OFFLINE=true
 RUN if [ "$BUILD_MODE" = "release" ]; then \
       cargo build --locked --release; \
     else \
