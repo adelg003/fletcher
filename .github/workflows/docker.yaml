@@ -26,7 +26,7 @@ jobs:
       - name: Startup PostgreSQL
         run: just pg-start
       - name: Install SQLx cli
-        run: just sqlx-install
+        run: cargo install sqlx-cli --debug --no-default-features --features postgres --locked
       - name: Run SQLx Migration
         run: just sqlx-migrate
       - name: Image Build
