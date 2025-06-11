@@ -158,7 +158,7 @@ docker-build-debug:
   docker build \
   . \
   --file Containerfile \
-  --tag localhost/fletcher:latest \
+  --tag localhost/fletcher:debug \
   --build-arg BUILD_MODE=debug
 
 # Run the Docker container in Detached mode
@@ -171,6 +171,17 @@ docker-run:
     --publish=3000:3000 \
     --env DATABASE_URL=postgres://fletcher_user:password@fletcher_postgresql/fletcher_db \
     localhost/fletcher:latest
+
+# Run the Docker debug container in Detached mode
+docker-run-debug:
+  docker run \
+    --name=fletcher \
+    --detach \
+    --rm \
+    --network=pg_network \
+    --publish=3000:3000 \
+    --env DATABASE_URL=postgres://fletcher_user:password@fletcher_postgresql/fletcher_db \
+    localhost/fletcher:debug
 
 # Dump logs from container
 docker-logs:
@@ -186,7 +197,7 @@ docker-kill:
 
 # Test the Healthcheck and that the service came up (Docker only)
 docker-healthcheck:
-  sh ./scripts/test_healthcheck.sh
+  sh ./scripts/healthcheck.sh
 
 # Build the Docker image via Podman in release mode
 podman-build:
@@ -201,7 +212,7 @@ podman-build-debug:
   podman build \
   . \
   --file Containerfile \
-  --tag localhost/fletcher:latest \
+  --tag localhost/fletcher:debug \
   --build-arg BUILD_MODE=debug
 
 # Run the Docker container in Detached mode via Podman
@@ -214,6 +225,17 @@ podman-run:
     --publish=3000:3000 \
     --env DATABASE_URL=postgres://fletcher_user:password@fletcher_postgresql/fletcher_db \
     localhost/fletcher:latest
+
+# Run the Docker container in Detached mode via Podman in debug mode
+podman-run-debug:
+  podman run \
+    --name=fletcher \
+    --detach \
+    --rm \
+    --network=pg_network \
+    --publish=3000:3000 \
+    --env DATABASE_URL=postgres://fletcher_user:password@fletcher_postgresql/fletcher_db \
+    localhost/fletcher:debug
 
 # Dump logs from container via Podman
 podman-logs:
@@ -238,7 +260,7 @@ trivy-repo:
 
 # Trivy Scan the Docker image
 trivy-image:
-  trivy image localhost/fletcher:latest
+  trivy image localhost/fletcher:debug
 
 
 ############
@@ -249,7 +271,7 @@ trivy-image:
 github-rust-checks: sqlx-migrate sqlx-check check_w_sqlx_cache clippy_w_sqlx_cache fmt-check test deny
 
 # Run all Github Docker Checks
-github-docker-checks: docker-build-debug docker-run docker-healthcheck docker-kill
+github-docker-checks: docker-build-debug docker-run-debug docker-healthcheck docker-kill
 
 # Run all Github Docker Checks via Podman
 github-podman-checks: podman-build-debug

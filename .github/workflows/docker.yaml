@@ -32,7 +32,7 @@ jobs:
       - name: Image Build
         run: just docker-build-debug
       - name: Container Startup
-        run: just docker-run
+        run: just docker-run-debug
       - name: Container Healthcheck
         run: just docker-healthcheck
       - name: Container Stop
