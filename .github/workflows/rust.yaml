@@ -52,7 +52,7 @@ jobs:
       - name: Install Just
         run: sudo apt install just
       - name: Install SQLx cli
-      - run: cargo binstall sqlx-cli
+        run: cargo binstall sqlx-cli
       - name: Run SQLx Migration
         run: just sqlx-migrate
       - name: Tests
