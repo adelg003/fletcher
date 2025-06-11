@@ -48,10 +48,9 @@ jobs:
         ports:
           - 5432:5432
     steps:
-      - uses: actions/checkout@v4
+      - uses: cargo-bins/cargo-binstall@main
       - name: Install Just
         run: sudo apt install just
-      - uses: cargo-bins/cargo-binstall@main
       - name: Install SQLx cli
       - run: cargo binstall sqlx-cli
       - name: Run SQLx Migration
