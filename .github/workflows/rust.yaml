@@ -51,8 +51,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Just
         run: sudo apt install just
+      - uses: cargo-bins/cargo-binstall@main
       - name: Install SQLx cli
-        run: just sqlx-install
+      - run: cargo binstall sqlx-cli
       - name: Run SQLx Migration
         run: just sqlx-migrate
       - name: Tests
