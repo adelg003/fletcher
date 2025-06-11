@@ -13,7 +13,7 @@ jobs:
       - name: Install Just
         run: sudo apt install just
       - name: Image Build Check
-        run: just docker-build
+        run: just docker-build-debug
 
   docker-healthcheck:
     runs-on: ubuntu-latest
@@ -26,13 +26,13 @@ jobs:
       - name: Startup PostgreSQL
         run: just pg-start
       - name: Install SQLx cli
-        run: just sqlx-install
+        run: cargo install sqlx-cli --debug --no-default-features --features postgres --locked
       - name: Run SQLx Migration
         run: just sqlx-migrate
       - name: Image Build
-        run: just docker-build
+        run: just docker-build-debug
       - name: Container Startup
-        run: just docker-run
+        run: just docker-run-debug
       - name: Container Healthcheck
         run: just docker-healthcheck
       - name: Container Stop

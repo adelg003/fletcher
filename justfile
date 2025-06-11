@@ -86,12 +86,15 @@ deny:
 ################
 
 # Create the network that we allow others to connect to PostgreSQL
-pg-init-network:
-  docker network create pg_network
+pg-init-network client="docker":
+  {{ client }} network create pg_network
+
+# Create the network that we allow others to connect to PostgreSQL
+pg-init-network-podman: (pg-init-network "podman")
 
 # Start a local PostgreSQL instance for development.
-pg-start:
-  docker run \
+pg-start client="docker":
+  {{ client }} run \
     -t \
     --detach \
     --rm \
@@ -104,31 +107,15 @@ pg-start:
     --publish 5432:5432 \
     docker.io/library/postgres:alpine
 
-# Stop local PostgreSQL
-pg-stop:
-  docker stop fletcher_postgresql
-
-# Create the network that we allow others to connect to PostgreSQL
-pg-init-network-podman:
-  podman network create pg_network
-
 # Start local PostgreSQL via Podman
-pg-start-podman:
-  podman run \
-    -dt \
-    --rm \
-    --name fletcher_postgresql \
-    --network=pg_network \
-    --env POSTGRES_USER=fletcher_user \
-    --env POSTGRES_PASSWORD=password \
-    --env POSTGRES_DB=fletcher_db \
-    --volume fletcher_postgresql:/var/lib/postgresql/data \
-    --publish 5432:5432 \
-    docker.io/library/postgres:alpine
+pg-start-podman: (pg-start "podman")
+
+# Stop local PostgreSQL
+pg-stop client="docker":
+  {{ client }} stop fletcher_postgresql
 
 # Stop local PostgreSQL via Podman
-pg-stop-podman:
-  podman stop fletcher_postgresql
+pg-stop-podman: (pg-stop "podman") 
 
 # Connect to PostgreSQL via Rainfrog (https://github.com/achristmascarl/rainfrog)
 pg-cli:
@@ -141,73 +128,71 @@ pg-cli:
     --driver=postgres
 
 
-############
-## Docker ##
-############
+#####################
+## Docker / Podman ##
+#####################
 
-# Build the Docker image
-docker-build:
-  docker build \
+# Build the Docker image in release mode
+docker-build client="docker" mode="release":
+  {{ client }} build \
   . \
   --file Containerfile \
-  --tag localhost/fletcher:latest
+  --tag localhost/fletcher:{{ mode }} \
+  --build-arg BUILD_MODE={{ mode }}
+
+# Build the Docker image in debug mode
+docker-build-debug: (docker-build "docker" "debug")
+
+# Build the Docker image via Podman in release mode
+podman-build: (docker-build "podman" "release")
+
+# Build the Docker image via Podman in debug mode
+podman-build-debug: (docker-build "podman" "debug")
 
 # Run the Docker container in Detached mode
-docker-run:
-  docker run \
+docker-run client="docker" mode="release":
+  {{ client }} run \
     --name=fletcher \
     --detach \
     --rm \
     --network=pg_network \
     --publish=3000:3000 \
     --env DATABASE_URL=postgres://fletcher_user:password@fletcher_postgresql/fletcher_db \
-    localhost/fletcher:latest
+    localhost/fletcher:{{ mode }}
+
+# Run the Docker debug container in Detached mode
+docker-run-debug: (docker-run "docker" "debug")
+
+# Run the Docker container in Detached mode via Podman in release mode
+podman-run: (docker-run "podman" "release")
+
+# Run the Docker container in Detached mode via Podman in debug mode
+podman-run-debug: (docker-run "podman" "debug")
 
 # Dump logs from container
-docker-logs:
- docker logs fletcher
+docker-logs client="docker":
+ {{ client }} logs fletcher
+
+# Dump logs from container via Podman
+podman-logs: (docker-logs "podman")
 
 # Follow logs from container
-docker-follow:
- docker logs --follow fletcher
+docker-follow client="docker":
+ {{ client }} logs --follow fletcher
+
+# Follow logs from container via Podman
+podman-follow: (docker-follow "podman")
 
 # Kill the Detached Docker container
-docker-kill:
-  docker kill fletcher
+docker-kill client="docker":
+  {{ client }} kill fletcher
+
+# Kill the Detached Docker container via Podman
+podman-kill: (docker-kill "podman")
 
 # Test the Healthcheck and that the service came up (Docker only)
 docker-healthcheck:
-  sh ./scripts/test_healthcheck.sh
-
-# Build the Docker image via Podman
-podman-build:
-  podman build \
-  . \
-  --file Containerfile \
-  --tag localhost/fletcher:latest
-
-# Run the Docker container in Detached mode via Podman
-podman-run:
-  podman run \
-    --name=fletcher \
-    --detach \
-    --rm \
-    --network=pg_network \
-    --publish=3000:3000 \
-    --env DATABASE_URL=postgres://fletcher_user:password@fletcher_postgresql/fletcher_db \
-    localhost/fletcher:latest
-
-# Dump logs from container via Podman
-podman-logs:
- podman logs fletcher
-
-# Follow logs from container via Podman
-podman-follow:
- podman logs --follow fletcher
-
-# Kill the Detached Docker container via Podman
-podman-kill:
-  podman kill fletcher
+  sh ./scripts/healthcheck.sh
 
 
 ###########
@@ -219,8 +204,11 @@ trivy-repo:
   trivy repo .
 
 # Trivy Scan the Docker image
-trivy-image:
-  trivy image localhost/fletcher:latest
+trivy-image mode="release":
+  trivy image localhost/fletcher:{{ mode }}
+
+# Trivy Scan the debug Docker image
+trivy-image-debug: (trivy-image "debug")
 
 
 ############
@@ -228,19 +216,22 @@ trivy-image:
 ############
 
 # Run all Github Rust Checks
-github-rust-checks: sqlx-migrate sqlx-check check_w_sqlx_cache clippy_w_sqlx_cache fmt-check test deny
+github-rust-checks: sqlx-check check_w_sqlx_cache clippy_w_sqlx_cache fmt-check test deny
 
 # Run all Github Docker Checks
-github-docker-checks: docker-build docker-run docker-healthcheck docker-kill
+github-docker-checks mode="debug": (docker-build "docker" mode) (docker-run "docker" mode) docker-healthcheck (docker-kill "docker")
 
-# Run all Github Docker Checks via Podman
-github-podman-checks: podman-build
+# Run all Github Docker Checks via Podman (excluding Healthcheck)
+github-podman-checks: (docker-build "podman" "debug")
 
 # Run all Github Trivy Checks
-github-trivy-checks: trivy-repo trivy-image
+github-trivy-checks client="docker": trivy-repo (docker-build client "debug") (trivy-image "debug")
+
+# Run all Github Trivy Checks (via Podman)
+github-trivy-checks-podman: (github-trivy-checks "podman")
 
 # Run all Github Checks
-github-checks: github-rust-checks github-docker-checks github-trivy-checks
+github-checks: github-rust-checks github-docker-checks (github-trivy-checks "docker")
 
-# Run all Github Checks via Podman
-github-checks-podman: github-rust-checks github-podman-checks github-trivy-checks
+# Run all Github Checks (with Podman)
+github-checks-podman: github-rust-checks github-podman-checks (github-trivy-checks "podman")
