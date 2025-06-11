@@ -14,9 +14,19 @@ COPY ./Cargo.lock ./Cargo.lock
 COPY ./.sqlx ./.sqlx
 COPY ./src ./src
 
+# Accept compile mode as an argument (default: release)
+ARG COMPILE_MODE=release
+
+# Compile relevant environmental variables
+ENV COMPILE_MODE=${COMPILE_MODE}
+ENV SQLX_OFFLINE=true
+
 # Build Rust Application
-RUN SQLX_OFFLINE=true \
-  cargo build --release --locked
+RUN if [ "$COMPILE_MODE" = "release" ]; then \
+      cargo build --locked --release; \
+    else \
+      cargo build --locked; \
+    fi
 
 
 ###################

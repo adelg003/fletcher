@@ -36,6 +36,6 @@ jobs:
           sudo apt update
           sudo apt install trivy
       - name: Image Build
-        run: just docker-build
+        run: just docker-build-debug
       - name: Trivy Image Scan
         run: just trivy-image

@@ -145,12 +145,21 @@ pg-cli:
 ## Docker ##
 ############
 
-# Build the Docker image
+# Build the Docker image in release mode
 docker-build:
   docker build \
   . \
   --file Containerfile \
-  --tag localhost/fletcher:latest
+  --tag localhost/fletcher:latest \
+  --build-arg BUILD_MODE=release
+
+# Build the Docker image in debug mode
+docker-build-debug:
+  docker build \
+  . \
+  --file Containerfile \
+  --tag localhost/fletcher:latest \
+  --build-arg BUILD_MODE=debug
 
 # Run the Docker container in Detached mode
 docker-run:
@@ -179,12 +188,21 @@ docker-kill:
 docker-healthcheck:
   sh ./scripts/test_healthcheck.sh
 
-# Build the Docker image via Podman
+# Build the Docker image via Podman in release mode
 podman-build:
   podman build \
   . \
   --file Containerfile \
-  --tag localhost/fletcher:latest
+  --tag localhost/fletcher:latest \
+  --build-arg BUILD_MODE=release
+
+# Build the Docker image via Podman in debug mode
+podman-build-debug:
+  podman build \
+  . \
+  --file Containerfile \
+  --tag localhost/fletcher:latest \
+  --build-arg BUILD_MODE=debug
 
 # Run the Docker container in Detached mode via Podman
 podman-run:
@@ -231,10 +249,10 @@ trivy-image:
 github-rust-checks: sqlx-migrate sqlx-check check_w_sqlx_cache clippy_w_sqlx_cache fmt-check test deny
 
 # Run all Github Docker Checks
-github-docker-checks: docker-build docker-run docker-healthcheck docker-kill
+github-docker-checks: docker-build-debug docker-run docker-healthcheck docker-kill
 
 # Run all Github Docker Checks via Podman
-github-podman-checks: podman-build
+github-podman-checks: podman-build-debug
 
 # Run all Github Trivy Checks
 github-trivy-checks: trivy-repo trivy-image
