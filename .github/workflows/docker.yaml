@@ -13,7 +13,7 @@ jobs:
       - name: Install Just
         run: sudo apt install just
       - name: Image Build Check
-        run: just docker-build
+        run: just docker-build-debug
 
   docker-healthcheck:
     runs-on: ubuntu-latest

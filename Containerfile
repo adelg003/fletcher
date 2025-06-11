@@ -15,14 +15,14 @@ COPY ./.sqlx ./.sqlx
 COPY ./src ./src
 
 # Accept compile mode as an argument (default: release)
-ARG COMPILE_MODE=release
+ARG BUILD_MODE=release
 
 # Compile relevant environmental variables
-ENV COMPILE_MODE=${COMPILE_MODE}
+ENV BUILD_MODE=${BUILD_MODE}
 ENV SQLX_OFFLINE=true
 
 # Build Rust Application
-RUN if [ "$COMPILE_MODE" = "release" ]; then \
+RUN if [ "$BUILD_MODE" = "release" ]; then \
       cargo build --locked --release; \
     else \
       cargo build --locked; \
@@ -45,9 +45,12 @@ RUN setup-user fletcher
 USER fletcher
 WORKDIR /home/fletcher
 
+# Accept compile mode as an argument (default: release)
+ARG BUILD_MODE=release
+
 # Copy over complied runtime binary
 COPY --from=builder \
-  /opt/fletcher/target/release/fletcher \
+  /opt/fletcher/target/${BUILD_MODE}/fletcher \
   /usr/local/bin/fletcher
 
 # Setup Healthcheck
