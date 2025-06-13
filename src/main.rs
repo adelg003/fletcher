@@ -1,6 +1,7 @@
 mod api;
 mod core;
 mod db;
+mod graph;
 mod model;
 
 use api::Api;

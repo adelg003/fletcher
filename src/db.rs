@@ -1,6 +1,6 @@
 use crate::model::{
     Compute, DataProduct, DataProductParam, Dataset, DatasetParam, Dependency, DependencyParam,
-    PlanDag, PlanDagParam, State, StateParam,
+    Plan, PlanParam, State, StateParam,
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -324,9 +324,9 @@ async fn dependencies_by_dataset_select(
 /// Write the Plan Dag to the DB
 pub async fn plan_dag_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    param: PlanDagParam,
+    param: PlanParam,
     username: &str,
-) -> Result<PlanDag, sqlx::Error> {
+) -> Result<Plan, sqlx::Error> {
     let dataset_id: Uuid = param.dataset.id;
     let modified_date: DateTime<Utc> = Utc::now();
 
@@ -351,7 +351,7 @@ pub async fn plan_dag_upsert(
         dependencies.push(dependency);
     }
 
-    Ok(PlanDag {
+    Ok(Plan {
         dataset,
         data_products,
         dependencies,
@@ -362,13 +362,13 @@ pub async fn plan_dag_upsert(
 pub async fn plan_dag_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: Uuid,
-) -> Result<PlanDag, sqlx::Error> {
+) -> Result<Plan, sqlx::Error> {
     // Pull data elements
     let dataset: Dataset = dataset_select(tx, dataset_id).await?;
     let data_products: Vec<DataProduct> = data_products_by_dataset_select(tx, dataset_id).await?;
     let dependencies: Vec<Dependency> = dependencies_by_dataset_select(tx, dataset_id).await?;
 
-    Ok(PlanDag {
+    Ok(Plan {
         dataset,
         data_products,
         dependencies,
