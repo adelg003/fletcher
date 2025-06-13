@@ -1,6 +1,7 @@
 mod api;
 mod core;
 mod db;
+mod error;
 mod graph;
 mod model;
 
@@ -11,7 +12,7 @@ use poem_openapi::OpenApiService;
 use sqlx::PgPool;
 
 #[tokio::main]
-async fn main() -> Result<(), eyre::Error> {
+async fn main() -> eyre::Result<()> {
     // Lets get pretty error reports
     color_eyre::install()?;
 

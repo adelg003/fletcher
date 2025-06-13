@@ -2,7 +2,10 @@ use crate::{
     core::{plan_dag_add, plan_dag_read},
     model::{Plan, PlanParam},
 };
-use poem::{error::InternalServerError, web::Data};
+use poem::{
+    error::{InternalServerError, Result},
+    web::Data,
+};
 use poem_openapi::{OpenApi, Tags, param::Path, payload::Json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -27,7 +30,7 @@ impl Api {
         &self,
         Data(pool): Data<&PgPool>,
         Json(plan_dag): Json<PlanParam>,
-    ) -> Result<Json<Plan>, poem::Error> {
+    ) -> Result<Json<Plan>> {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
@@ -47,7 +50,7 @@ impl Api {
         &self,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<Uuid>,
-    ) -> Result<Json<Plan>, poem::Error> {
+    ) -> Result<Json<Plan>> {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 

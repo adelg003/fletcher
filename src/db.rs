@@ -1,11 +1,13 @@
-use crate::model::{
-    Compute, DataProduct, DataProductParam, Dataset, DatasetParam, Dependency, DependencyParam,
-    Plan, PlanParam, State, StateParam,
+use crate::{
+    error::Result,
+    model::{
+        Compute, DataProduct, DataProductParam, Dataset, DatasetId, DatasetParam, Dependency,
+        DependencyParam, Plan, PlanParam, State, StateParam,
+    },
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, query_as};
-use uuid::Uuid;
 
 /// Insert up Update a Dataset
 async fn dataset_upsert(
@@ -13,7 +15,7 @@ async fn dataset_upsert(
     param: DatasetParam,
     username: &str,
     modified_date: &DateTime<Utc>,
-) -> Result<Dataset, sqlx::Error> {
+) -> Result<Dataset> {
     let dataset = query_as!(
         Dataset,
         "INSERT INTO dataset (
@@ -55,8 +57,8 @@ async fn dataset_upsert(
 /// Pull a Dataset
 async fn dataset_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: Uuid,
-) -> Result<Dataset, sqlx::Error> {
+    dataset_id: DatasetId,
+) -> Result<Dataset> {
     // Select a dataset row
     let dataset = query_as!(
         Dataset,
@@ -81,11 +83,11 @@ async fn dataset_select(
 /// Insert or Update a Data Product
 async fn data_product_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: Uuid,
+    dataset_id: DatasetId,
     param: DataProductParam,
     username: &str,
     modified_date: &DateTime<Utc>,
-) -> Result<DataProduct, sqlx::Error> {
+) -> Result<DataProduct> {
     let data_product = query_as!(
         DataProduct,
         r#"INSERT INTO data_product (
@@ -150,7 +152,7 @@ async fn data_product_upsert(
         param.eager,
         param.passthrough,
         State::Waiting as State,
-        None::<Uuid>,
+        None::<DatasetId>,
         None::<String>,
         None::<Value>,
         param.extra,
@@ -169,7 +171,7 @@ async fn state_update(
     param: StateParam,
     username: &str,
     modified_date: &DateTime<Utc>,
-) -> Result<DataProduct, sqlx::Error> {
+) -> Result<DataProduct> {
     let data_product = query_as!(
         DataProduct,
         r#"UPDATE
@@ -218,8 +220,8 @@ async fn state_update(
 /// Retrieve all Data Products for a Dataset
 async fn data_products_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: Uuid,
-) -> Result<Vec<DataProduct>, sqlx::Error> {
+    dataset_id: DatasetId,
+) -> Result<Vec<DataProduct>> {
     let data_products = query_as!(
         DataProduct,
         r#"SELECT
@@ -251,11 +253,11 @@ async fn data_products_by_dataset_select(
 /// Upsert a new Dependency between Data Products
 async fn dependency_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: Uuid,
+    dataset_id: DatasetId,
     param: DependencyParam,
     username: &str,
     modified_date: &DateTime<Utc>,
-) -> Result<Dependency, sqlx::Error> {
+) -> Result<Dependency> {
     let dependency = query_as!(
         Dependency,
         "INSERT INTO dependency (
@@ -299,8 +301,8 @@ async fn dependency_upsert(
 /// Retrieve all Dependencies for a Dataset
 async fn dependencies_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: Uuid,
-) -> Result<Vec<Dependency>, sqlx::Error> {
+    dataset_id: DatasetId,
+) -> Result<Vec<Dependency>> {
     let dependencies = query_as!(
         Dependency,
         "SELECT
@@ -326,8 +328,8 @@ pub async fn plan_dag_upsert(
     tx: &mut Transaction<'_, Postgres>,
     param: PlanParam,
     username: &str,
-) -> Result<Plan, sqlx::Error> {
-    let dataset_id: Uuid = param.dataset.id;
+) -> Result<Plan> {
+    let dataset_id: DatasetId = param.dataset.id;
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Write our data to the DB for a Dataset
@@ -361,8 +363,8 @@ pub async fn plan_dag_upsert(
 /// Read a Plan Dag from the DB
 pub async fn plan_dag_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: Uuid,
-) -> Result<Plan, sqlx::Error> {
+    dataset_id: DatasetId,
+) -> Result<Plan> {
     // Pull data elements
     let dataset: Dataset = dataset_select(tx, dataset_id).await?;
     let data_products: Vec<DataProduct> = data_products_by_dataset_select(tx, dataset_id).await?;

@@ -1,15 +1,15 @@
+use crate::error::{Error, Result};
 use petgraph::{
     algo::is_cyclic_directed,
     graph::{DiGraph, GraphError, NodeIndex},
 };
-use poem::http::StatusCode;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
 };
 
 /// Build a Directed Graph from Nodes and Edges
-pub fn build_graph<N, E>(nodes: Vec<N>, edges: Vec<(N, N, E)>) -> Result<DiGraph<N, E>, GraphError>
+pub fn build_graph<N, E>(nodes: Vec<N>, edges: Vec<(N, N, E)>) -> Result<DiGraph<N, E>>
 where
     N: Eq + Hash + Clone,
     E: Eq + Hash,
@@ -40,7 +40,7 @@ where
             graph.try_add_edge(from_idx, to_idx, edge)?;
         } else {
             // We had an edge that was not covered by the nodes
-            return Err(GraphError::NodeOutBounds);
+            return Err(GraphError::NodeOutBounds.into());
         }
     }
 
@@ -48,14 +48,10 @@ where
 }
 
 /// Check if a directed graph is also a dag
-pub fn check_if_dag<N, E>(graph: &DiGraph<N, E>) -> Result<(), poem::Error> {
+pub fn check_if_dag<N, E>(graph: &DiGraph<N, E>) -> Result<()> {
     // Is our graph a valid dag (aka not cyclical)?
-    if is_cyclic_directed(graph) {
-        return Err(poem::Error::from_string(
-            "Dependency graph is cyclical, so invalid",
-            StatusCode::UNPROCESSABLE_ENTITY,
-        ));
+    match is_cyclic_directed(graph) {
+        true => Err(Error::Cyclical),
+        false => Ok(()),
     }
-
-    Ok(())
 }
