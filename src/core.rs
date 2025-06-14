@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+
 use crate::{
     dag::Dag,
     error::Error,
@@ -9,20 +10,18 @@ use poem::error::{BadRequest, InternalServerError, NotFound, Result, Unprocessab
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-/// Map SQLx to Poem Errors
-fn sqlx_to_poem_error(err: Error) -> poem::Error {
+/// Map Crate Error to Poem Error
+fn to_poem_error(err: Error) -> poem::Error {
     match err {
-        Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
-        Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some() => BadRequest(err),
-        err => InternalServerError(err),
-    }
-}
-
-/// Map Dag to Poem Errors
-fn dag_to_poem_error(err: Error) -> poem::Error {
-    match err {
+        // Graph is cyclical
         Error::Cyclical => UnprocessableEntity(Error::Cyclical),
+        // Failed to build graph
         Error::Graph(err) => InternalServerError(err),
+        // Row not found
+        Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
+        // We hit a db constraint
+        Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some() => BadRequest(err),
+        // Unknown error
         err => InternalServerError(err),
     }
 }
@@ -75,14 +74,12 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
     }
 
     // Collect all parent / child relationships
-        let mut param_edges: Vec<(DataProductId, DataProductId, u32)> =
-            param.dependency_edges().into_iter().collect();
     let dependency_edges: HashSet<(DataProductId, DataProductId, u32)> = {
+        let mut param_edges: Vec<(DataProductId, DataProductId, u32)> = param.dependency_edges();
 
         // If we got a plan from the DB, add its edges
         if let Some(plan) = plan {
-            let plan_edges: Vec<(DataProductId, DataProductId, u32)> =
-                plan.dependency_edges().into_iter().collect();
+            let plan_edges: Vec<(DataProductId, DataProductId, u32)> = plan.dependency_edges();
             param_edges.extend(plan_edges);
         }
 
@@ -91,7 +88,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
 
     // If you take all our data products and map them to a graph are they a valid dag?
     DiGraph::<DataProductId, u32>::build_dag(data_product_ids, dependency_edges)
-        .map_err(dag_to_poem_error)?;
+        .map_err(to_poem_error)?;
 
     Ok(())
 }
@@ -116,12 +113,10 @@ pub async fn plan_dag_add(
     validate_plan_param(&param, &plan)?;
 
     // Write our Plan to the DB
-    param.upsert(tx, username).await.map_err(sqlx_to_poem_error)
+    param.upsert(tx, username).await.map_err(to_poem_error)
 }
 
 /// Read a Plan Dag from the DB
 pub async fn plan_dag_read(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<Plan> {
-    Plan::from_dataset_id(id, tx)
-        .await
-        .map_err(sqlx_to_poem_error)
+    Plan::from_dataset_id(id, tx).await.map_err(to_poem_error)
 }
