@@ -15,7 +15,6 @@ pub type DatasetId = Uuid;
 /// Type for Data Product ID
 pub type DataProductId = String;
 
-
 /// Plan Dag Details
 #[derive(Object)]
 pub struct Plan {
@@ -26,7 +25,10 @@ pub struct Plan {
 
 impl Plan {
     /// Pull the Plan Dag for a Dataset
-    pub async fn from_dataset_id(id: DatasetId, tx: &mut Transaction<'_, Postgres>) -> Result<Self> {
+    pub async fn from_dataset_id(
+        id: DatasetId,
+        tx: &mut Transaction<'_, Postgres>,
+    ) -> Result<Self> {
         plan_dag_select(tx, id).await
     }
 

@@ -1,6 +1,6 @@
 use crate::{
+    dag::Dag,
     error::Error,
-    graph::{build_graph, check_if_dag},
     model::{DataProductId, Plan, PlanParam},
 };
 use petgraph::graph::DiGraph;
@@ -9,10 +9,19 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 /// Map SQLx to Poem Errors
-fn sqlx_to_poem_error(err: sqlx::Error) -> poem::Error {
+fn sqlx_to_poem_error(err: Error) -> poem::Error {
     match err {
-        sqlx::Error::RowNotFound => NotFound(err),
-        sqlx::Error::Database(err) if err.constraint().is_some() => BadRequest(err),
+        Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
+        Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some() => BadRequest(err),
+        err => InternalServerError(err),
+    }
+}
+
+/// Map Dag to Poem Errors
+fn dag_to_poem_error(err: Error) -> poem::Error {
+    match err {
+        Error::Cyclical => UnprocessableEntity(Error::Cyclical),
+        Error::Graph(err) => InternalServerError(err),
         err => InternalServerError(err),
     }
 }
@@ -79,12 +88,9 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
         param_edges
     };
 
-    // Convert node and edges to a graph
-    let graph: DiGraph<DataProductId, u32> =
-        build_graph(data_product_ids, dependency_edges).map_err(InternalServerError)?;
-
-    // Is the graph for the plan cyclical?
-    check_if_dag(&graph).map_err(UnprocessableEntity)?;
+    // If you take all our data products and map them to a graph are they a valid dag?
+    DiGraph::<DataProductId, u32>::build_dag(data_product_ids, dependency_edges)
+        .map_err(dag_to_poem_error)?;
 
     Ok(())
 }
@@ -110,21 +116,12 @@ pub async fn plan_dag_add(
 
     // Write our Plan Dag to the DB
     //param.upsert(tx, username).await.map_err(sqlx_to_poem_error)
-    param
-        .upsert(tx, username)
-        .await
-        .map_err(|err: Error| match err {
-            Error::Sqlx(err) => sqlx_to_poem_error(err),
-            err => InternalServerError(err),
-        })
+    param.upsert(tx, username).await.map_err(sqlx_to_poem_error)
 }
 
 /// Read a Plan Dag from the DB
 pub async fn plan_dag_read(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<Plan> {
     Plan::from_dataset_id(id, tx)
         .await
-        .map_err(|err: Error| match err {
-            Error::Sqlx(err) => sqlx_to_poem_error(err),
-            err => InternalServerError(err),
-        })
+        .map_err(sqlx_to_poem_error)
 }
