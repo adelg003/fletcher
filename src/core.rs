@@ -102,7 +102,7 @@ pub async fn plan_add(
     // Pull any prior details
     let wip_plan = Plan::from_dataset_id(param.dataset.id, tx).await;
 
-    // So what did we get form the DB?
+    // So what did we get from the DB?
     let plan: Option<Plan> = match wip_plan {
         Ok(plan) => Some(plan),
         Err(Error::Sqlx(sqlx::Error::RowNotFound)) => None,
