@@ -114,8 +114,7 @@ pub async fn plan_dag_add(
     // Validate to make sure the user submitted valid parameters
     validate_plan_param(&param, &plan)?;
 
-    // Write our Plan Dag to the DB
-    //param.upsert(tx, username).await.map_err(sqlx_to_poem_error)
+    // Write our Plan to the DB
     param.upsert(tx, username).await.map_err(sqlx_to_poem_error)
 }
 

@@ -11,7 +11,7 @@ use std::{
 
 /// Trait for building graphs that are valid dags
 pub trait Dag<N, E> {
-    /// Build a Directed Graph from Nodes and Edges and ensure its is acyclical.
+    /// Build a Directed Graph from Nodes and Edges and ensure it is acyclic
     fn build_dag(nodes: Vec<N>, edges: Vec<(N, N, E)>) -> Result<Self>
     where
         Self: Sized;

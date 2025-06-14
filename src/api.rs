@@ -3,7 +3,7 @@ use crate::{
     model::{Plan, PlanParam},
 };
 use poem::{
-    error::{InternalServerError, Result},
+    error::{InternalServerError},
     web::Data,
 };
 use poem_openapi::{OpenApi, Tags, param::Path, payload::Json};
@@ -25,12 +25,12 @@ pub struct Api;
 #[OpenApi]
 impl Api {
     /// Register a Plan DAG
-    #[oai(path = "/plan_dag", method = "post", tag = Tag::Plan)]
+    #[oai(path = "/plan", method = "post", tag = Tag::Plan)]
     async fn plan_dag_post(
         &self,
         Data(pool): Data<&PgPool>,
         Json(plan_dag): Json<PlanParam>,
-    ) -> Result<Json<Plan>> {
+    ) -> poem::Result<Json<Plan>> {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
@@ -45,12 +45,12 @@ impl Api {
     }
 
     /// Read a Plan DAG
-    #[oai(path = "/plan_dag/:dataset_id", method = "get", tag = Tag::Plan)]
+    #[oai(path = "/plan/:dataset_id", method = "get", tag = Tag::Plan)]
     async fn plan_dag_get(
         &self,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<Uuid>,
-    ) -> Result<Json<Plan>> {
+    ) -> poem::Result<Json<Plan>> {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 

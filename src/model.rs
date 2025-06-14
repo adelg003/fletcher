@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, Type};
-use std::{collections::HashSet, hash::Hash, marker::Copy};
+use std::{collections::HashSet, hash::Hash};
 use uuid::Uuid;
 
 /// Type for Dataset ID

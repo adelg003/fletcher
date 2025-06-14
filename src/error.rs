@@ -1,27 +1,26 @@
 use crate::model::DataProductId;
 use petgraph::graph::GraphError;
-use thiserror::Error;
 
-/// Result Type we will for Fletcher
+/// Crate-wide result alias.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Custom Error Type for Fletcher
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Graph that as cyclical, aka not valid dag
+    /// The dependency graph contains a cycle (not a valid DAG)
     #[error("Graph is cyclical")]
     Cyclical,
 
     /// Duplicate data products in parameter
-    #[error("Duplicate data products ids in paramiter: {0}")]
+    #[error("Duplicate data-product id in parameter: {0}")]
     DuplicateDataProduct(DataProductId),
 
     /// Duplicate dependencies in parameter
-    #[error("Duplicate dependencies in paramiter: {0} => {1}")]
+    #[error("Duplicate dependency in parameter: {0} -> {1}")]
     DuplicateDependencies(DataProductId, DataProductId),
 
     /// Error from Petgraph
-    #[error("Error from Petgraph: {0}")]
+    #[error("Petgraph error: {0}")]
     Graph(#[from] GraphError),
 
     /// Data Product not found
