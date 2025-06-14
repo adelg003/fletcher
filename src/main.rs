@@ -1,16 +1,17 @@
 mod api;
 mod core;
+mod dag;
 mod db;
+mod error;
 mod model;
 
 use api::Api;
-use color_eyre::eyre;
 use poem::{EndpointExt, Route, Server, listener::TcpListener, middleware::Tracing};
 use poem_openapi::OpenApiService;
 use sqlx::PgPool;
 
 #[tokio::main]
-async fn main() -> Result<(), eyre::Error> {
+async fn main() -> color_eyre::Result<()> {
     // Lets get pretty error reports
     color_eyre::install()?;
 
