@@ -12,6 +12,22 @@ use poem_openapi::OpenApiService;
 use sqlx::PgPool;
 
 #[tokio::main]
+/// Initializes and runs the Fletcher web server with OpenAPI documentation and PostgreSQL integration.
+///
+/// Sets up enhanced error reporting, logging, OpenAPI endpoints, and connects to a PostgreSQL database. Configures application routes for API access, OpenAPI specification, and Swagger UI, then starts the server on `0.0.0.0:3000`.
+///
+/// # Errors
+///
+/// Returns an error if initialization, database connection, or server startup fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// #[tokio::main]
+/// async fn main() -> eyre::Result<()> {
+///     main().await
+/// }
+/// ```
 async fn main() -> eyre::Result<()> {
     // Lets get pretty error reports
     color_eyre::install()?;

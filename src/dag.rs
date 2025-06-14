@@ -22,6 +22,27 @@ where
     N: Eq + Hash + Clone,
     E: Eq + Hash,
 {
+    /// Constructs a directed acyclic graph (DAG) from the provided nodes and edges.
+    ///
+    /// Deduplicates nodes and edges, inserts them into a new directed graph, and ensures all edges reference valid nodes. Returns an error if any edge references a missing node or if the resulting graph contains cycles.
+    ///
+    /// # Returns
+    /// A `Result` containing the constructed DAG if successful, or an error if the graph is invalid.
+    ///
+    /// # Errors
+    /// Returns an error if an edge references a node not present in the node list, or if the resulting graph is not acyclic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use petgraph::graph::DiGraph;
+    /// use mycrate::Dag;
+    ///
+    /// let nodes = vec![1, 2, 3];
+    /// let edges = vec![(1, 2, "a"), (2, 3, "b")];
+    /// let dag = DiGraph::build_dag(nodes, edges);
+    /// assert!(dag.is_ok());
+    /// ```
     fn build_dag(nodes: Vec<N>, edges: Vec<(N, N, E)>) -> Result<Self> {
         // Dedup all nodes and edges
         let nodes: HashSet<N> = nodes.into_iter().collect();
@@ -60,7 +81,22 @@ where
     }
 }
 
-/// Check if a directed graph is also a dag
+/// Validates that the given directed graph is acyclic.
+///
+/// Returns an error if the graph contains any cycles; otherwise, returns `Ok(())`.
+///
+/// # Examples
+///
+/// ```
+/// use petgraph::graph::DiGraph;
+/// use mycrate::validate_acyclic;
+///
+/// let mut graph = DiGraph::<u32, ()>::new();
+/// let a = graph.add_node(1);
+/// let b = graph.add_node(2);
+/// graph.add_edge(a, b, ());
+/// assert!(validate_acyclic(&graph).is_ok());
+/// ```
 fn validate_acyclic<N, E>(graph: &DiGraph<N, E>) -> Result<()> {
     // Is our graph a valid dag (aka not cyclical)?
     match is_cyclic_directed(graph) {

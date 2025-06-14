@@ -8,7 +8,9 @@ use poem::error::{BadRequest, InternalServerError, NotFound, Result, Unprocessab
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-/// Map SQLx to Poem Errors
+/// Converts database errors into appropriate Poem HTTP errors.
+///
+/// Maps `RowNotFound` to `NotFound`, database constraint violations to `BadRequest`, and all other errors to `InternalServerError`.
 fn sqlx_to_poem_error(err: Error) -> poem::Error {
     match err {
         Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
@@ -17,7 +19,9 @@ fn sqlx_to_poem_error(err: Error) -> poem::Error {
     }
 }
 
-/// Map Dag to Poem Errors
+/// Converts DAG-related errors into appropriate Poem HTTP errors.
+///
+/// Maps cyclical graph errors to `UnprocessableEntity` and all other errors to `InternalServerError`.
 fn dag_to_poem_error(err: Error) -> poem::Error {
     match err {
         Error::Cyclical => UnprocessableEntity(Error::Cyclical),
@@ -26,7 +30,21 @@ fn dag_to_poem_error(err: Error) -> poem::Error {
     }
 }
 
-/// Validate a PlanParam from the user
+/// Validates a `PlanParam` against constraints to ensure it can form a valid plan DAG.
+///
+/// Checks for duplicate data products and dependencies, verifies that all dependency parent and child IDs exist among the data products (including those from an existing plan if provided), and ensures the resulting graph is a valid directed acyclic graph (DAG). Returns an error if any validation fails.
+///
+/// # Errors
+///
+/// Returns a `BadRequest` error if there are duplicate data products, duplicate dependencies, or missing data products for dependencies. Returns an error mapped by `dag_to_poem_error` if the dependency graph is not a valid DAG.
+///
+/// # Examples
+///
+/// ```
+/// let param = PlanParam::example();
+/// let plan = None;
+/// assert!(validate_plan_param(&param, &plan).is_ok());
+/// ```
 fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
     // Does Plan have any dup data products?
     if let Some(data_product_id) = param.has_dup_data_products() {
@@ -95,7 +113,21 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
     Ok(())
 }
 
-/// Add a Plan Dag to the DB
+/// Inserts or updates a plan DAG in the database after validating the provided parameters.
+///
+/// Attempts to retrieve an existing plan by dataset ID, validates the new parameters against it, and then upserts the plan DAG within the given transaction. Returns the resulting `Plan` on success, or an appropriate HTTP error if validation or database operations fail.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use sqlx::{Postgres, Transaction};
+/// # use your_crate::{PlanParam, plan_dag_add};
+/// # async fn example(mut tx: Transaction<'_, Postgres>, param: PlanParam, username: &str) {
+/// let result = plan_dag_add(&mut tx, param, username).await;
+/// assert!(result.is_ok());
+/// # }
+/// ```
 pub async fn plan_dag_add(
     tx: &mut Transaction<'_, Postgres>,
     param: PlanParam,
@@ -119,7 +151,19 @@ pub async fn plan_dag_add(
     param.upsert(tx, username).await.map_err(sqlx_to_poem_error)
 }
 
-/// Read a Plan Dag from the DB
+/// Retrieves a plan DAG from the database by dataset ID.
+///
+/// Returns the corresponding `Plan` if found; otherwise, returns an HTTP error mapped from database errors.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use sqlx::{Postgres, Transaction};
+/// # async fn example(mut tx: Transaction<'_, Postgres>, id: Uuid) {
+/// let plan = plan_dag_read(&mut tx, id).await?;
+/// # }
+/// ```
 pub async fn plan_dag_read(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<Plan> {
     Plan::from_dataset_id(id, tx)
         .await
