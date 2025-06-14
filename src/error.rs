@@ -19,7 +19,7 @@ pub enum Error {
     #[error("Duplicate dependency in parameter: {0} -> {1}")]
     DuplicateDependencies(DataProductId, DataProductId),
 
-    /// Error from Petgraph
+    /// Error from Petgraph::Graph
     #[error("Petgraph error: {0}")]
     Graph(#[from] GraphError),
 

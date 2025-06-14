@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use crate::{
     dag::Dag,
     error::Error,
@@ -41,7 +42,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
     }
 
     // Get a list of all Data Product IDs
-    let data_product_ids: Vec<DataProductId> = {
+    let data_product_ids: HashSet<DataProductId> = {
         let mut param_ids: Vec<DataProductId> = param.data_product_ids();
 
         // If we got a plan from the DB, add its data products
@@ -50,7 +51,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
             param_ids.extend(plan_ids);
         }
 
-        param_ids
+        param_ids.into_iter().collect()
     };
 
     // Do all parents have a data product?
@@ -74,9 +75,9 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
     }
 
     // Collect all parent / child relationships
-    let dependency_edges: Vec<(DataProductId, DataProductId, u32)> = {
         let mut param_edges: Vec<(DataProductId, DataProductId, u32)> =
             param.dependency_edges().into_iter().collect();
+    let dependency_edges: HashSet<(DataProductId, DataProductId, u32)> = {
 
         // If we got a plan from the DB, add its edges
         if let Some(plan) = plan {
@@ -85,7 +86,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
             param_edges.extend(plan_edges);
         }
 
-        param_edges
+        param_edges.into_iter().collect()
     };
 
     // If you take all our data products and map them to a graph are they a valid dag?

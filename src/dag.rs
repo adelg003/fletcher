@@ -12,7 +12,7 @@ use std::{
 /// Trait for building graphs that are valid dags
 pub trait Dag<N, E> {
     /// Build a Directed Graph from Nodes and Edges and ensure it is acyclic
-    fn build_dag(nodes: Vec<N>, edges: Vec<(N, N, E)>) -> Result<Self>
+    fn build_dag(nodes: HashSet<N>, edges: HashSet<(N, N, E)>) -> Result<Self>
     where
         Self: Sized;
 }
@@ -22,11 +22,7 @@ where
     N: Eq + Hash + Clone,
     E: Eq + Hash,
 {
-    fn build_dag(nodes: Vec<N>, edges: Vec<(N, N, E)>) -> Result<Self> {
-        // Dedup all nodes and edges
-        let nodes: HashSet<N> = nodes.into_iter().collect();
-        let edges: HashSet<(N, N, E)> = edges.into_iter().collect();
-
+    fn build_dag(nodes: HashSet<N>, edges: HashSet<(N, N, E)>) -> Result<Self> {
         // Our working data
         let mut graph: DiGraph<N, E> = DiGraph::new();
         let mut node_map: HashMap<N, NodeIndex> = HashMap::new();
