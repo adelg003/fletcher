@@ -1,11 +1,8 @@
 use crate::{
-    core::{plan_dag_add, plan_dag_read},
+    core::{plan_add, plan_read},
     model::{Plan, PlanParam},
 };
-use poem::{
-    error::{InternalServerError},
-    web::Data,
-};
+use poem::{error::InternalServerError, web::Data};
 use poem_openapi::{OpenApi, Tags, param::Path, payload::Json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -13,8 +10,6 @@ use uuid::Uuid;
 /// Tags to show in Swagger Page
 #[derive(Tags)]
 pub enum Tag {
-    Auth,
-    #[oai(rename = "Plan DAG")]
     Plan,
     State,
 }
@@ -24,29 +19,28 @@ pub struct Api;
 
 #[OpenApi]
 impl Api {
-    /// Register a Plan DAG
+    /// Register a Plan
     #[oai(path = "/plan", method = "post", tag = Tag::Plan)]
-    async fn plan_dag_post(
+    async fn plan_post(
         &self,
         Data(pool): Data<&PgPool>,
-        Json(plan_dag): Json<PlanParam>,
+        Json(plan): Json<PlanParam>,
     ) -> poem::Result<Json<Plan>> {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
-        // Add the plan dag to the DB
-        //TODO remove "dev_user"
-        let plan_dag: Plan = plan_dag_add(&mut tx, plan_dag, "dev_user").await?;
+        // Add the plan to the DB
+        let plan: Plan = plan_add(&mut tx, plan, "placeholder_user").await?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;
 
-        Ok(Json(plan_dag))
+        Ok(Json(plan))
     }
 
-    /// Read a Plan DAG
+    /// Read a Plan
     #[oai(path = "/plan/:dataset_id", method = "get", tag = Tag::Plan)]
-    async fn plan_dag_get(
+    async fn plan_get(
         &self,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<Uuid>,
@@ -54,12 +48,12 @@ impl Api {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
-        // Read the plan dag from the DB
-        let plan_dag: Plan = plan_dag_read(&mut tx, dataset_id).await?;
+        // Read the plan from the DB
+        let plan: Plan = plan_read(&mut tx, dataset_id).await?;
 
         // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
 
-        Ok(Json(plan_dag))
+        Ok(Json(plan))
     }
 }

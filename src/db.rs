@@ -323,8 +323,8 @@ async fn dependencies_by_dataset_select(
     Ok(dependencies)
 }
 
-/// Write the Plan Dag to the DB
-pub async fn plan_dag_upsert(
+/// Write the Plan to the DB
+pub async fn plan_upsert(
     tx: &mut Transaction<'_, Postgres>,
     param: PlanParam,
     username: &str,
@@ -360,8 +360,8 @@ pub async fn plan_dag_upsert(
     })
 }
 
-/// Read a Plan Dag from the DB
-pub async fn plan_dag_select(
+/// Read a Plan from the DB
+pub async fn plan_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: DatasetId,
 ) -> Result<Plan> {

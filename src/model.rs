@@ -1,12 +1,12 @@
 use crate::{
-    db::{plan_dag_select, plan_dag_upsert},
+    db::{plan_select, plan_upsert},
     error::Result,
 };
 use chrono::{DateTime, Utc};
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, Type};
-use std::{collections::HashSet, hash::Hash};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// Type for Dataset ID
@@ -15,7 +15,7 @@ pub type DatasetId = Uuid;
 /// Type for Data Product ID
 pub type DataProductId = String;
 
-/// Plan Dag Details
+/// Plan Details
 #[derive(Object)]
 pub struct Plan {
     pub dataset: Dataset,
@@ -24,12 +24,12 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Pull the Plan Dag for a Dataset
+    /// Pull the Plan for a Dataset
     pub async fn from_dataset_id(
         id: DatasetId,
         tx: &mut Transaction<'_, Postgres>,
     ) -> Result<Self> {
-        plan_dag_select(tx, id).await
+        plan_select(tx, id).await
     }
 
     /// Return all Data Product IDs
@@ -111,7 +111,7 @@ pub struct Dependency {
     pub modified_date: DateTime<Utc>,
 }
 
-/// Input for a Plan Dag
+/// Input for a Plan
 #[derive(Object)]
 pub struct PlanParam {
     pub dataset: DatasetParam,
@@ -120,35 +120,35 @@ pub struct PlanParam {
 }
 
 impl PlanParam {
-    /// Write the Plan Dag to the DB
+    /// Write the Plan to the DB
     pub async fn upsert(self, tx: &mut Transaction<'_, Postgres>, username: &str) -> Result<Plan> {
-        plan_dag_upsert(tx, self, username).await
+        plan_upsert(tx, self, username).await
     }
 
     /// Check for duplicate Data Products
     pub fn has_dup_data_products(&self) -> Option<DataProductId> {
-        // Pull the Data Product IDs
-        let data_product_ids: Vec<DataProductId> = self
-            .data_products
-            .iter()
-            .map(|param: &DataProductParam| param.id.clone())
-            .collect();
+        let mut seen = HashSet::new();
 
-        // Are there duplicate Data Product IDs?
-        find_duplicate(&data_product_ids)
+        for data_product in &self.data_products {
+            if !seen.insert(&data_product.id) {
+                return Some(data_product.id.clone());
+            }
+        }
+
+        None
     }
 
     /// Check for duplicate Dependencies
     pub fn has_dup_dependencies(&self) -> Option<(DataProductId, DataProductId)> {
-        // Pull the Data Product IDs
-        let parent_child_ids: Vec<(DataProductId, DataProductId)> = self
-            .dependencies
-            .iter()
-            .map(|param: &DependencyParam| (param.parent_id.clone(), param.child_id.clone()))
-            .collect();
+        let mut seen = HashSet::new();
 
-        // Are there duplicate Data Product IDs?
-        find_duplicate(&parent_child_ids)
+        for dependency in &self.dependencies {
+            if !seen.insert((&dependency.parent_id, &dependency.child_id)) {
+                return Some((dependency.parent_id.clone(), dependency.child_id.clone()));
+            }
+        }
+
+        None
     }
 
     /// Return all Data Product IDs
@@ -184,20 +184,6 @@ impl PlanParam {
             })
             .collect()
     }
-}
-
-/// Check if Vec has duplicates
-fn find_duplicate<T>(vec: &[T]) -> Option<T>
-where
-    T: Eq + Hash + Clone,
-{
-    let mut seen = HashSet::new();
-    for item in vec {
-        if !seen.insert(item) {
-            return Some(item.clone());
-        }
-    }
-    None
 }
 
 /// Input parameters for a Dataset

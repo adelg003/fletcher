@@ -94,7 +94,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
 }
 
 /// Add a Plan Dag to the DB
-pub async fn plan_dag_add(
+pub async fn plan_add(
     tx: &mut Transaction<'_, Postgres>,
     param: PlanParam,
     username: &str,
@@ -117,6 +117,6 @@ pub async fn plan_dag_add(
 }
 
 /// Read a Plan Dag from the DB
-pub async fn plan_dag_read(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<Plan> {
+pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<Plan> {
     Plan::from_dataset_id(id, tx).await.map_err(to_poem_error)
 }

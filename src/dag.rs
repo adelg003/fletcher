@@ -59,8 +59,9 @@ where
 /// Check if a directed graph is also a dag
 fn validate_acyclic<N, E>(graph: &DiGraph<N, E>) -> Result<()> {
     // Is our graph a valid dag (aka not cyclical)?
-    match is_cyclic_directed(graph) {
-        true => Err(Error::Cyclical),
-        false => Ok(()),
+    if is_cyclic_directed(graph) {
+        Err(Error::Cyclical)
+    } else {
+        Ok(())
     }
 }
