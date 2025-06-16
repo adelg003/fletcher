@@ -30,7 +30,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Add the plan to the DB
-        let plan: Plan = plan_add(&mut tx, plan, "placeholder_user").await?;
+        let plan: Plan = plan_add(&mut tx, &plan, "placeholder_user").await?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -49,7 +49,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Read the plan from the DB
-        let plan: Plan = plan_read(&mut tx, dataset_id).await?;
+        let plan: Plan = plan_read(&mut tx, &dataset_id).await?;
 
         // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;

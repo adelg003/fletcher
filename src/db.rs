@@ -1,8 +1,8 @@
 use crate::{
     error::Result,
     model::{
-        Compute, DataProduct, DataProductParam, Dataset, DatasetId, DatasetParam, Dependency,
-        DependencyParam, Plan, PlanParam, State, StateParam,
+        Compute, DataProduct, DataProductId, DataProductParam, Dataset, DatasetId, DatasetParam,
+        Dependency, DependencyParam, Plan, PlanParam, State, StateParam,
     },
 };
 use chrono::{DateTime, Utc};
@@ -12,7 +12,7 @@ use sqlx::{Postgres, Transaction, query_as};
 /// Insert up Update a Dataset
 async fn dataset_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    param: DatasetParam,
+    param: &DatasetParam,
     username: &str,
     modified_date: &DateTime<Utc>,
 ) -> Result<Dataset> {
@@ -57,7 +57,7 @@ async fn dataset_upsert(
 /// Pull a Dataset
 async fn dataset_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: DatasetId,
+    dataset_id: &DatasetId,
 ) -> Result<Dataset> {
     // Select a dataset row
     let dataset = query_as!(
@@ -83,8 +83,8 @@ async fn dataset_select(
 /// Insert or Update a Data Product
 async fn data_product_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: DatasetId,
-    param: DataProductParam,
+    dataset_id: &DatasetId,
+    param: &DataProductParam,
     username: &str,
     modified_date: &DateTime<Utc>,
 ) -> Result<DataProduct> {
@@ -168,7 +168,9 @@ async fn data_product_upsert(
 /// Update the State of a Data Product
 async fn state_update(
     tx: &mut Transaction<'_, Postgres>,
-    param: StateParam,
+    dataset_id: &DatasetId,
+    data_product_id: &DataProductId,
+    param: &StateParam,
     username: &str,
     modified_date: &DateTime<Utc>,
 ) -> Result<DataProduct> {
@@ -201,8 +203,8 @@ async fn state_update(
             extra,
             modified_by,
             modified_date"#,
-        param.dataset_id,
-        param.data_product_id,
+        dataset_id,
+        data_product_id,
         param.state as State,
         param.run_id,
         param.link,
@@ -220,7 +222,7 @@ async fn state_update(
 /// Retrieve all Data Products for a Dataset
 async fn data_products_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: DatasetId,
+    dataset_id: &DatasetId,
 ) -> Result<Vec<DataProduct>> {
     let data_products = query_as!(
         DataProduct,
@@ -253,8 +255,8 @@ async fn data_products_by_dataset_select(
 /// Upsert a new Dependency between Data Products
 async fn dependency_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: DatasetId,
-    param: DependencyParam,
+    dataset_id: &DatasetId,
+    param: &DependencyParam,
     username: &str,
     modified_date: &DateTime<Utc>,
 ) -> Result<Dependency> {
@@ -301,7 +303,7 @@ async fn dependency_upsert(
 /// Retrieve all Dependencies for a Dataset
 async fn dependencies_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: DatasetId,
+    dataset_id: &DatasetId,
 ) -> Result<Vec<Dependency>> {
     let dependencies = query_as!(
         Dependency,
@@ -326,29 +328,30 @@ async fn dependencies_by_dataset_select(
 /// Write the Plan to the DB
 pub async fn plan_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    param: PlanParam,
+    param: &PlanParam,
     username: &str,
 ) -> Result<Plan> {
-    let dataset_id: DatasetId = param.dataset.id;
+    let dataset_id: &DatasetId = &param.dataset.id;
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Write our data to the DB for a Dataset
-    let dataset: Dataset = dataset_upsert(tx, param.dataset, username, &modified_date).await?;
+    let dataset: Dataset = dataset_upsert(tx, &param.dataset, username, &modified_date).await?;
 
     // Write our data to the DB for Data Products
     let mut data_products: Vec<DataProduct> = Vec::new();
-    for param in param.data_products {
+    for data_product_param in &param.data_products {
         let data_product: DataProduct =
-            data_product_upsert(tx, dataset_id, param, username, &modified_date).await?;
+            data_product_upsert(tx, dataset_id, data_product_param, username, &modified_date)
+                .await?;
 
         data_products.push(data_product);
     }
 
     // Write our data to the DB for Dependencies
     let mut dependencies: Vec<Dependency> = Vec::new();
-    for param in param.dependencies {
+    for dependency_param in &param.dependencies {
         let dependency: Dependency =
-            dependency_upsert(tx, dataset_id, param, username, &modified_date).await?;
+            dependency_upsert(tx, dataset_id, dependency_param, username, &modified_date).await?;
 
         dependencies.push(dependency);
     }
@@ -363,7 +366,7 @@ pub async fn plan_upsert(
 /// Read a Plan from the DB
 pub async fn plan_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: DatasetId,
+    dataset_id: &DatasetId,
 ) -> Result<Plan> {
     // Pull data elements
     let dataset: Dataset = dataset_select(tx, dataset_id).await?;

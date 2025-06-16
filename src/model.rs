@@ -26,7 +26,7 @@ pub struct Plan {
 impl Plan {
     /// Pull the Plan for a Dataset
     pub async fn from_dataset_id(
-        id: DatasetId,
+        id: &DatasetId,
         tx: &mut Transaction<'_, Postgres>,
     ) -> Result<Self> {
         plan_select(tx, id).await
@@ -36,7 +36,7 @@ impl Plan {
     pub fn data_product_ids(&self) -> Vec<DataProductId> {
         self.data_products
             .iter()
-            .map(|data_product: &DataProduct| data_product.id.clone())
+            .map(|dp: &DataProduct| dp.id.clone())
             .collect()
     }
 
@@ -44,9 +44,7 @@ impl Plan {
     pub fn dependency_edges(&self) -> Vec<(DataProductId, DataProductId, u32)> {
         self.dependencies
             .iter()
-            .map(|dependency: &Dependency| {
-                (dependency.parent_id.clone(), dependency.child_id.clone(), 1)
-            })
+            .map(|dep: &Dependency| (dep.parent_id.clone(), dep.child_id.clone(), 1))
             .collect()
     }
 }
@@ -121,7 +119,7 @@ pub struct PlanParam {
 
 impl PlanParam {
     /// Write the Plan to the DB
-    pub async fn upsert(self, tx: &mut Transaction<'_, Postgres>, username: &str) -> Result<Plan> {
+    pub async fn upsert(&self, tx: &mut Transaction<'_, Postgres>, username: &str) -> Result<Plan> {
         plan_upsert(tx, self, username).await
     }
 
@@ -155,7 +153,7 @@ impl PlanParam {
     pub fn data_product_ids(&self) -> Vec<DataProductId> {
         self.data_products
             .iter()
-            .map(|data_product: &DataProductParam| data_product.id.clone())
+            .map(|dp: &DataProductParam| dp.id.clone())
             .collect()
     }
 
@@ -163,7 +161,7 @@ impl PlanParam {
     pub fn parent_ids(&self) -> Vec<DataProductId> {
         self.dependencies
             .iter()
-            .map(|dependencies: &DependencyParam| dependencies.parent_id.clone())
+            .map(|dep: &DependencyParam| dep.parent_id.clone())
             .collect()
     }
 
@@ -171,7 +169,7 @@ impl PlanParam {
     pub fn child_ids(&self) -> Vec<DataProductId> {
         self.dependencies
             .iter()
-            .map(|dependencies: &DependencyParam| dependencies.child_id.clone())
+            .map(|dep: &DependencyParam| dep.child_id.clone())
             .collect()
     }
 
@@ -179,9 +177,7 @@ impl PlanParam {
     pub fn dependency_edges(&self) -> Vec<(DataProductId, DataProductId, u32)> {
         self.dependencies
             .iter()
-            .map(|dependency: &DependencyParam| {
-                (dependency.parent_id.clone(), dependency.child_id.clone(), 1)
-            })
+            .map(|dep: &DependencyParam| (dep.parent_id.clone(), dep.child_id.clone(), 1))
             .collect()
     }
 }
@@ -208,8 +204,6 @@ pub struct DataProductParam {
 
 /// Input parameters for State
 pub struct StateParam {
-    pub dataset_id: DatasetId,
-    pub data_product_id: DataProductId,
     pub state: State,
     pub run_id: Option<Uuid>,
     pub link: Option<String>,
