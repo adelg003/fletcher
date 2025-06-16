@@ -1,13 +1,13 @@
-use std::collections::HashSet;
-
 use crate::{
     dag::Dag,
     error::Error,
     model::{DataProductId, DatasetId, Plan, PlanParam},
 };
+use chrono::Utc;
 use petgraph::graph::DiGraph;
 use poem::error::{BadRequest, InternalServerError, NotFound, Result, UnprocessableEntity};
 use sqlx::{Postgres, Transaction};
+use std::collections::HashSet;
 
 /// Map Crate Error to Poem Error
 fn to_poem_error(err: Error) -> poem::Error {
@@ -99,7 +99,7 @@ pub async fn plan_add(
     username: &str,
 ) -> Result<Plan> {
     // Pull any prior details
-    let wip_plan = Plan::from_dataset_id(&param.dataset.id, tx).await;
+    let wip_plan = Plan::from_dataset_id(tx, &param.dataset.id).await;
 
     // So what did we get from the DB?
     let plan: Option<Plan> = match wip_plan {
@@ -112,10 +112,13 @@ pub async fn plan_add(
     validate_plan_param(param, &plan)?;
 
     // Write our Plan to the DB
-    param.upsert(tx, username).await.map_err(to_poem_error)
+    param
+        .upsert(tx, username, &Utc::now())
+        .await
+        .map_err(to_poem_error)
 }
 
 /// Read a Plan Dag from the DB
 pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: &DatasetId) -> Result<Plan> {
-    Plan::from_dataset_id(id, tx).await.map_err(to_poem_error)
+    Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)
 }

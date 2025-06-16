@@ -1,5 +1,8 @@
 use crate::{
-    db::{plan_select, plan_upsert},
+    db::{
+        data_product_upsert, data_products_by_dataset_select, dataset_select, dataset_upsert,
+        dependencies_by_dataset_select, dependency_upsert, state_update,
+    },
     error::Result,
 };
 use chrono::{DateTime, Utc};
@@ -26,10 +29,19 @@ pub struct Plan {
 impl Plan {
     /// Pull the Plan for a Dataset
     pub async fn from_dataset_id(
-        id: &DatasetId,
         tx: &mut Transaction<'_, Postgres>,
+        id: &DatasetId,
     ) -> Result<Self> {
-        plan_select(tx, id).await
+        // Pull data elements
+        let dataset: Dataset = dataset_select(tx, id).await?;
+        let data_products: Vec<DataProduct> = data_products_by_dataset_select(tx, id).await?;
+        let dependencies: Vec<Dependency> = dependencies_by_dataset_select(tx, id).await?;
+
+        Ok(Plan {
+            dataset,
+            data_products,
+            dependencies,
+        })
     }
 
     /// Return all Data Product IDs
@@ -99,6 +111,28 @@ pub struct DataProduct {
     pub modified_date: DateTime<Utc>,
 }
 
+impl DataProduct {
+    /// Update the State of a DataProduct
+    pub async fn state_update(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        plan: &Plan,
+        state: &StateParam,
+        username: &str,
+        modified_date: &DateTime<Utc>,
+    ) -> Result<DataProduct> {
+        state_update(
+            tx,
+            &plan.dataset.id,
+            &self.id,
+            state,
+            username,
+            modified_date,
+        )
+        .await
+    }
+}
+
 /// Dependency from one Data Product to another Data Product
 #[derive(Object)]
 pub struct Dependency {
@@ -119,8 +153,42 @@ pub struct PlanParam {
 
 impl PlanParam {
     /// Write the Plan to the DB
-    pub async fn upsert(&self, tx: &mut Transaction<'_, Postgres>, username: &str) -> Result<Plan> {
-        plan_upsert(tx, self, username).await
+    pub async fn upsert(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        username: &str,
+        modified_date: &DateTime<Utc>,
+    ) -> Result<Plan> {
+        let dataset_id: &DatasetId = &self.dataset.id;
+
+        // Write our data to the DB for a Dataset
+        let dataset: Dataset = dataset_upsert(tx, &self.dataset, username, modified_date).await?;
+
+        // Write our data to the DB for Data Products
+        let mut data_products: Vec<DataProduct> = Vec::new();
+        for data_product_param in &self.data_products {
+            let data_product: DataProduct =
+                data_product_upsert(tx, dataset_id, data_product_param, username, modified_date)
+                    .await?;
+
+            data_products.push(data_product);
+        }
+
+        // Write our data to the DB for Dependencies
+        let mut dependencies: Vec<Dependency> = Vec::new();
+        for dependency_param in &self.dependencies {
+            let dependency: Dependency =
+                dependency_upsert(tx, dataset_id, dependency_param, username, modified_date)
+                    .await?;
+
+            dependencies.push(dependency);
+        }
+
+        Ok(Plan {
+            dataset,
+            data_products,
+            dependencies,
+        })
     }
 
     /// Check for duplicate Data Products
