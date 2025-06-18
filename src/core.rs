@@ -142,7 +142,7 @@ async fn state_update(
 
     // Is the data product locked?
     if data_product.state == State::Disabled {
-        return Err(Forbidden(Error::Locked(data_product.id.clone())));
+        return Err(Forbidden(Error::Disabled(data_product.id.clone())));
     }
 
     // Update our Data Product State

@@ -11,6 +11,10 @@ pub enum Error {
     #[error("Graph is cyclical")]
     Cyclical,
 
+    /// Data Product is locked
+    #[error("Data product is locked: {0}")]
+    Disabled(DataProductId),
+
     /// Duplicate data products in parameter
     #[error("Duplicate data-product id in parameter: {0}")]
     Duplicate(DataProductId),
@@ -22,10 +26,6 @@ pub enum Error {
     /// Error from Petgraph::Graph
     #[error("Petgraph error: {0}")]
     Graph(#[from] GraphError),
-
-    /// Data Product is locked
-    #[error("Data product is locked: {0}")]
-    Locked(DataProductId),
 
     /// Data Product not found
     #[error("Data product not found for: {0}")]
