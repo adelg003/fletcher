@@ -128,7 +128,7 @@ pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: &DatasetId) -> po
 async fn state_update(
     tx: &mut Transaction<'_, Postgres>,
     plan: &mut Plan,
-    param: &StateParam,
+    state: &StateParam,
     username: &str,
     modified_date: &DateTime<Utc>,
 ) -> poem::Result<()> {
@@ -137,8 +137,8 @@ async fn state_update(
 
     // Pull our Data Product
     let data_product: &mut DataProduct = plan
-        .data_product(&param.id)
-        .ok_or(NotFound(Error::Missing(param.id.clone())))?;
+        .data_product(&state.id)
+        .ok_or(NotFound(Error::Missing(state.id.clone())))?;
 
     // Is the data product locked?
     if data_product.state == State::Disabled {
@@ -147,7 +147,7 @@ async fn state_update(
 
     // Update our Data Product State
     data_product
-        .state_update(tx, &dataset_id, &param.state, username, modified_date)
+        .state_update(tx, &dataset_id, state, username, modified_date)
         .await
         .map_err(to_poem_error)?;
 
@@ -158,7 +158,7 @@ async fn state_update(
 pub async fn states_edit(
     tx: &mut Transaction<'_, Postgres>,
     id: &DatasetId,
-    params: &Vec<StateParam>,
+    states: &Vec<StateParam>,
     username: &str,
 ) -> poem::Result<Plan> {
     // Pull the Plan so we know what we are working with
@@ -168,8 +168,8 @@ pub async fn states_edit(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Apply our updates to the data products
-    for param in params {
-        state_update(tx, &mut plan, param, username, &modified_date).await?;
+    for state in states {
+        state_update(tx, &mut plan, state, username, &modified_date).await?;
     }
 
     Ok(plan)

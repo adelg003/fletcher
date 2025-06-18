@@ -124,11 +124,11 @@ impl DataProduct {
         &mut self,
         tx: &mut Transaction<'_, Postgres>,
         dataset_id: &DatasetId,
-        state: &StateInnerParam,
+        state: &StateParam,
         username: &str,
         modified_date: &DateTime<Utc>,
     ) -> Result<()> {
-        *self = state_update(tx, dataset_id, &self.id, state, username, modified_date).await?;
+        *self = state_update(tx, dataset_id, state, username, modified_date).await?;
         Ok(())
     }
 }
@@ -272,19 +272,13 @@ pub struct DataProductParam {
 
 /// Input parameters for State
 #[derive(Object)]
-pub struct StateInnerParam {
+pub struct StateParam {
+    pub id: DataProductId,
     pub state: State,
     pub run_id: Option<Uuid>,
     pub link: Option<String>,
     pub passback: Option<Value>,
     pub extra: Option<Value>,
-}
-
-/// Struct for when we update the state (and allow for batch updates)
-#[derive(Object)]
-pub struct StateParam {
-    pub id: DataProductId,
-    pub state: StateInnerParam,
 }
 
 /// Input for adding a Dependency

@@ -1,8 +1,8 @@
 use crate::{
     error::Result,
     model::{
-        Compute, DataProduct, DataProductId, DataProductParam, Dataset, DatasetId, DatasetParam,
-        Dependency, DependencyParam, State, StateInnerParam,
+        Compute, DataProduct, DataProductParam, Dataset, DatasetId, DatasetParam, Dependency,
+        DependencyParam, State, StateParam,
     },
 };
 use chrono::{DateTime, Utc};
@@ -169,8 +169,7 @@ pub async fn data_product_upsert(
 pub async fn state_update(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: &DatasetId,
-    data_product_id: &DataProductId,
-    param: &StateInnerParam,
+    param: &StateParam,
     username: &str,
     modified_date: &DateTime<Utc>,
 ) -> Result<DataProduct> {
@@ -204,7 +203,7 @@ pub async fn state_update(
             modified_by,
             modified_date"#,
         dataset_id,
-        data_product_id,
+        param.id,
         param.state as State,
         param.run_id,
         param.link,

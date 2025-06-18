@@ -1,6 +1,6 @@
 use crate::{
     core::{plan_add, plan_read, states_edit},
-    model::{DataProductId, DatasetId, Plan, PlanParam, StateInnerParam, StateParam},
+    model::{DatasetId, Plan, PlanParam, StateParam},
 };
 use poem::{error::InternalServerError, web::Data};
 use poem_openapi::{OpenApi, Tags, param::Path, payload::Json};
@@ -56,39 +56,9 @@ impl Api {
         Ok(Json(plan))
     }
 
-    /// Update a data product state
-    #[oai(path = "/data_product/:dataset_id/:data_product_id", method = "put", tag = Tag::State)]
-    async fn state_put(
-        &self,
-        Data(pool): Data<&PgPool>,
-        Path(dataset_id): Path<DatasetId>,
-        Path(data_product_id): Path<DataProductId>,
-        Json(state): Json<StateInnerParam>,
-    ) -> poem::Result<Json<Plan>> {
-        // Start Transaction
-        let mut tx = pool.begin().await.map_err(InternalServerError)?;
-
-        // Add the plan to the DB
-        let plan: Plan = states_edit(
-            &mut tx,
-            &dataset_id,
-            &vec![StateParam {
-                id: data_product_id,
-                state,
-            }],
-            "placeholder_user",
-        )
-        .await?;
-
-        // Commit Transaction
-        tx.commit().await.map_err(InternalServerError)?;
-
-        Ok(Json(plan))
-    }
-
-    /// Update a multiple data product states
+    /// Update one or multiple data product states
     #[oai(path = "/data_product/:dataset_id", method = "put", tag = Tag::State)]
-    async fn states_put(
+    async fn state_put(
         &self,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
