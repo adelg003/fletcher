@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, Type};
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt};
 use uuid::Uuid;
 
 /// Type for Dataset ID
@@ -88,16 +88,29 @@ pub enum Compute {
 }
 
 /// States a Data Product can be in
-#[derive(Clone, Copy, Enum, PartialEq, Type)]
+#[derive(Clone, Copy, Debug, Enum, PartialEq, Type)]
 #[oai(rename_all = "lowercase")]
 #[sqlx(type_name = "state", rename_all = "lowercase")]
 pub enum State {
-    Waiting,
+    Disabled,
+    Failed,
     Queued,
     Running,
     Success,
-    Failed,
-    Disabled,
+    Waiting,
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            State::Disabled => write!(f, "disabled"),
+            State::Failed => write!(f, "failed"),
+            State::Queued => write!(f, "queued"),
+            State::Running => write!(f, "running"),
+            State::Success => write!(f, "success"),
+            State::Waiting => write!(f, "waiting"),
+        }
+    }
 }
 
 /// Data Product details

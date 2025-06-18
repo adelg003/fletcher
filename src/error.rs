@@ -1,4 +1,4 @@
-use crate::model::DataProductId;
+use crate::model::{DataProductId, State};
 use petgraph::graph::GraphError;
 
 /// Crate-wide result alias.
@@ -7,6 +7,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Custom Error Type for Fletcher
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// The dependency graph contains a cycle (not a valid DAG)
+    #[error("The requested state for {0} is invalid: {1}")]
+    BadState(DataProductId, State),
+
     /// The dependency graph contains a cycle (not a valid DAG)
     #[error("Graph is cyclical")]
     Cyclical,

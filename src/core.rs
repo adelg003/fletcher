@@ -135,6 +135,14 @@ async fn state_update(
     // Pull before we mutably borrow via plan.data_product()
     let dataset_id: DatasetId = plan.dataset.id;
 
+    // Check the new state to update to, and make sure is valid.
+    match state.state {
+        State::Failed | State::Running | State::Success => Ok(()),
+        State::Disabled | State::Queued | State::Waiting => {
+            Err(BadRequest(Error::BadState(state.id.clone(), state.state)))
+        }
+    }?;
+
     // Pull our Data Product
     let data_product: &mut DataProduct = plan
         .data_product(&state.id)
@@ -161,11 +169,11 @@ pub async fn states_edit(
     states: &Vec<StateParam>,
     username: &str,
 ) -> poem::Result<Plan> {
-    // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
-
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
+
+    // Pull the Plan so we know what we are working with
+    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
 
     // Apply our updates to the data products
     for state in states {
