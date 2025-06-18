@@ -1,11 +1,10 @@
 use crate::{
-    core::{plan_add, plan_read},
-    model::{Plan, PlanParam},
+    core::{plan_add, plan_read, states_edit},
+    model::{DataProductId, DatasetId, Plan, PlanParam, StateInnerParam, StateParam},
 };
 use poem::{error::InternalServerError, web::Data};
 use poem_openapi::{OpenApi, Tags, param::Path, payload::Json};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 /// Tags to show in Swagger Page
 #[derive(Tags)]
@@ -43,7 +42,7 @@ impl Api {
     async fn plan_get(
         &self,
         Data(pool): Data<&PgPool>,
-        Path(dataset_id): Path<Uuid>,
+        Path(dataset_id): Path<DatasetId>,
     ) -> poem::Result<Json<Plan>> {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
@@ -53,6 +52,56 @@ impl Api {
 
         // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+    }
+
+    /// Update a data product state
+    #[oai(path = "/data_product/:dataset_id/:data_product_id", method = "put", tag = Tag::State)]
+    async fn state_put(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+        Path(data_product_id): Path<DataProductId>,
+        Json(state): Json<StateInnerParam>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Add the plan to the DB
+        let plan: Plan = states_edit(
+            &mut tx,
+            &dataset_id,
+            &vec![StateParam {
+                id: data_product_id,
+                state,
+            }],
+            "placeholder_user",
+        )
+        .await?;
+
+        // Commit Transaction
+        tx.commit().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+    }
+
+    /// Update a multiple data product states
+    #[oai(path = "/data_product/:dataset_id", method = "put", tag = Tag::State)]
+    async fn states_put(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+        Json(states): Json<Vec<StateParam>>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Add the plan to the DB
+        let plan: Plan = states_edit(&mut tx, &dataset_id, &states, "placeholder_user").await?;
+
+        // Commit Transaction
+        tx.commit().await.map_err(InternalServerError)?;
 
         Ok(Json(plan))
     }
