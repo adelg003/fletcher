@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use petgraph::{
     algo::is_cyclic_directed,
     graph::{DiGraph, GraphError, NodeIndex},
+    visit::Dfs,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -15,6 +16,9 @@ pub trait Dag<N, E> {
     fn build_dag(nodes: HashSet<N>, edges: HashSet<(N, N, E)>) -> Result<Self>
     where
         Self: Sized;
+
+    /// Return all nodes downstream of a given node.
+    fn downstream_nodes(&self, start_node: N) -> HashSet<N>;
 }
 
 impl<N, E> Dag<N, E> for DiGraph<N, E>
@@ -53,6 +57,37 @@ where
         validate_acyclic(&graph)?;
 
         Ok(graph)
+    }
+
+    fn downstream_nodes(&self, start_node: N) -> HashSet<N> {
+        // Nodes we have already sean
+        let mut visited = HashSet::<N>::new();
+
+        // Find the index of the node we want to start with
+        let start_idx: Option<NodeIndex> = self
+            .node_indices()
+            .find(|idx: &NodeIndex| self.node_weight(*idx) == Some(&start_node));
+
+        // If our nodes is not in the graph, just return an empty set.
+        let start_idx: NodeIndex = match start_idx {
+            Some(start_idx) => start_idx,
+            None => return visited,
+        };
+
+        // Lets iterate over all the downstream nodes via a depth first search (DFS)
+        let mut dfs = Dfs::new(self, start_idx);
+        while let Some(idx) = dfs.next(self) {
+            // Skip the first node
+            if idx != start_idx {
+                // Add node weight to ones we have seen
+                if let Some(node) = self.node_weight(idx) {
+                    visited.insert(node.clone());
+                }
+            }
+        }
+
+        // Return list of all nodes we have visited on our walk down the graph
+        visited
     }
 }
 

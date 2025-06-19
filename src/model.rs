@@ -1,4 +1,5 @@
 use crate::{
+    dag::Dag,
     db::{
         data_product_upsert, data_products_by_dataset_select, dataset_select, dataset_upsert,
         dependencies_by_dataset_select, dependency_upsert, state_update,
@@ -6,6 +7,7 @@ use crate::{
     error::Result,
 };
 use chrono::{DateTime, Utc};
+use petgraph::graph::DiGraph;
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, Type};
@@ -17,6 +19,9 @@ pub type DatasetId = Uuid;
 
 /// Type for Data Product ID
 pub type DataProductId = String;
+
+/// Edge of the graph
+pub type Edge<'a> = (&'a DataProductId, &'a DataProductId, u32);
 
 /// Plan Details
 #[derive(Object)]
@@ -44,13 +49,6 @@ impl Plan {
         })
     }
 
-    /// Pull a single Data Product
-    pub fn data_product(&mut self, id: &DataProductId) -> Option<&mut DataProduct> {
-        self.data_products
-            .iter_mut()
-            .find(|dp: &&mut DataProduct| &dp.id == id)
-    }
-
     /// Return all Data Product IDs
     pub fn data_product_ids(&self) -> Vec<&DataProductId> {
         self.data_products
@@ -60,11 +58,38 @@ impl Plan {
     }
 
     /// Return all Parent / Child dependencies
-    pub fn dependency_edges(&self) -> Vec<(&DataProductId, &DataProductId, u32)> {
+    pub fn edges(&self) -> Vec<Edge> {
         self.dependencies
             .iter()
             .map(|dep: &Dependency| (&dep.parent_id, &dep.child_id, 1))
             .collect()
+    }
+
+    /// Pull a single Data Product
+    pub fn data_product(&self, id: &DataProductId) -> Option<&DataProduct> {
+        self.data_products
+            .iter()
+            .find(|dp: &&DataProduct| &dp.id == id)
+    }
+
+    /// Pull a single Data Product in a mutable state
+    pub fn data_product_mut(&mut self, id: &DataProductId) -> Option<&mut DataProduct> {
+        self.data_products
+            .iter_mut()
+            .find(|dp: &&mut DataProduct| &dp.id == id)
+    }
+
+    /// Return a graph representation of the plan
+    pub fn to_dag(&self) -> Result<DiGraph<&DataProductId, u32>> {
+        // Pull Data Product details
+        let data_product_ids: HashSet<&DataProductId> =
+            self.data_product_ids().into_iter().collect();
+
+        // How do the data products relate?
+        let edges: HashSet<Edge> = self.edges().into_iter().collect();
+
+        // Build the dag
+        DiGraph::<&DataProductId, u32>::build_dag(data_product_ids, edges)
     }
 }
 
@@ -132,7 +157,7 @@ pub struct DataProduct {
 }
 
 impl DataProduct {
-    /// Update the State of a DataProduct inplace
+    /// Update the State of a Data Product inplace
     pub async fn state_update(
         &mut self,
         tx: &mut Transaction<'_, Postgres>,
@@ -292,6 +317,19 @@ pub struct StateParam {
     pub link: Option<String>,
     pub passback: Option<Value>,
     pub extra: Option<Value>,
+}
+
+impl From<&mut DataProduct> for StateParam {
+    fn from(data_product: &mut DataProduct) -> Self {
+        StateParam {
+            id: data_product.id.clone(),
+            state: data_product.state,
+            run_id: data_product.run_id,
+            link: data_product.link.clone(),
+            passback: data_product.passback.clone(),
+            extra: data_product.extra.clone(),
+        }
+    }
 }
 
 /// Input for adding a Dependency

@@ -1,7 +1,7 @@
 use crate::{
     dag::Dag,
     error::Error,
-    model::{DataProduct, DataProductId, DatasetId, Plan, PlanParam, State, StateParam},
+    model::{DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, State, StateParam},
 };
 use chrono::{DateTime, Utc};
 use petgraph::graph::DiGraph;
@@ -74,12 +74,12 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
     }
 
     // Collect all parent / child relationships
-    let dependency_edges: HashSet<(&DataProductId, &DataProductId, u32)> = {
-        let mut param_edges: Vec<(&DataProductId, &DataProductId, u32)> = param.dependency_edges();
+    let edges: HashSet<Edge> = {
+        let mut param_edges: Vec<Edge> = param.dependency_edges();
 
         // If we got a plan from the DB, add its edges
         if let Some(plan) = plan {
-            let plan_edges: Vec<(&DataProductId, &DataProductId, u32)> = plan.dependency_edges();
+            let plan_edges: Vec<(&DataProductId, &DataProductId, u32)> = plan.edges();
             param_edges.extend(plan_edges);
         }
 
@@ -87,8 +87,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
     };
 
     // If you take all our data products and map them to a graph are they a valid dag?
-    DiGraph::<&DataProductId, u32>::build_dag(data_product_ids, dependency_edges)
-        .map_err(to_poem_error)?;
+    DiGraph::<&DataProductId, u32>::build_dag(data_product_ids, edges).map_err(to_poem_error)?;
 
     Ok(())
 }
@@ -124,6 +123,30 @@ pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: &DatasetId) -> po
     Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)
 }
 
+/// Edit the state of a Data Product
+pub async fn states_edit(
+    tx: &mut Transaction<'_, Postgres>,
+    id: &DatasetId,
+    states: &Vec<StateParam>,
+    username: &str,
+) -> poem::Result<Plan> {
+    // Timestamp of the transaction
+    let modified_date: DateTime<Utc> = Utc::now();
+
+    // Pull the Plan so we know what we are working with
+    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+
+    // Apply our updates to the data products
+    for state in states {
+        state_update(tx, &mut plan, state, username, &modified_date).await?;
+    }
+
+    // Clear all nodes that are downstream of the ones we just updated.
+    clear_downstream_nodes(tx, &mut plan, states, username, &modified_date).await?;
+
+    Ok(plan)
+}
+
 /// Update the state of our data product
 async fn state_update(
     tx: &mut Transaction<'_, Postgres>,
@@ -145,7 +168,7 @@ async fn state_update(
 
     // Pull our Data Product
     let data_product: &mut DataProduct = plan
-        .data_product(&state.id)
+        .data_product_mut(&state.id)
         .ok_or(NotFound(Error::Missing(state.id.clone())))?;
 
     // Is the data product locked?
@@ -162,23 +185,61 @@ async fn state_update(
     Ok(())
 }
 
-/// Edit the state of a Data Product
-pub async fn states_edit(
+/// Clear all downstream data products
+async fn clear_downstream_nodes(
     tx: &mut Transaction<'_, Postgres>,
-    id: &DatasetId,
+    plan: &mut Plan,
     states: &Vec<StateParam>,
     username: &str,
-) -> poem::Result<Plan> {
-    // Timestamp of the transaction
-    let modified_date: DateTime<Utc> = Utc::now();
+    modified_date: &DateTime<Utc>,
+) -> poem::Result<()> {
+    // Pull before we mutably borrow via plan.data_product()
+    let dataset_id: DatasetId = plan.dataset.id;
 
-    // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+    // What are all the downstream nodes of our updated states?
+    let downstream_ids: HashSet<DataProductId> = {
+        // Generate Dag representation of the plan
+        let dag: DiGraph<&DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
 
-    // Apply our updates to the data products
-    for state in states {
-        state_update(tx, &mut plan, state, username, &modified_date).await?;
+        // What are all the downstream nodes of our updated states?
+        let mut downstream_ids = HashSet::<&DataProductId>::new();
+        for state in states {
+            let new_ids: HashSet<&DataProductId> = dag.downstream_nodes(&state.id);
+            downstream_ids.extend(new_ids);
+        }
+
+        // Remove all nodes that are already in a Waiting or Disabled state
+        downstream_ids.retain(|id: &&DataProductId| {
+            !matches!(
+                plan.data_product(id),
+                Some(dp) if matches!(dp.state, State::Waiting | State::Disabled),
+            )
+        });
+
+        // Clone the values so we can free up the pointers in the dag and allow more mutable
+        // borrows of plan.
+        downstream_ids.into_iter().cloned().collect()
+    };
+
+    // Get ready to update the state of the data products
+    for id in downstream_ids {
+        let data_product: &mut DataProduct = plan
+            .data_product_mut(&id)
+            .ok_or(InternalServerError(Error::Missing(id.clone())))?;
+
+        // Params for the current and new state. Make our change and dump the current state to fill the rest.
+        let current_state: StateParam = data_product.into();
+        let new_state = StateParam {
+            state: State::Waiting,
+            ..current_state
+        };
+
+        // Set non-waiting downstream_nodes to waiting
+        data_product
+            .state_update(tx, &dataset_id, &new_state, username, modified_date)
+            .await
+            .map_err(to_poem_error)?;
     }
 
-    Ok(plan)
+    Ok(())
 }
