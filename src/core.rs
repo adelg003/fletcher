@@ -144,6 +144,40 @@ pub async fn states_edit(
     // Clear all nodes that are downstream of the ones we just updated.
     clear_downstream_nodes(tx, &mut plan, states, username, &modified_date).await?;
 
+    // Find all nodes that can be ready to run
+    let waiting_ids: HashSet<&DataProductId> = plan
+        .data_products
+        .iter()
+        .filter_map(|dp: &DataProduct| {
+            if dp.state == State::Waiting && dp.eager {
+                Some(&dp.id)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Generate Dag representation of the plan
+    let dag: DiGraph<&DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
+
+    // Check each data product's parents to see if any of them are blocking
+    for waiting_id in waiting_ids {
+        let parent_ids: HashSet<&DataProductId> = dag.parent_nodes(waiting_id);
+
+        // Check if parents are good to go. (all() returns true if the parent_ids is empty)
+        let ready: bool = parent_ids.into_iter().all(|parent_id: &DataProductId| {
+            matches!(
+                plan.data_product(parent_id),
+                Some(dp) if dp.state == State::Success,
+            )
+        });
+
+        // If the waiting node is ready to run, trigger it
+        if ready {
+            todo!("Yo, you need to trigger the data product!");
+        }
+    }
+
     Ok(plan)
 }
 
@@ -196,30 +230,27 @@ async fn clear_downstream_nodes(
     // Pull before we mutably borrow via plan.data_product()
     let dataset_id: DatasetId = plan.dataset.id;
 
+    // Generate Dag representation of the plan
+    let dag: DiGraph<&DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
+
     // What are all the downstream nodes of our updated states?
-    let downstream_ids: HashSet<DataProductId> = {
-        // Generate Dag representation of the plan
-        let dag: DiGraph<&DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
+    let mut downstream_ids = HashSet::<&DataProductId>::new();
+    for state in states {
+        let new_ids: HashSet<&DataProductId> = dag.downstream_nodes(&state.id);
+        downstream_ids.extend(new_ids);
+    }
 
-        // What are all the downstream nodes of our updated states?
-        let mut downstream_ids = HashSet::<&DataProductId>::new();
-        for state in states {
-            let new_ids: HashSet<&DataProductId> = dag.downstream_nodes(&state.id);
-            downstream_ids.extend(new_ids);
-        }
+    // Remove all nodes that are already in a Waiting or Disabled state
+    downstream_ids.retain(|id: &&DataProductId| {
+        !matches!(
+            plan.data_product(id),
+            Some(dp) if matches!(dp.state, State::Waiting | State::Disabled),
+        )
+    });
 
-        // Remove all nodes that are already in a Waiting or Disabled state
-        downstream_ids.retain(|id: &&DataProductId| {
-            !matches!(
-                plan.data_product(id),
-                Some(dp) if matches!(dp.state, State::Waiting | State::Disabled),
-            )
-        });
-
-        // Clone the values so we can free up the pointers in the dag and allow more mutable
-        // borrows of plan.
-        downstream_ids.into_iter().cloned().collect()
-    };
+    // Clone the values so we can free up the pointers in the dag and allow more mutable
+    // borrows of plan.
+    let downstream_ids: HashSet<DataProductId> = downstream_ids.into_iter().cloned().collect();
 
     // Get ready to update the state of the data products
     for id in downstream_ids {
