@@ -8,6 +8,7 @@ use petgraph::graph::DiGraph;
 use poem::error::{BadRequest, Forbidden, InternalServerError, NotFound, UnprocessableEntity};
 use sqlx::{Postgres, Transaction};
 use std::collections::HashSet;
+use tracing::warn;
 
 /// Map Crate Error to Poem Error
 fn to_poem_error(err: Error) -> poem::Error {
@@ -144,8 +145,13 @@ pub async fn states_edit(
     // Clear all nodes that are downstream of the ones we just updated.
     clear_downstream_nodes(tx, &mut plan, states, username, &modified_date).await?;
 
+    // Is the dataset paused? If so, no need to trigger the next data product.
+    if plan.dataset.paused {
+        return Ok(plan);
+    }
+
     // Find all nodes that can be ready to run
-    let waiting_ids: HashSet<&DataProductId> = plan
+    let waiting_ids: HashSet<DataProductId> = plan
         .data_products
         .iter()
         .filter_map(|dp: &DataProduct| {
@@ -155,26 +161,52 @@ pub async fn states_edit(
                 None
             }
         })
+        .cloned()
         .collect();
 
-    // Generate Dag representation of the plan
-    let dag: DiGraph<&DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
-
-    // Check each data product's parents to see if any of them are blocking
     for waiting_id in waiting_ids {
-        let parent_ids: HashSet<&DataProductId> = dag.parent_nodes(waiting_id);
+        // Generate Dag representation of the plan
+        let dag: DiGraph<&DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
+
+        // Check each data product's parents to see if any of them are blocking
+        let parent_ids: HashSet<DataProductId> = dag
+            .parent_nodes(&waiting_id)
+            .iter()
+            .cloned()
+            .cloned()
+            .collect();
 
         // Check if parents are good to go. (all() returns true if the parent_ids is empty)
-        let ready: bool = parent_ids.into_iter().all(|parent_id: &DataProductId| {
+        let ready: bool = parent_ids.into_iter().all(|parent_id: DataProductId| {
             matches!(
-                plan.data_product(parent_id),
+                plan.data_product(&parent_id),
                 Some(dp) if dp.state == State::Success,
             )
         });
 
         // If the waiting node is ready to run, trigger it
         if ready {
-            todo!("Yo, you need to trigger the data product!");
+            warn!(
+                "This is where I would trigger the data product with the OaaS Wrapper... IF I HAD ONE!!!"
+            );
+
+            // Representation of the current data product
+            let data_product: &mut DataProduct = plan
+                .data_product_mut(&waiting_id)
+                .ok_or(InternalServerError(Error::Missing(waiting_id.clone())))?;
+
+            // Params for the current and new state. Make our change and dump the current state to fill the rest.
+            let current_state: StateParam = data_product.into();
+            let new_state = StateParam {
+                state: State::Queued,
+                ..current_state
+            };
+
+            // Now record what we triggered the data product in the OaaS Wrapper
+            data_product
+                .state_update(tx, id, &new_state, username, &modified_date)
+                .await
+                .map_err(to_poem_error)?;
         }
     }
 
