@@ -335,9 +335,9 @@ mod tests {
     use uuid::Uuid;
 
     /// Trim a DateTime to micro-seconds (aka the level that Postgres stores timestamps to)
-    fn trim_to_microseconds(dt: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    fn trim_to_microseconds(dt: DateTime<Utc>) -> DateTime<Utc> {
         let micros = dt.timestamp_subsec_micros();
-        dt.with_nanosecond(micros * 1_000)
+        dt.with_nanosecond(micros * 1_000).unwrap()
     }
 
     /// Test Insert of new Dataset
@@ -367,7 +367,7 @@ mod tests {
                 paused: param.paused,
                 extra: param.extra,
                 modified_by: username.to_string(),
-                modified_date: trim_to_microseconds(modified_date).unwrap(),
+                modified_date: trim_to_microseconds(modified_date),
             }
         );
     }
@@ -410,7 +410,7 @@ mod tests {
                 paused: param.paused,
                 extra: param.extra,
                 modified_by: username.to_string(),
-                modified_date: trim_to_microseconds(modified_date).unwrap(),
+                modified_date: trim_to_microseconds(modified_date),
             }
         );
     }
@@ -447,7 +447,7 @@ mod tests {
                 paused: param.paused,
                 extra: param.extra,
                 modified_by: username.to_string(),
-                modified_date: trim_to_microseconds(modified_date).unwrap(),
+                modified_date: trim_to_microseconds(modified_date),
             }
         );
     }
