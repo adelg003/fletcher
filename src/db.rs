@@ -182,9 +182,8 @@ pub async fn state_update(
             run_id = $4,
             link = $5,
             passback = $6,
-            extra = $7,
-            modified_by = $8,
-            modified_date = $9
+            modified_by = $7,
+            modified_date = $8
         WHERE
             dataset_id = $1
             AND data_product_id = $2
@@ -208,7 +207,6 @@ pub async fn state_update(
         param.run_id,
         param.link,
         param.passback,
-        param.extra,
         username,
         modified_date,
     )
@@ -653,7 +651,8 @@ mod tests {
             },
         );
     }
-/// Test successful update of Data Product State
+
+    /// Test successful update of Data Product State
     #[sqlx::test]
     async fn test_state_update_success(pool: PgPool) {
         // First create a dataset
@@ -701,7 +700,6 @@ mod tests {
             run_id: Some(Uuid::new_v4()),
             link: Some("https://example.com/run".to_string()),
             passback: Some(json!({"status": "running"})),
-            extra: Some(json!({"updated": "state"})),
         };
 
         let updated_modified_date = Utc::now();
@@ -721,21 +719,24 @@ mod tests {
         tx.commit().await.unwrap();
 
         // Verify the state update worked
-        assert_eq!(updated_data_product.id, state_param.id);
-        assert_eq!(updated_data_product.state, state_param.state);
-        assert_eq!(updated_data_product.run_id, state_param.run_id);
-        assert_eq!(updated_data_product.link, state_param.link);
-        assert_eq!(updated_data_product.passback, state_param.passback);
-        assert_eq!(updated_data_product.extra, state_param.extra);
-        assert_eq!(updated_data_product.modified_by, updated_username.to_string());
-        assert_eq!(updated_data_product.modified_date, trim_to_microseconds(updated_modified_date));
-
-        // Verify fields that shouldn't change
-        assert_eq!(updated_data_product.compute, initial_data_product.compute);
-        assert_eq!(updated_data_product.name, initial_data_product.name);
-        assert_eq!(updated_data_product.version, initial_data_product.version);
-        assert_eq!(updated_data_product.eager, initial_data_product.eager);
-        assert_eq!(updated_data_product.passthrough, initial_data_product.passthrough);
+        assert_eq!(
+            updated_data_product,
+            DataProduct {
+                id: initial_data_product.id,
+                compute: initial_data_product.compute,
+                name: initial_data_product.name,
+                version: initial_data_product.version,
+                eager: initial_data_product.eager,
+                passthrough: initial_data_product.passthrough,
+                state: state_param.state,
+                run_id: state_param.run_id,
+                link: state_param.link,
+                passback: state_param.passback,
+                extra: initial_data_product.extra,
+                modified_by: updated_username.to_string(),
+                modified_date: trim_to_microseconds(updated_modified_date),
+            }
+        );
     }
 
     /// Test rejection when updating state of non-existent data product
@@ -764,19 +765,11 @@ mod tests {
             run_id: Some(Uuid::new_v4()),
             link: Some("https://example.com/completed".to_string()),
             passback: Some(json!({"status": "complete"})),
-            extra: Some(json!({"result": "success"})),
         };
 
         // Test state update - should fail since data product doesn't exist
         let mut tx = pool.begin().await.unwrap();
-        let result = state_update(
-            &mut tx,
-            dataset.id,
-            &state_param,
-            username,
-            modified_date,
-        )
-        .await;
+        let result = state_update(&mut tx, dataset.id, &state_param, username, modified_date).await;
         tx.rollback().await.unwrap();
 
         // Should get a RowNotFound error since the data product doesn't exist
