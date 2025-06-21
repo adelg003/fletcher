@@ -416,14 +416,14 @@ mod tests {
             }
         );
     }
-/// Test Select of existing Dataset
+    /// Test Select of existing Dataset
     #[sqlx::test]
     async fn test_dataset_select(pool: PgPool) {
         // Inputs
         let param = DatasetParam {
             id: Uuid::new_v4(),
             paused: true,
-            extra: Some(serde_json::json!({"test": "data"})),
+            extra: Some(json!({"test": "data"})),
         };
         let username = "test_user";
         let modified_date = Utc::now();
@@ -437,9 +437,7 @@ mod tests {
 
         // Now test dataset_select
         let mut tx = pool.begin().await.unwrap();
-        let selected_dataset = dataset_select(&mut tx, param.id)
-            .await
-            .unwrap();
+        let selected_dataset = dataset_select(&mut tx, param.id).await.unwrap();
         tx.commit().await.unwrap();
 
         // Did we get what we wanted?
