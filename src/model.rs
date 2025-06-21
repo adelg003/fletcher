@@ -94,7 +94,7 @@ impl Plan {
 }
 
 /// Dataset details
-#[derive(Object)]
+#[derive(Debug, Object, PartialEq)]
 pub struct Dataset {
     pub id: DatasetId,
     pub paused: bool,
@@ -280,7 +280,7 @@ impl PlanParam {
     }
 
     /// Return all Parent / Child dependencies
-    pub fn dependency_edges(&self) -> Vec<Edge> {
+    pub fn edges(&self) -> Vec<Edge> {
         self.dependencies
             .iter()
             .map(|dep: &DependencyParam| (dep.parent_id, dep.child_id, 1))
