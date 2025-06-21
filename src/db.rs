@@ -327,6 +327,7 @@ pub async fn dependencies_by_dataset_select(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
     use chrono::Timelike;
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -450,9 +451,8 @@ mod tests {
             }
         );
     }
-}
 
-/// Test Select of non-existent Dataset returns error
+    /// Test Select of non-existent Dataset returns error
     #[sqlx::test]
     async fn test_dataset_select_nonexistent(pool: PgPool) {
         // Generate a random UUID that doesn't exist in the database
@@ -463,6 +463,7 @@ mod tests {
         let result = dataset_select(&mut tx, nonexistent_dataset_id).await;
         tx.rollback().await.unwrap();
 
-        // Assert that we got an error
-        assert!(result.is_err(), "Expected error when selecting non-existent dataset");
+        // Assert that we got the error we wanted
+        assert!(matches!(result, Err(Error::Sqlx(sqlx::Error::RowNotFound))));
     }
+}
