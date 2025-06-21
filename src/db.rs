@@ -466,3 +466,169 @@ mod tests {
         // Assert that we got an error
         assert!(result.is_err(), "Expected error when selecting non-existent dataset");
     }
+/// Test Insert of new Data Product
+    #[sqlx::test]
+    async fn test_data_product_insert(pool: PgPool) {
+        // First create a dataset since data_product has foreign key constraint
+        let dataset_param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: None,
+        };
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let mut tx = pool.begin().await.unwrap();
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Now create data product parameters
+        let data_product_param = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Cams,
+            name: "Test Product".to_string(),
+            version: "1.0.0".to_string(),
+            eager: true,
+            passthrough: Some(json!({"test": "passthrough"})),
+            extra: Some(json!({"test": "extra"})),
+        };
+
+        // Test our function
+        let mut tx = pool.begin().await.unwrap();
+        let data_product = data_product_upsert(&mut tx, dataset.id, &data_product_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Did we get what we wanted?
+        assert_eq!(
+            data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting, // This is set by the function
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date).unwrap(),
+            }
+        );
+    }
+
+    /// Test Update of existing Data Product
+    #[sqlx::test]
+    async fn test_data_product_update(pool: PgPool) {
+        // First create a dataset
+        let dataset_param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: None,
+        };
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let mut tx = pool.begin().await.unwrap();
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Create initial data product
+        let mut data_product_param = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Cams,
+            name: "Initial Product".to_string(),
+            version: "1.0.0".to_string(),
+            eager: false,
+            passthrough: None,
+            extra: None,
+        };
+
+        // Insert initial data product
+        let mut tx = pool.begin().await.unwrap();
+        data_product_upsert(&mut tx, dataset.id, &data_product_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Update parameters for the same data product
+        data_product_param.compute = Compute::Dbxaas;
+        data_product_param.name = "Updated Product".to_string();
+        data_product_param.version = "2.0.0".to_string();
+        data_product_param.eager = true;
+        data_product_param.extra = Some(json!({"updated": "data"}));
+        let updated_modified_date = Utc::now();
+
+        // Test the update
+        let mut tx = pool.begin().await.unwrap();
+        let updated_data_product = data_product_upsert(&mut tx, dataset.id, &data_product_param, username, updated_modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Did we get the updated values?
+        assert_eq!(
+            updated_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting, // State should remain unchanged on update
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(updated_modified_date).unwrap(),
+            }
+        );
+    }
+
+    /// Test rejection when data product references non-existent dataset
+    #[sqlx::test]
+    async fn test_data_product_insert_nonexistent_dataset(pool: PgPool) {
+        // Create data product parameters with non-existent dataset_id
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let data_product_param = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Cams,
+            name: "Test Product".to_string(),
+            version: "1.0.0".to_string(),
+            eager: true,
+            passthrough: None,
+            extra: None,
+        };
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Test our function - this should fail due to foreign key constraint
+        let mut tx = pool.begin().await.unwrap();
+        let result = data_product_upsert(&mut tx, nonexistent_dataset_id, &data_product_param, username, modified_date).await;
+        tx.rollback().await.unwrap();
+
+        // Should get an error due to foreign key constraint violation
+        assert!(result.is_err(), "Expected error when referencing non-existent dataset");
+
+        // Optionally check that it's specifically a database error
+        match result {
+            Err(e) => {
+                let error_msg = format!("{:?}", e);
+                assert!(
+                    error_msg.contains("foreign key") || error_msg.contains("violates") || error_msg.contains("constraint"),
+                    "Expected foreign key constraint error, got: {}", error_msg
+                );
+            }
+            Ok(_) => panic!("Expected error but got success"),
+        }
+    }
