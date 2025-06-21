@@ -103,20 +103,27 @@ pub async fn plan_add(
     let wip_plan = Plan::from_dataset_id(tx, param.dataset.id).await;
 
     // So what did we get from the DB?
-    let plan: Option<Plan> = match wip_plan {
+    let current_plan: Option<Plan> = match wip_plan {
         Ok(plan) => Some(plan),
         Err(Error::Sqlx(sqlx::Error::RowNotFound)) => None,
         Err(err) => return Err(InternalServerError(err)),
     };
 
     // Validate to make sure the user submitted valid parameters
-    validate_plan_param(param, &plan)?;
+    validate_plan_param(param, &current_plan)?;
+
+    let modified_date: DateTime<Utc> = Utc::now();
 
     // Write our Plan to the DB
-    param
-        .upsert(tx, username, Utc::now())
+    let mut plan: Plan = param
+        .upsert(tx, username, modified_date)
         .await
-        .map_err(to_poem_error)
+        .map_err(to_poem_error)?;
+
+    // Triger the next batch of data products
+    trigger_next_data_product_batch(tx, &mut plan, username, modified_date).await?;
+
+    Ok(plan)
 }
 
 /// Read a Plan Dag from the DB
