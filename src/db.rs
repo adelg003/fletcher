@@ -466,4 +466,159 @@ mod tests {
         // Assert that we got the error we wanted
         assert!(matches!(result, Err(Error::Sqlx(sqlx::Error::RowNotFound))));
     }
+/// Test Insert of new Data Product
+    #[sqlx::test]
+    async fn test_data_product_insert(pool: PgPool) {
+        // First create a dataset since data_product has a foreign key constraint
+        let dataset_param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: Some(json!({"test": "dataset"})),
+        };
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let mut tx = pool.begin().await.unwrap();
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Now create the data product
+        let data_product_param = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Cams,
+            name: "test-data-product".to_string(),
+            version: "1.0.0".to_string(),
+            eager: true,
+            passthrough: Some(json!({"test": "passthrough"})),
+            extra: Some(json!({"test": "extra"})),
+        };
+
+        // Test our function
+        let mut tx = pool.begin().await.unwrap();
+        let data_product = data_product_upsert(&mut tx, dataset.id, &data_product_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Did we get what we wanted?
+        assert_eq!(data_product.id, data_product_param.id);
+        assert_eq!(data_product.compute, data_product_param.compute);
+        assert_eq!(data_product.name, data_product_param.name);
+        assert_eq!(data_product.version, data_product_param.version);
+        assert_eq!(data_product.eager, data_product_param.eager);
+        assert_eq!(data_product.passthrough, data_product_param.passthrough);
+        assert_eq!(data_product.state, State::Waiting);
+        assert_eq!(data_product.run_id, None);
+        assert_eq!(data_product.link, None);
+        assert_eq!(data_product.passback, None);
+        assert_eq!(data_product.modified_by, username.to_string());
+        assert_eq!(data_product.modified_date, trim_to_microseconds(modified_date));
+    }
+
+    /// Test rejection when data product references non-existent dataset
+    #[sqlx::test]
+    async fn test_data_product_insert_nonexistent_dataset(pool: PgPool) {
+        // Create data product with a fake dataset_id
+        let fake_dataset_id = Uuid::new_v4();
+        let data_product_param = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Dbxaas,
+            name: "test-data-product".to_string(),
+            version: "1.0.0".to_string(),
+            eager: false,
+            passthrough: None,
+            extra: None,
+        };
+        let username = "test";
+        let modified_date = Utc::now();
+
+        // Test our function - should fail with foreign key constraint
+        let mut tx = pool.begin().await.unwrap();
+        let result = data_product_upsert(&mut tx, fake_dataset_id, &data_product_param, username, modified_date)
+            .await;
+        tx.rollback().await.unwrap();
+
+        // Should get a database error due to foreign key constraint
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        // Check that it's a database error related to foreign key constraint
+        match error {
+            Error::Database(db_err) => {
+                assert!(db_err.to_string().contains("foreign key constraint"));
+            }
+            _ => panic!("Expected database foreign key constraint error, got: {:?}", error),
+        }
+    }
+
+    /// Test Update of existing Data Product
+    #[sqlx::test]
+    async fn test_data_product_update(pool: PgPool) {
+        // First create a dataset
+        let dataset_param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: Some(json!({"test": "dataset"})),
+        };
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let mut tx = pool.begin().await.unwrap();
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Create initial data product
+        let initial_param = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Cams,
+            name: "initial-name".to_string(),
+            version: "1.0.0".to_string(),
+            eager: true,
+            passthrough: Some(json!({"initial": "data"})),
+            extra: Some(json!({"initial": "extra"})),
+        };
+
+        let mut tx = pool.begin().await.unwrap();
+        let initial_data_product = data_product_upsert(&mut tx, dataset.id, &initial_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Now update with different values (same id, same dataset_id)
+        let updated_param = DataProductParam {
+            id: initial_param.id, // Same ID to trigger update
+            compute: Compute::Dbxaas, // Changed
+            name: "updated-name".to_string(), // Changed
+            version: "2.0.0".to_string(), // Changed
+            eager: false, // Changed
+            passthrough: Some(json!({"updated": "passthrough"})), // Changed
+            extra: Some(json!({"updated": "extra"})), // Changed
+        };
+
+        let updated_modified_date = Utc::now();
+        let updated_username = "updater";
+
+        // Test the update
+        let mut tx = pool.begin().await.unwrap();
+        let updated_data_product = data_product_upsert(&mut tx, dataset.id, &updated_param, updated_username, updated_modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Verify the update worked
+        assert_eq!(updated_data_product.id, updated_param.id);
+        assert_eq!(updated_data_product.compute, updated_param.compute);
+        assert_eq!(updated_data_product.name, updated_param.name);
+        assert_eq!(updated_data_product.version, updated_param.version);
+        assert_eq!(updated_data_product.eager, updated_param.eager);
+        assert_eq!(updated_data_product.passthrough, updated_param.passthrough);
+        assert_eq!(updated_data_product.modified_by, updated_username.to_string());
+        assert_eq!(updated_data_product.modified_date, trim_to_microseconds(updated_modified_date));
+
+        // State should remain the same (not updated by upsert)
+        assert_eq!(updated_data_product.state, initial_data_product.state);
+    }
 }
