@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE\n            data_product\n        SET\n            state = $3,\n            run_id = $4,\n            link = $5,\n            passback = $6,\n            extra = $7,\n            modified_by = $8,\n            modified_date = $9\n        WHERE\n            dataset_id = $1\n            AND data_product_id = $2\n        RETURNING\n            data_product_id AS id,\n            compute AS \"compute: Compute\",\n            name,\n            version,\n            eager,\n            passthrough,\n            state AS \"state: State\",\n            run_id,\n            link,\n            passback,\n            extra,\n            modified_by,\n            modified_date",
+  "query": "UPDATE\n            data_product\n        SET\n            state = $3,\n            run_id = $4,\n            link = $5,\n            passback = $6,\n            modified_by = $7,\n            modified_date = $8\n        WHERE\n            dataset_id = $1\n            AND data_product_id = $2\n        RETURNING\n            data_product_id AS id,\n            compute AS \"compute: Compute\",\n            name,\n            version,\n            eager,\n            passthrough,\n            state AS \"state: State\",\n            run_id,\n            link,\n            passback,\n            extra,\n            modified_by,\n            modified_date",
   "describe": {
     "columns": [
       {
@@ -115,7 +115,6 @@
         "Uuid",
         "Text",
         "Jsonb",
-        "Jsonb",
         "Text",
         "Timestamptz"
       ]
@@ -136,5 +135,5 @@
       false
     ]
   },
-  "hash": "8cb75a6fef27a0f33a60edb8c24e71dd29c0d32c854dfa82e9980e0860872aec"
+  "hash": "bd6bfe4fa476c74c9a4e9e7203092fdd084dba4717686d8b4d74c49e627cb741"
 }
