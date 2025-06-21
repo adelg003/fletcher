@@ -280,7 +280,7 @@ impl PlanParam {
     }
 
     /// Return all Parent / Child dependencies
-    pub fn dependency_edges(&self) -> Vec<Edge> {
+    pub fn edges(&self) -> Vec<Edge> {
         self.dependencies
             .iter()
             .map(|dep: &DependencyParam| (dep.parent_id, dep.child_id, 1))
