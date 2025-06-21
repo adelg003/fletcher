@@ -104,7 +104,7 @@ pub struct Dataset {
 }
 
 /// The Types of compute OaaS can call
-#[derive(Clone, Copy, Enum, Type)]
+#[derive(Clone, Copy, Debug, Enum, PartialEq, Type)]
 #[oai(rename_all = "lowercase")]
 #[sqlx(type_name = "compute", rename_all = "lowercase")]
 pub enum Compute {
@@ -139,7 +139,7 @@ impl fmt::Display for State {
 }
 
 /// Data Product details
-#[derive(Object)]
+#[derive(Debug, Object, PartialEq)]
 pub struct DataProduct {
     pub id: DataProductId,
     pub compute: Compute,
