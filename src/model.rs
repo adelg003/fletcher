@@ -94,7 +94,7 @@ impl Plan {
 }
 
 /// Dataset details
-#[derive(Object)]
+#[derive(Debug, Object, PartialEq)]
 pub struct Dataset {
     pub id: DatasetId,
     pub paused: bool,
