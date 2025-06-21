@@ -10,6 +10,9 @@ use serde_json::Value;
 use sqlx::{Postgres, Transaction, query_as};
 
 /// Insert up Update a Dataset
+// @coderabbit: Please generate a unit test that tests the following function for the following scenarios:
+// can we insert a new dataset?
+// can we update an existing dataset?
 pub async fn dataset_upsert(
     tx: &mut Transaction<'_, Postgres>,
     param: &DatasetParam,
