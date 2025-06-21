@@ -114,7 +114,7 @@ pub async fn plan_add(
 
     // Write our Plan to the DB
     param
-        .upsert(tx, username, &Utc::now())
+        .upsert(tx, username, Utc::now())
         .await
         .map_err(to_poem_error)
 }
@@ -130,7 +130,7 @@ async fn state_update(
     plan: &mut Plan,
     state: &StateParam,
     username: &str,
-    modified_date: &DateTime<Utc>,
+    modified_date: DateTime<Utc>,
 ) -> poem::Result<()> {
     // Pull before we mutably borrow via plan.data_product()
     let dataset_id: DatasetId = plan.dataset.id;
@@ -168,7 +168,7 @@ async fn clear_downstream_nodes(
     plan: &mut Plan,
     states: &Vec<StateParam>,
     username: &str,
-    modified_date: &DateTime<Utc>,
+    modified_date: DateTime<Utc>,
 ) -> poem::Result<()> {
     // Pull before we mutably borrow via plan.data_product()
     let dataset_id: DatasetId = plan.dataset.id;
@@ -214,31 +214,20 @@ async fn clear_downstream_nodes(
     Ok(())
 }
 
-/// Edit the state of a Data Product
-pub async fn states_edit(
+/// Triger the next batch of data products
+async fn trigger_next_data_product_batch(
     tx: &mut Transaction<'_, Postgres>,
-    id: DatasetId,
-    states: &Vec<StateParam>,
+    plan: &mut Plan,
     username: &str,
-) -> poem::Result<Plan> {
-    // Timestamp of the transaction
-    let modified_date: DateTime<Utc> = Utc::now();
-
-    // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
-
-    // Apply our updates to the data products
-    for state in states {
-        state_update(tx, &mut plan, state, username, &modified_date).await?;
-    }
-
-    // Clear all nodes that are downstream of the ones we just updated.
-    clear_downstream_nodes(tx, &mut plan, states, username, &modified_date).await?;
-
+    modified_date: DateTime<Utc>,
+) -> poem::Result<()> {
     // Is the dataset paused? If so, no need to trigger the next data product.
     if plan.dataset.paused {
-        return Ok(plan);
+        return Ok(());
     }
+
+    // Pull before we mutably borrow via plan.data_product()
+    let dataset_id: DatasetId = plan.dataset.id;
 
     // Find all nodes that can be ready to run
     let waiting_ids: HashSet<DataProductId> = plan
@@ -288,11 +277,38 @@ pub async fn states_edit(
 
             // Now record what we triggered the data product in the OaaS Wrapper
             data_product
-                .state_update(tx, id, &new_state, username, &modified_date)
+                .state_update(tx, dataset_id, &new_state, username, modified_date)
                 .await
                 .map_err(to_poem_error)?;
         }
     }
+
+    Ok(())
+}
+
+/// Edit the state of a Data Product
+pub async fn states_edit(
+    tx: &mut Transaction<'_, Postgres>,
+    id: DatasetId,
+    states: &Vec<StateParam>,
+    username: &str,
+) -> poem::Result<Plan> {
+    // Timestamp of the transaction
+    let modified_date: DateTime<Utc> = Utc::now();
+
+    // Pull the Plan so we know what we are working with
+    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+
+    // Apply our updates to the data products
+    for state in states {
+        state_update(tx, &mut plan, state, username, modified_date).await?;
+    }
+
+    // Clear all nodes that are downstream of the ones we just updated.
+    clear_downstream_nodes(tx, &mut plan, states, username, modified_date).await?;
+
+    // Triger the next batch of data products
+    trigger_next_data_product_batch(tx, &mut plan, username, modified_date).await?;
 
     Ok(plan)
 }

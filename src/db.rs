@@ -14,7 +14,7 @@ pub async fn dataset_upsert(
     tx: &mut Transaction<'_, Postgres>,
     param: &DatasetParam,
     username: &str,
-    modified_date: &DateTime<Utc>,
+    modified_date: DateTime<Utc>,
 ) -> Result<Dataset> {
     let dataset = query_as!(
         Dataset,
@@ -86,7 +86,7 @@ pub async fn data_product_upsert(
     dataset_id: DatasetId,
     param: &DataProductParam,
     username: &str,
-    modified_date: &DateTime<Utc>,
+    modified_date: DateTime<Utc>,
 ) -> Result<DataProduct> {
     let data_product = query_as!(
         DataProduct,
@@ -171,7 +171,7 @@ pub async fn state_update(
     dataset_id: DatasetId,
     param: &StateParam,
     username: &str,
-    modified_date: &DateTime<Utc>,
+    modified_date: DateTime<Utc>,
 ) -> Result<DataProduct> {
     let data_product = query_as!(
         DataProduct,
@@ -257,7 +257,7 @@ pub async fn dependency_upsert(
     dataset_id: DatasetId,
     param: &DependencyParam,
     username: &str,
-    modified_date: &DateTime<Utc>,
+    modified_date: DateTime<Utc>,
 ) -> Result<Dependency> {
     let dependency = query_as!(
         Dependency,

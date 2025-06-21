@@ -164,7 +164,7 @@ impl DataProduct {
         dataset_id: DatasetId,
         state: &StateParam,
         username: &str,
-        modified_date: &DateTime<Utc>,
+        modified_date: DateTime<Utc>,
     ) -> Result<()> {
         *self = state_update(tx, dataset_id, state, username, modified_date).await?;
         Ok(())
@@ -195,7 +195,7 @@ impl PlanParam {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         username: &str,
-        modified_date: &DateTime<Utc>,
+        modified_date: DateTime<Utc>,
     ) -> Result<Plan> {
         let dataset_id: DatasetId = self.dataset.id;
 
