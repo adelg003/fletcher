@@ -316,7 +316,6 @@ pub struct StateParam {
     pub run_id: Option<Uuid>,
     pub link: Option<String>,
     pub passback: Option<Value>,
-    pub extra: Option<Value>,
 }
 
 impl From<&mut DataProduct> for StateParam {
@@ -327,7 +326,6 @@ impl From<&mut DataProduct> for StateParam {
             run_id: data_product.run_id,
             link: data_product.link.clone(),
             passback: data_product.passback.clone(),
-            extra: data_product.extra.clone(),
         }
     }
 }

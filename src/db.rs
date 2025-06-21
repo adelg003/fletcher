@@ -182,9 +182,8 @@ pub async fn state_update(
             run_id = $4,
             link = $5,
             passback = $6,
-            extra = $7,
-            modified_by = $8,
-            modified_date = $9
+            modified_by = $7,
+            modified_date = $8
         WHERE
             dataset_id = $1
             AND data_product_id = $2
@@ -208,7 +207,6 @@ pub async fn state_update(
         param.run_id,
         param.link,
         param.passback,
-        param.extra,
         username,
         modified_date,
     )
@@ -652,5 +650,133 @@ mod tests {
                 modified_date: trim_to_microseconds(updated_modified_date),
             },
         );
+    }
+
+    /// Test successful update of Data Product State
+    #[sqlx::test]
+    async fn test_state_update_success(pool: PgPool) {
+        // First create a dataset
+        let dataset_param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: Some(json!({"test": "dataset"})),
+        };
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let mut tx = pool.begin().await.unwrap();
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Create initial data product
+        let data_product_param = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Cams,
+            name: "test-data-product".to_string(),
+            version: "1.0.0".to_string(),
+            eager: true,
+            passthrough: Some(json!({"test": "passthrough"})),
+            extra: Some(json!({"test": "extra"})),
+        };
+
+        let mut tx = pool.begin().await.unwrap();
+        let initial_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        // Now update the state
+        let state_param = StateParam {
+            id: data_product_param.id,
+            state: State::Running,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("https://example.com/run".to_string()),
+            passback: Some(json!({"status": "running"})),
+        };
+
+        let updated_modified_date = Utc::now();
+        let updated_username = "state_updater";
+
+        // Test the state update
+        let mut tx = pool.begin().await.unwrap();
+        let updated_data_product = state_update(
+            &mut tx,
+            dataset.id,
+            &state_param,
+            updated_username,
+            updated_modified_date,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        // Verify the state update worked
+        assert_eq!(
+            updated_data_product,
+            DataProduct {
+                id: initial_data_product.id,
+                compute: initial_data_product.compute,
+                name: initial_data_product.name,
+                version: initial_data_product.version,
+                eager: initial_data_product.eager,
+                passthrough: initial_data_product.passthrough,
+                state: state_param.state,
+                run_id: state_param.run_id,
+                link: state_param.link,
+                passback: state_param.passback,
+                extra: initial_data_product.extra,
+                modified_by: updated_username.to_string(),
+                modified_date: trim_to_microseconds(updated_modified_date),
+            }
+        );
+    }
+
+    /// Test rejection when updating state of non-existent data product
+    #[sqlx::test]
+    async fn test_state_update_nonexistent_data_product(pool: PgPool) {
+        // Create a dataset so dataset exists but no data product
+        let dataset_param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: Some(json!({"test": "dataset"})),
+        };
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let mut tx = pool.begin().await.unwrap();
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Try to update state for a non-existent data product
+        let fake_data_product_id = Uuid::new_v4();
+        let state_param = StateParam {
+            id: fake_data_product_id,
+            state: State::Success,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("https://example.com/completed".to_string()),
+            passback: Some(json!({"status": "complete"})),
+        };
+
+        // Test state update - should fail since data product doesn't exist
+        let mut tx = pool.begin().await.unwrap();
+        let result = state_update(&mut tx, dataset.id, &state_param, username, modified_date).await;
+        tx.rollback().await.unwrap();
+
+        // Should get a RowNotFound error since the data product doesn't exist
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
     }
 }
