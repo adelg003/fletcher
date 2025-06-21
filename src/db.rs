@@ -451,3 +451,18 @@ mod tests {
         );
     }
 }
+
+/// Test Select of non-existent Dataset returns error
+    #[sqlx::test]
+    async fn test_dataset_select_nonexistent(pool: PgPool) {
+        // Generate a random UUID that doesn't exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+
+        // Test that dataset_select returns an error for non-existent dataset
+        let mut tx = pool.begin().await.unwrap();
+        let result = dataset_select(&mut tx, nonexistent_dataset_id).await;
+        tx.rollback().await.unwrap();
+
+        // Assert that we got an error
+        assert!(result.is_err(), "Expected error when selecting non-existent dataset");
+    }
