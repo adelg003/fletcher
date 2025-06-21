@@ -56,7 +56,7 @@ pub async fn dataset_upsert(
 
 /// Pull a Dataset
 // @coderabbitai: Please generate a unit test that tests the following function for the following scenarios:
-// - can we return a dataset that is in the DB?
+// - Check to make sure we get an error if a non-existent dataset is selected.
 pub async fn dataset_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: DatasetId,
@@ -83,6 +83,10 @@ pub async fn dataset_select(
 }
 
 /// Insert or Update a Data Product
+// @coderabbitai: Please generate a unit test that tests the following function for the following scenarios:
+// - can we insert a new data product?
+// - can we update an existing data product?
+// - do we get rejected if a data products has a reference to non-existent dataset?
 pub async fn data_product_upsert(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: DatasetId,
@@ -168,6 +172,9 @@ pub async fn data_product_upsert(
 }
 
 /// Update the State of a Data Product
+// @coderabbitai: Please generate a unit test that tests the following function for the following scenarios:
+// - can we update a data products state?
+// - do we get rejected if there is no data product?
 pub async fn state_update(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: DatasetId,
@@ -221,6 +228,8 @@ pub async fn state_update(
 }
 
 /// Retrieve all Data Products for a Dataset
+// @coderabbitai: Please generate a unit test that tests the following function for the following scenarios:
+// - Do we get all data products for a dataset?
 pub async fn data_products_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: DatasetId,
@@ -254,6 +263,12 @@ pub async fn data_products_by_dataset_select(
 }
 
 /// Upsert a new Dependency between Data Products
+// @coderabbitai: Please generate a unit test that tests the following function for the following scenarios:
+// - Can we add a dependence?
+// - Can we update a dependence?
+// - Do we get rejected if the dependency parent refers to a non-existent data product?
+// - Do we get rejected if the dependency child refers to a non-existent data product?
+// - Do we get rejected if a dependency has the same data product for both the parent and child?
 pub async fn dependency_upsert(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: DatasetId,
@@ -302,6 +317,8 @@ pub async fn dependency_upsert(
 }
 
 /// Retrieve all Dependencies for a Dataset
+// @coderabbitai: Please generate a unit test that tests the following function for the following scenarios:
+// - Do we get all dependencies for a dataset?
 pub async fn dependencies_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: DatasetId,
@@ -329,7 +346,6 @@ pub async fn dependencies_by_dataset_select(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Dataset, DatasetParam};
     use chrono::Timelike;
     use pretty_assertions::assert_eq;
     use serde_json::json;
