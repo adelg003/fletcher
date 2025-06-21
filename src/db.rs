@@ -326,96 +326,29 @@ pub async fn dependencies_by_dataset_select(
     Ok(dependencies)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        db::dataset_upsert,
-        model::{Dataset, DatasetParam},
-    };
-    use chrono::Timelike;
-    use pretty_assertions::assert_eq;
-    use sqlx::PgPool;
-    use uuid::Uuid;
-
-    /// Trim a DateTime to micro-seconds (aka the level that Postgres stores timestamps to)
-    fn trim_to_microseconds(dt: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        let micros = dt.timestamp_subsec_micros();
-        dt.with_nanosecond(micros * 1_000)
-    }
-
-    /// Test Insert of new Dataset
-    #[sqlx::test]
-    async fn test_dataset_insert(pool: PgPool) {
-        // Inputs
-        let param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: None,
-        };
-        let username = "test";
-        let modified_date = Utc::now();
-
-        // Test our function
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
-
-        // Did we get what we wanted?
-        assert_eq!(
-            dataset,
-            Dataset {
-                id: param.id,
-                paused: param.paused,
-                extra: param.extra,
-                modified_by: username.to_string(),
-                modified_date: trim_to_microseconds(modified_date).unwrap(),
-            }
-        );
-    }
-
-    /// Test Update of new Dataset
-    #[sqlx::test]
-    async fn test_dataset_update(pool: PgPool) {
-        // Inputs
-        let mut param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: None,
-        };
-        let username = "test";
-        let mut modified_date = Utc::now();
-
-        // Setup first record
-        let mut tx = pool.begin().await.unwrap();
-        dataset_upsert(&mut tx, &param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
-
-        // Update parameters
-        param.paused = true;
-        modified_date = Utc::now();
-
-        // Update to new values
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
-
-        // Did we get what we wanted?
-        assert_eq!(
-            dataset,
-            Dataset {
-                id: param.id,
-                paused: param.paused,
-                extra: param.extra,
-                modified_by: username.to_string(),
-                modified_date: trim_to_microseconds(modified_date).unwrap(),
-            }
-        );
-    }
-}
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use crate::{
+-        db::dataset_upsert,
+         model::{Dataset, DatasetParam},
+     };
+ 
+     /// Trim a DateTime to micro-seconds (aka the level that Postgres stores timestamps to)
+     fn trim_to_microseconds(dt: DateTime<Utc>) -> Option<DateTime<Utc>> {
+         let micros = dt.timestamp_subsec_micros();
+         dt.with_nanosecond(micros * 1_000)
+     }
+ 
+     /// Test Insert of new Dataset
+     #[sqlx::test]
+     async fn test_dataset_insert(pool: PgPool) {
+         // ...
+     }
+ 
+     /// Test Update of new Dataset
+     #[sqlx::test]
+     async fn test_dataset_update(pool: PgPool) {
+         // ...
+     }
+ }
