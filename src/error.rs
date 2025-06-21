@@ -1,4 +1,4 @@
-use crate::model::DataProductId;
+use crate::model::{DataProductId, State};
 use petgraph::graph::GraphError;
 
 /// Crate-wide result alias.
@@ -8,12 +8,20 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The dependency graph contains a cycle (not a valid DAG)
+    #[error("The requested state for {0} is invalid: {1}")]
+    BadState(DataProductId, State),
+
+    /// The dependency graph contains a cycle (not a valid DAG)
     #[error("Graph is cyclical")]
     Cyclical,
 
+    /// Data Product is locked
+    #[error("Data product is locked: {0}")]
+    Disabled(DataProductId),
+
     /// Duplicate data products in parameter
     #[error("Duplicate data-product id in parameter: {0}")]
-    DuplicateDataProduct(DataProductId),
+    Duplicate(DataProductId),
 
     /// Duplicate dependencies in parameter
     #[error("Duplicate dependency in parameter: {0} -> {1}")]
@@ -25,7 +33,7 @@ pub enum Error {
 
     /// Data Product not found
     #[error("Data product not found for: {0}")]
-    MissingDataProduct(DataProductId),
+    Missing(DataProductId),
 
     /// Errors from SQLx
     #[error("Error from SQLx: {0}")]

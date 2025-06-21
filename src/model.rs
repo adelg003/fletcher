@@ -1,19 +1,27 @@
 use crate::{
-    db::{plan_select, plan_upsert},
+    dag::Dag,
+    db::{
+        data_product_upsert, data_products_by_dataset_select, dataset_select, dataset_upsert,
+        dependencies_by_dataset_select, dependency_upsert, state_update,
+    },
     error::Result,
 };
 use chrono::{DateTime, Utc};
+use petgraph::graph::DiGraph;
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, Type};
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt};
 use uuid::Uuid;
 
 /// Type for Dataset ID
 pub type DatasetId = Uuid;
 
 /// Type for Data Product ID
-pub type DataProductId = String;
+pub type DataProductId = Uuid;
+
+/// Edge of the graph
+pub type Edge = (DataProductId, DataProductId, u32);
 
 /// Plan Details
 #[derive(Object)]
@@ -26,28 +34,62 @@ pub struct Plan {
 impl Plan {
     /// Pull the Plan for a Dataset
     pub async fn from_dataset_id(
-        id: DatasetId,
         tx: &mut Transaction<'_, Postgres>,
+        id: DatasetId,
     ) -> Result<Self> {
-        plan_select(tx, id).await
+        // Pull data elements
+        let dataset: Dataset = dataset_select(tx, id).await?;
+        let data_products: Vec<DataProduct> = data_products_by_dataset_select(tx, id).await?;
+        let dependencies: Vec<Dependency> = dependencies_by_dataset_select(tx, id).await?;
+
+        Ok(Plan {
+            dataset,
+            data_products,
+            dependencies,
+        })
     }
 
     /// Return all Data Product IDs
     pub fn data_product_ids(&self) -> Vec<DataProductId> {
         self.data_products
             .iter()
-            .map(|data_product: &DataProduct| data_product.id.clone())
+            .map(|dp: &DataProduct| dp.id)
             .collect()
     }
 
     /// Return all Parent / Child dependencies
-    pub fn dependency_edges(&self) -> Vec<(DataProductId, DataProductId, u32)> {
+    pub fn edges(&self) -> Vec<Edge> {
         self.dependencies
             .iter()
-            .map(|dependency: &Dependency| {
-                (dependency.parent_id.clone(), dependency.child_id.clone(), 1)
-            })
+            .map(|dep: &Dependency| (dep.parent_id, dep.child_id, 1))
             .collect()
+    }
+
+    /// Pull a single Data Product
+    pub fn data_product(&self, id: DataProductId) -> Option<&DataProduct> {
+        self.data_products
+            .iter()
+            .find(|dp: &&DataProduct| dp.id == id)
+    }
+
+    /// Pull a single Data Product in a mutable state
+    pub fn data_product_mut(&mut self, id: DataProductId) -> Option<&mut DataProduct> {
+        self.data_products
+            .iter_mut()
+            .find(|dp: &&mut DataProduct| dp.id == id)
+    }
+
+    /// Return a graph representation of the plan
+    pub fn to_dag(&self) -> Result<DiGraph<DataProductId, u32>> {
+        // Pull Data Product details
+        let data_product_ids: HashSet<DataProductId> =
+            self.data_product_ids().into_iter().collect();
+
+        // How do the data products relate?
+        let edges: HashSet<Edge> = self.edges().into_iter().collect();
+
+        // Build the dag
+        DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges)
     }
 }
 
@@ -71,16 +113,29 @@ pub enum Compute {
 }
 
 /// States a Data Product can be in
-#[derive(Clone, Copy, Enum, Type)]
+#[derive(Clone, Copy, Debug, Enum, PartialEq, Type)]
 #[oai(rename_all = "lowercase")]
 #[sqlx(type_name = "state", rename_all = "lowercase")]
 pub enum State {
-    Waiting,
+    Disabled,
+    Failed,
     Queued,
     Running,
     Success,
-    Failed,
-    Disabled,
+    Waiting,
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            State::Disabled => write!(f, "disabled"),
+            State::Failed => write!(f, "failed"),
+            State::Queued => write!(f, "queued"),
+            State::Running => write!(f, "running"),
+            State::Success => write!(f, "success"),
+            State::Waiting => write!(f, "waiting"),
+        }
+    }
 }
 
 /// Data Product details
@@ -99,6 +154,21 @@ pub struct DataProduct {
     pub extra: Option<Value>,
     pub modified_by: String,
     pub modified_date: DateTime<Utc>,
+}
+
+impl DataProduct {
+    /// Update the State of a Data Product inplace
+    pub async fn state_update(
+        &mut self,
+        tx: &mut Transaction<'_, Postgres>,
+        dataset_id: DatasetId,
+        state: &StateParam,
+        username: &str,
+        modified_date: DateTime<Utc>,
+    ) -> Result<()> {
+        *self = state_update(tx, dataset_id, state, username, modified_date).await?;
+        Ok(())
+    }
 }
 
 /// Dependency from one Data Product to another Data Product
@@ -121,8 +191,42 @@ pub struct PlanParam {
 
 impl PlanParam {
     /// Write the Plan to the DB
-    pub async fn upsert(self, tx: &mut Transaction<'_, Postgres>, username: &str) -> Result<Plan> {
-        plan_upsert(tx, self, username).await
+    pub async fn upsert(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        username: &str,
+        modified_date: DateTime<Utc>,
+    ) -> Result<Plan> {
+        let dataset_id: DatasetId = self.dataset.id;
+
+        // Write our data to the DB for a Dataset
+        let dataset: Dataset = dataset_upsert(tx, &self.dataset, username, modified_date).await?;
+
+        // Write our data to the DB for Data Products
+        let mut data_products: Vec<DataProduct> = Vec::new();
+        for data_product_param in &self.data_products {
+            let data_product: DataProduct =
+                data_product_upsert(tx, dataset_id, data_product_param, username, modified_date)
+                    .await?;
+
+            data_products.push(data_product);
+        }
+
+        // Write our data to the DB for Dependencies
+        let mut dependencies: Vec<Dependency> = Vec::new();
+        for dependency_param in &self.dependencies {
+            let dependency: Dependency =
+                dependency_upsert(tx, dataset_id, dependency_param, username, modified_date)
+                    .await?;
+
+            dependencies.push(dependency);
+        }
+
+        Ok(Plan {
+            dataset,
+            data_products,
+            dependencies,
+        })
     }
 
     /// Check for duplicate Data Products
@@ -131,7 +235,7 @@ impl PlanParam {
 
         for data_product in &self.data_products {
             if !seen.insert(&data_product.id) {
-                return Some(data_product.id.clone());
+                return Some(data_product.id);
             }
         }
 
@@ -143,8 +247,8 @@ impl PlanParam {
         let mut seen = HashSet::new();
 
         for dependency in &self.dependencies {
-            if !seen.insert((&dependency.parent_id, &dependency.child_id)) {
-                return Some((dependency.parent_id.clone(), dependency.child_id.clone()));
+            if !seen.insert((dependency.parent_id, dependency.child_id)) {
+                return Some((dependency.parent_id, dependency.child_id));
             }
         }
 
@@ -155,7 +259,7 @@ impl PlanParam {
     pub fn data_product_ids(&self) -> Vec<DataProductId> {
         self.data_products
             .iter()
-            .map(|data_product: &DataProductParam| data_product.id.clone())
+            .map(|dp: &DataProductParam| dp.id)
             .collect()
     }
 
@@ -163,7 +267,7 @@ impl PlanParam {
     pub fn parent_ids(&self) -> Vec<DataProductId> {
         self.dependencies
             .iter()
-            .map(|dependencies: &DependencyParam| dependencies.parent_id.clone())
+            .map(|dep: &DependencyParam| dep.parent_id)
             .collect()
     }
 
@@ -171,17 +275,15 @@ impl PlanParam {
     pub fn child_ids(&self) -> Vec<DataProductId> {
         self.dependencies
             .iter()
-            .map(|dependencies: &DependencyParam| dependencies.child_id.clone())
+            .map(|dep: &DependencyParam| dep.child_id)
             .collect()
     }
 
     /// Return all Parent / Child dependencies
-    pub fn dependency_edges(&self) -> Vec<(DataProductId, DataProductId, u32)> {
+    pub fn dependency_edges(&self) -> Vec<Edge> {
         self.dependencies
             .iter()
-            .map(|dependency: &DependencyParam| {
-                (dependency.parent_id.clone(), dependency.child_id.clone(), 1)
-            })
+            .map(|dep: &DependencyParam| (dep.parent_id, dep.child_id, 1))
             .collect()
     }
 }
@@ -207,14 +309,27 @@ pub struct DataProductParam {
 }
 
 /// Input parameters for State
+#[derive(Object)]
 pub struct StateParam {
-    pub dataset_id: DatasetId,
-    pub data_product_id: DataProductId,
+    pub id: DataProductId,
     pub state: State,
     pub run_id: Option<Uuid>,
     pub link: Option<String>,
     pub passback: Option<Value>,
     pub extra: Option<Value>,
+}
+
+impl From<&mut DataProduct> for StateParam {
+    fn from(data_product: &mut DataProduct) -> Self {
+        StateParam {
+            id: data_product.id,
+            state: data_product.state,
+            run_id: data_product.run_id,
+            link: data_product.link.clone(),
+            passback: data_product.passback.clone(),
+            extra: data_product.extra.clone(),
+        }
+    }
 }
 
 /// Input for adding a Dependency

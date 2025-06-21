@@ -28,7 +28,7 @@ CREATE TYPE state AS ENUM (
 -- Data Product Table
 CREATE TABLE data_product (
   dataset_id UUID NOT NULL,
-  data_product_id TEXT NOT NULL,
+  data_product_id UUID NOT NULL,
   compute compute NOT NULL,
   name TEXT NOT NULL,
   version TEXT NOT NULL,
@@ -48,8 +48,8 @@ CREATE TABLE data_product (
 -- Dependencies between Data Products Table
 CREATE TABLE dependency (
   dataset_id UUID NOT NULL,
-  parent_id TEXT NOT NULL,
-  child_id TEXT NOT NULL,
+  parent_id UUID NOT NULL,
+  child_id UUID NOT NULL,
   extra JSONB,
   modified_by TEXT NOT NULL,
   modified_date TIMESTAMPTZ NOT NULL,

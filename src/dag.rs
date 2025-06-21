@@ -1,7 +1,9 @@
 use crate::error::{Error, Result};
 use petgraph::{
+    Direction,
     algo::is_cyclic_directed,
     graph::{DiGraph, GraphError, NodeIndex},
+    visit::Dfs,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -15,11 +17,23 @@ pub trait Dag<N, E> {
     fn build_dag(nodes: HashSet<N>, edges: HashSet<(N, N, E)>) -> Result<Self>
     where
         Self: Sized;
+
+    /// Check if a directed graph is also a dag
+    fn validate_acyclic(&self) -> Result<()>;
+
+    /// Find the index in a graph for a node value
+    fn find_node_index(&self, node: N) -> Option<NodeIndex>;
+
+    /// Return all nodes downstream of a given node.
+    fn downstream_nodes(&self, start_node: N) -> HashSet<N>;
+
+    /// Return nodes that lead into the target node
+    fn parent_nodes(&self, target: N) -> HashSet<N>;
 }
 
 impl<N, E> Dag<N, E> for DiGraph<N, E>
 where
-    N: Eq + Hash + Clone,
+    N: Eq + Hash + Copy,
     E: Eq + Hash,
 {
     fn build_dag(nodes: HashSet<N>, edges: HashSet<(N, N, E)>) -> Result<Self> {
@@ -29,7 +43,7 @@ where
 
         // Add Nodes to graph and map the nodes index to its value
         for node in nodes {
-            let idx: NodeIndex = graph.try_add_node(node.clone())?;
+            let idx: NodeIndex = graph.try_add_node(node)?;
             node_map.insert(node, idx);
         }
 
@@ -50,18 +64,62 @@ where
         }
 
         // Is our graph a valid dag (aka not cyclical)?
-        validate_acyclic(&graph)?;
+        graph.validate_acyclic()?;
 
         Ok(graph)
     }
-}
 
-/// Check if a directed graph is also a dag
-fn validate_acyclic<N, E>(graph: &DiGraph<N, E>) -> Result<()> {
-    // Is our graph a valid dag (aka not cyclical)?
-    if is_cyclic_directed(graph) {
-        Err(Error::Cyclical)
-    } else {
-        Ok(())
+    fn validate_acyclic(&self) -> Result<()> {
+        // Is our graph a valid dag (aka not cyclical)?
+        if is_cyclic_directed(self) {
+            Err(Error::Cyclical)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn find_node_index(&self, node: N) -> Option<NodeIndex> {
+        self.node_indices()
+            .find(|idx: &NodeIndex| self.node_weight(*idx) == Some(&node))
+    }
+
+    fn downstream_nodes(&self, start_node: N) -> HashSet<N> {
+        // Nodes we have already seen
+        let mut visited = HashSet::<N>::new();
+
+        // Find the index of the node we want to start with
+        let start_idx: NodeIndex = match self.find_node_index(start_node) {
+            Some(start_idx) => start_idx,
+            None => return visited,
+        };
+
+        // Lets iterate over all the downstream nodes via a depth first search (DFS)
+        let mut dfs = Dfs::new(self, start_idx);
+        while let Some(idx) = dfs.next(self) {
+            // Skip the first node
+            if idx != start_idx {
+                // Add node weight to ones we have seen
+                if let Some(node) = self.node_weight(idx) {
+                    visited.insert(*node);
+                }
+            }
+        }
+
+        // Return list of all nodes we have visited on our walk down the graph
+        visited
+    }
+
+    fn parent_nodes(&self, target_node: N) -> HashSet<N> {
+        // Find where our target lives in the graph
+        let target_idx: NodeIndex = match self.find_node_index(target_node) {
+            Some(target_idx) => target_idx,
+            None => return HashSet::new(),
+        };
+
+        // Return the "incoming neighbors" (aka parents) for the node
+        self.neighbors_directed(target_idx, Direction::Incoming)
+            .filter_map(|parent_idx: NodeIndex| self.node_weight(parent_idx))
+            .copied()
+            .collect()
     }
 }
