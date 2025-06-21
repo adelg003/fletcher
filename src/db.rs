@@ -329,10 +329,7 @@ pub async fn dependencies_by_dataset_select(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        db::dataset_upsert,
-        model::{Dataset, DatasetParam},
-    };
+    use crate::model::{Dataset, DatasetParam};
     use chrono::Timelike;
     use pretty_assertions::assert_eq;
     use sqlx::PgPool;
