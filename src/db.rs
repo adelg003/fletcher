@@ -332,6 +332,7 @@ mod tests {
     use crate::model::{Dataset, DatasetParam};
     use chrono::Timelike;
     use pretty_assertions::assert_eq;
+    use serde_json::json;
     use sqlx::PgPool;
     use uuid::Uuid;
 
@@ -348,7 +349,7 @@ mod tests {
         let param = DatasetParam {
             id: Uuid::new_v4(),
             paused: false,
-            extra: None,
+            extra: Some(json!({"test": "data"})),
         };
         let username = "test";
         let modified_date = Utc::now();
@@ -406,6 +407,43 @@ mod tests {
         // Did we get what we wanted?
         assert_eq!(
             dataset,
+            Dataset {
+                id: param.id,
+                paused: param.paused,
+                extra: param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date).unwrap(),
+            }
+        );
+    }
+    /// Test Select of existing Dataset
+    #[sqlx::test]
+    async fn test_dataset_select(pool: PgPool) {
+        // Inputs
+        let param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: true,
+            extra: Some(json!({"test": "data"})),
+        };
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // First insert a dataset to select later
+        let mut tx = pool.begin().await.unwrap();
+        let inserted_dataset = dataset_upsert(&mut tx, &param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Now test dataset_select
+        let mut tx = pool.begin().await.unwrap();
+        let selected_dataset = dataset_select(&mut tx, param.id).await.unwrap();
+        tx.rollback().await.unwrap();
+
+        // Did we get what we wanted?
+        assert_eq!(selected_dataset, inserted_dataset);
+        assert_eq!(
+            selected_dataset,
             Dataset {
                 id: param.id,
                 paused: param.paused,
