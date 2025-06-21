@@ -332,6 +332,7 @@ mod tests {
     use crate::model::{Dataset, DatasetParam};
     use chrono::Timelike;
     use pretty_assertions::assert_eq;
+    use serde_json::json;
     use sqlx::PgPool;
     use uuid::Uuid;
 
@@ -348,7 +349,7 @@ mod tests {
         let param = DatasetParam {
             id: Uuid::new_v4(),
             paused: false,
-            extra: None,
+            extra: Some(json!({"test": "data"})),
         };
         let username = "test";
         let modified_date = Utc::now();
