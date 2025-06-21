@@ -466,3 +466,160 @@ mod tests {
         // Assert that we got an error
         assert!(result.is_err(), "Expected error when selecting non-existent dataset");
     }
+/// Test retrieving all data products for a dataset
+    #[sqlx::test]
+    async fn test_data_products_by_dataset_select(pool: PgPool) {
+        // Create a dataset first
+        let dataset_param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: None,
+        };
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let mut tx = pool.begin().await.unwrap();
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Create multiple data products for this dataset
+        let data_product_param1 = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Sql,
+            name: "Test Product 1".to_string(),
+            version: "1.0.0".to_string(),
+            eager: false,
+            passthrough: false,
+            extra: Some(json!({"test": "data1"})),
+        };
+        let data_product_param2 = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Python,
+            name: "Test Product 2".to_string(),
+            version: "2.0.0".to_string(),
+            eager: true,
+            passthrough: true,
+            extra: Some(json!({"test": "data2"})),
+        };
+
+        // Insert both data products
+        let mut tx = pool.begin().await.unwrap();
+        let inserted_product1 = data_product_upsert(&mut tx, dataset.id, &data_product_param1, username, modified_date)
+            .await
+            .unwrap();
+        let inserted_product2 = data_product_upsert(&mut tx, dataset.id, &data_product_param2, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Test retrieving all data products for the dataset
+        let mut tx = pool.begin().await.unwrap();
+        let mut retrieved_products = data_products_by_dataset_select(&mut tx, dataset.id)
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+
+        assert_eq!(retrieved_products.len(), 2);
+        // Sort by id for deterministic comparison
+        let mut expected = vec![inserted_product1, inserted_product2];
+        expected.sort_by_key(|p| p.id);
+        retrieved_products.sort_by_key(|p| p.id);
+        assert_eq!(retrieved_products, expected);
+    }
+
+    /// Test retrieving data products for dataset with no data products (empty result)
+    #[sqlx::test]
+    async fn test_data_products_by_dataset_select_empty(pool: PgPool) {
+        // Create a dataset with no data products
+        let dataset_param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: None,
+        };
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let mut tx = pool.begin().await.unwrap();
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Test retrieving data products for dataset with no data products
+        let mut tx = pool.begin().await.unwrap();
+        let retrieved_products = data_products_by_dataset_select(&mut tx, dataset.id)
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+
+        assert_eq!(retrieved_products.len(), 0);
+        assert!(retrieved_products.is_empty());
+    }
+
+    /// Test that data_products_by_dataset_select only returns products for the specified dataset
+    #[sqlx::test]
+    async fn test_data_products_by_dataset_select_isolation(pool: PgPool) {
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create two different datasets
+        let dataset_param1 = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: None,
+        };
+        let dataset_param2 = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: false,
+            extra: None,
+        };
+        let mut tx = pool.begin().await.unwrap();
+        let dataset1 = dataset_upsert(&mut tx, &dataset_param1, username, modified_date)
+            .await
+            .unwrap();
+        let dataset2 = dataset_upsert(&mut tx, &dataset_param2, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Insert one product into each dataset
+        let data_product_param1 = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Sql,
+            name: "Dataset1 Product".to_string(),
+            version: "1.0.0".to_string(),
+            eager: false,
+            passthrough: false,
+            extra: None,
+        };
+        let data_product_param2 = DataProductParam {
+            id: Uuid::new_v4(),
+            compute: Compute::Python,
+            name: "Dataset2 Product".to_string(),
+            version: "1.0.0".to_string(),
+            eager: false,
+            passthrough: false,
+            extra: None,
+        };
+        let mut tx = pool.begin().await.unwrap();
+        let inserted1 = data_product_upsert(&mut tx, dataset1.id, &data_product_param1, username, modified_date)
+            .await
+            .unwrap();
+        let _ = data_product_upsert(&mut tx, dataset2.id, &data_product_param2, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Only dataset1's products should be returned
+        let mut tx = pool.begin().await.unwrap();
+        let result = data_products_by_dataset_select(&mut tx, dataset1.id)
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], inserted1);
+        assert_eq!(result[0].name, "Dataset1 Product");
+    }
