@@ -415,4 +415,43 @@ mod tests {
             }
         );
     }
+/// Test Select of existing Dataset
+    #[sqlx::test]
+    async fn test_dataset_select(pool: PgPool) {
+        // Inputs
+        let param = DatasetParam {
+            id: Uuid::new_v4(),
+            paused: true,
+            extra: Some(serde_json::json!({"test": "data"})),
+        };
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // First insert a dataset to select later
+        let mut tx = pool.begin().await.unwrap();
+        let inserted_dataset = dataset_upsert(&mut tx, &param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Now test dataset_select
+        let mut tx = pool.begin().await.unwrap();
+        let selected_dataset = dataset_select(&mut tx, param.id)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Did we get what we wanted?
+        assert_eq!(selected_dataset, inserted_dataset);
+        assert_eq!(
+            selected_dataset,
+            Dataset {
+                id: param.id,
+                paused: param.paused,
+                extra: param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date).unwrap(),
+            }
+        );
+    }
 }
