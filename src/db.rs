@@ -438,7 +438,7 @@ mod tests {
         // Now test dataset_select
         let mut tx = pool.begin().await.unwrap();
         let selected_dataset = dataset_select(&mut tx, param.id).await.unwrap();
-        tx.commit().await.unwrap();
+        tx.rollback().await.unwrap();
 
         // Did we get what we wanted?
         assert_eq!(selected_dataset, inserted_dataset);
