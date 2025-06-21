@@ -466,3 +466,83 @@ mod tests {
         // Assert that we got an error
         assert!(result.is_err(), "Expected error when selecting non-existent dataset");
     }
+/// Test Select of all Dependencies for a Dataset
+    #[sqlx::test]
+    async fn test_dependencies_by_dataset_select(pool: PgPool) {
+        // Inputs
+        let dataset_id = Uuid::new_v4();
+        let parent_id = Uuid::new_v4();
+        let child_id = Uuid::new_v4();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // First, create a dataset
+        let dataset_param = DatasetParam {
+            id: dataset_id,
+            paused: false,
+            extra: None,
+        };
+        let mut tx = pool.begin().await.unwrap();
+        dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Create parent data product
+        let parent_param = DataProductParam {
+            id: parent_id,
+            compute: Compute::Never,
+            name: "parent_product".to_string(),
+            version: "1.0".to_string(),
+            eager: false,
+            passthrough: false,
+            extra: Some(json!({"type": "parent"})),
+        };
+        let mut tx = pool.begin().await.unwrap();
+        data_product_upsert(&mut tx, dataset_id, &parent_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Create child data product
+        let child_param = DataProductParam {
+            id: child_id,
+            compute: Compute::Never,
+            name: "child_product".to_string(),
+            version: "1.0".to_string(),
+            eager: false,
+            passthrough: false,
+            extra: Some(json!({"type": "child"})),
+        };
+        let mut tx = pool.begin().await.unwrap();
+        data_product_upsert(&mut tx, dataset_id, &child_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Create dependency between parent and child
+        let dependency_param = DependencyParam {
+            parent_id,
+            child_id,
+            extra: Some(json!({"relationship": "parent_child"})),
+        };
+        let mut tx = pool.begin().await.unwrap();
+        let inserted_dependency = dependency_upsert(&mut tx, dataset_id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Now test dependencies_by_dataset_select
+        let mut tx = pool.begin().await.unwrap();
+        let dependencies = dependencies_by_dataset_select(&mut tx, dataset_id).await.unwrap();
+        tx.rollback().await.unwrap();
+
+        // Did we get what we wanted?
+        assert_eq!(dependencies.len(), 1);
+        assert_eq!(dependencies[0], inserted_dependency);
+        assert_eq!(dependencies[0].parent_id, parent_id);
+        assert_eq!(dependencies[0].child_id, child_id);
+        assert_eq!(dependencies[0].extra, Some(json!({"relationship": "parent_child"})));
+        assert_eq!(dependencies[0].modified_by, username.to_string());
+        assert_eq!(dependencies[0].modified_date, trim_to_microseconds(modified_date).unwrap());
+    }
