@@ -33,7 +33,7 @@ pub trait Dag<N, E> {
 
 impl<N, E> Dag<N, E> for DiGraph<N, E>
 where
-    N: Eq + Hash + Clone,
+    N: Eq + Hash + Copy,
     E: Eq + Hash,
 {
     fn build_dag(nodes: HashSet<N>, edges: HashSet<(N, N, E)>) -> Result<Self> {
@@ -43,7 +43,7 @@ where
 
         // Add Nodes to graph and map the nodes index to its value
         for node in nodes {
-            let idx: NodeIndex = graph.try_add_node(node.clone())?;
+            let idx: NodeIndex = graph.try_add_node(node)?;
             node_map.insert(node, idx);
         }
 
@@ -100,7 +100,7 @@ where
             if idx != start_idx {
                 // Add node weight to ones we have seen
                 if let Some(node) = self.node_weight(idx) {
-                    visited.insert(node.clone());
+                    visited.insert(*node);
                 }
             }
         }
@@ -119,7 +119,7 @@ where
         // Return the "incoming neighbors" (aka parents) for the node
         self.neighbors_directed(target_idx, Direction::Incoming)
             .filter_map(|parent_idx: NodeIndex| self.node_weight(parent_idx))
-            .cloned()
+            .copied()
             .collect()
     }
 }

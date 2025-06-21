@@ -57,7 +57,7 @@ pub async fn dataset_upsert(
 /// Pull a Dataset
 pub async fn dataset_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: &DatasetId,
+    dataset_id: DatasetId,
 ) -> Result<Dataset> {
     // Select a dataset row
     let dataset = query_as!(
@@ -83,7 +83,7 @@ pub async fn dataset_select(
 /// Insert or Update a Data Product
 pub async fn data_product_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: &DatasetId,
+    dataset_id: DatasetId,
     param: &DataProductParam,
     username: &str,
     modified_date: &DateTime<Utc>,
@@ -168,7 +168,7 @@ pub async fn data_product_upsert(
 /// Update the State of a Data Product
 pub async fn state_update(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: &DatasetId,
+    dataset_id: DatasetId,
     param: &StateParam,
     username: &str,
     modified_date: &DateTime<Utc>,
@@ -221,7 +221,7 @@ pub async fn state_update(
 /// Retrieve all Data Products for a Dataset
 pub async fn data_products_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: &DatasetId,
+    dataset_id: DatasetId,
 ) -> Result<Vec<DataProduct>> {
     let data_products = query_as!(
         DataProduct,
@@ -254,7 +254,7 @@ pub async fn data_products_by_dataset_select(
 /// Upsert a new Dependency between Data Products
 pub async fn dependency_upsert(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: &DatasetId,
+    dataset_id: DatasetId,
     param: &DependencyParam,
     username: &str,
     modified_date: &DateTime<Utc>,
@@ -302,7 +302,7 @@ pub async fn dependency_upsert(
 /// Retrieve all Dependencies for a Dataset
 pub async fn dependencies_by_dataset_select(
     tx: &mut Transaction<'_, Postgres>,
-    dataset_id: &DatasetId,
+    dataset_id: DatasetId,
 ) -> Result<Vec<Dependency>> {
     let dependencies = query_as!(
         Dependency,

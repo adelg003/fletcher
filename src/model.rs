@@ -18,10 +18,10 @@ use uuid::Uuid;
 pub type DatasetId = Uuid;
 
 /// Type for Data Product ID
-pub type DataProductId = String;
+pub type DataProductId = Uuid;
 
 /// Edge of the graph
-pub type Edge<'a> = (&'a DataProductId, &'a DataProductId, u32);
+pub type Edge = (DataProductId, DataProductId, u32);
 
 /// Plan Details
 #[derive(Object)]
@@ -35,7 +35,7 @@ impl Plan {
     /// Pull the Plan for a Dataset
     pub async fn from_dataset_id(
         tx: &mut Transaction<'_, Postgres>,
-        id: &DatasetId,
+        id: DatasetId,
     ) -> Result<Self> {
         // Pull data elements
         let dataset: Dataset = dataset_select(tx, id).await?;
@@ -50,10 +50,10 @@ impl Plan {
     }
 
     /// Return all Data Product IDs
-    pub fn data_product_ids(&self) -> Vec<&DataProductId> {
+    pub fn data_product_ids(&self) -> Vec<DataProductId> {
         self.data_products
             .iter()
-            .map(|dp: &DataProduct| &dp.id)
+            .map(|dp: &DataProduct| dp.id)
             .collect()
     }
 
@@ -61,35 +61,35 @@ impl Plan {
     pub fn edges(&self) -> Vec<Edge> {
         self.dependencies
             .iter()
-            .map(|dep: &Dependency| (&dep.parent_id, &dep.child_id, 1))
+            .map(|dep: &Dependency| (dep.parent_id, dep.child_id, 1))
             .collect()
     }
 
     /// Pull a single Data Product
-    pub fn data_product(&self, id: &DataProductId) -> Option<&DataProduct> {
+    pub fn data_product(&self, id: DataProductId) -> Option<&DataProduct> {
         self.data_products
             .iter()
-            .find(|dp: &&DataProduct| &dp.id == id)
+            .find(|dp: &&DataProduct| dp.id == id)
     }
 
     /// Pull a single Data Product in a mutable state
-    pub fn data_product_mut(&mut self, id: &DataProductId) -> Option<&mut DataProduct> {
+    pub fn data_product_mut(&mut self, id: DataProductId) -> Option<&mut DataProduct> {
         self.data_products
             .iter_mut()
-            .find(|dp: &&mut DataProduct| &dp.id == id)
+            .find(|dp: &&mut DataProduct| dp.id == id)
     }
 
     /// Return a graph representation of the plan
-    pub fn to_dag(&self) -> Result<DiGraph<&DataProductId, u32>> {
+    pub fn to_dag(&self) -> Result<DiGraph<DataProductId, u32>> {
         // Pull Data Product details
-        let data_product_ids: HashSet<&DataProductId> =
+        let data_product_ids: HashSet<DataProductId> =
             self.data_product_ids().into_iter().collect();
 
         // How do the data products relate?
         let edges: HashSet<Edge> = self.edges().into_iter().collect();
 
         // Build the dag
-        DiGraph::<&DataProductId, u32>::build_dag(data_product_ids, edges)
+        DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges)
     }
 }
 
@@ -161,7 +161,7 @@ impl DataProduct {
     pub async fn state_update(
         &mut self,
         tx: &mut Transaction<'_, Postgres>,
-        dataset_id: &DatasetId,
+        dataset_id: DatasetId,
         state: &StateParam,
         username: &str,
         modified_date: &DateTime<Utc>,
@@ -197,7 +197,7 @@ impl PlanParam {
         username: &str,
         modified_date: &DateTime<Utc>,
     ) -> Result<Plan> {
-        let dataset_id: &DatasetId = &self.dataset.id;
+        let dataset_id: DatasetId = self.dataset.id;
 
         // Write our data to the DB for a Dataset
         let dataset: Dataset = dataset_upsert(tx, &self.dataset, username, modified_date).await?;
@@ -230,12 +230,12 @@ impl PlanParam {
     }
 
     /// Check for duplicate Data Products
-    pub fn has_dup_data_products(&self) -> Option<&DataProductId> {
+    pub fn has_dup_data_products(&self) -> Option<DataProductId> {
         let mut seen = HashSet::new();
 
         for data_product in &self.data_products {
             if !seen.insert(&data_product.id) {
-                return Some(&data_product.id);
+                return Some(data_product.id);
             }
         }
 
@@ -243,12 +243,12 @@ impl PlanParam {
     }
 
     /// Check for duplicate Dependencies
-    pub fn has_dup_dependencies(&self) -> Option<(&DataProductId, &DataProductId)> {
+    pub fn has_dup_dependencies(&self) -> Option<(DataProductId, DataProductId)> {
         let mut seen = HashSet::new();
 
         for dependency in &self.dependencies {
-            if !seen.insert((&dependency.parent_id, &dependency.child_id)) {
-                return Some((&dependency.parent_id, &dependency.child_id));
+            if !seen.insert((dependency.parent_id, dependency.child_id)) {
+                return Some((dependency.parent_id, dependency.child_id));
             }
         }
 
@@ -256,34 +256,34 @@ impl PlanParam {
     }
 
     /// Return all Data Product IDs
-    pub fn data_product_ids(&self) -> Vec<&DataProductId> {
+    pub fn data_product_ids(&self) -> Vec<DataProductId> {
         self.data_products
             .iter()
-            .map(|dp: &DataProductParam| &dp.id)
+            .map(|dp: &DataProductParam| dp.id)
             .collect()
     }
 
     /// Return all Parent IDs
-    pub fn parent_ids(&self) -> Vec<&DataProductId> {
+    pub fn parent_ids(&self) -> Vec<DataProductId> {
         self.dependencies
             .iter()
-            .map(|dep: &DependencyParam| &dep.parent_id)
+            .map(|dep: &DependencyParam| dep.parent_id)
             .collect()
     }
 
     /// Return all Child IDs
-    pub fn child_ids(&self) -> Vec<&DataProductId> {
+    pub fn child_ids(&self) -> Vec<DataProductId> {
         self.dependencies
             .iter()
-            .map(|dep: &DependencyParam| &dep.child_id)
+            .map(|dep: &DependencyParam| dep.child_id)
             .collect()
     }
 
     /// Return all Parent / Child dependencies
-    pub fn dependency_edges(&self) -> Vec<(&DataProductId, &DataProductId, u32)> {
+    pub fn dependency_edges(&self) -> Vec<Edge> {
         self.dependencies
             .iter()
-            .map(|dep: &DependencyParam| (&dep.parent_id, &dep.child_id, 1))
+            .map(|dep: &DependencyParam| (dep.parent_id, dep.child_id, 1))
             .collect()
     }
 }
@@ -322,7 +322,7 @@ pub struct StateParam {
 impl From<&mut DataProduct> for StateParam {
     fn from(data_product: &mut DataProduct) -> Self {
         StateParam {
-            id: data_product.id.clone(),
+            id: data_product.id,
             state: data_product.state,
             run_id: data_product.run_id,
             link: data_product.link.clone(),
