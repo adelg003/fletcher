@@ -84,7 +84,7 @@ where
     }
 
     fn downstream_nodes(&self, start_node: N) -> HashSet<N> {
-        // Nodes we have already sean
+        // Nodes we have already seen
         let mut visited = HashSet::<N>::new();
 
         // Find the index of the node we want to start with

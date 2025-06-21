@@ -67,7 +67,7 @@ impl Api {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
-        // Add the plan to the DB
+        // Update data product states and return the updated plan
         let plan: Plan = states_edit(&mut tx, dataset_id, &states, "placeholder_user").await?;
 
         // Commit Transaction
