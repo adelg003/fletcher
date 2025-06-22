@@ -325,12 +325,46 @@ pub async fn dependencies_by_dataset_select(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::Error;
+    use crate::{error::Error, model::DataProductId};
     use chrono::Timelike;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use sqlx::PgPool;
     use uuid::Uuid;
+
+    impl Default for DatasetParam {
+        fn default() -> Self {
+            Self {
+                id: Uuid::new_v4(),
+                paused: false,
+                extra: Some(json!({"test":"dataset"})),
+            }
+        }
+    }
+
+    impl Default for DataProductParam {
+        fn default() -> Self {
+            Self {
+                id: Uuid::new_v4(),
+                compute: Compute::Cams,
+                name: "test-data-product".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: Some(json!({"test":"passthrough"})),
+                extra: Some(json!({"test":"extra"})),
+            }
+        }
+    }
+
+    impl DependencyParam {
+        pub fn new(parent_id: DataProductId, child_id: DataProductId) -> Self {
+            Self {
+                parent_id,
+                child_id,
+                extra: Some(json!({"test":"dependency"})),
+            }
+        }
+    }
 
     /// Trim a DateTime to micro-seconds (aka the level that Postgres stores timestamps to)
     fn trim_to_microseconds(dt: DateTime<Utc>) -> DateTime<Utc> {
@@ -338,24 +372,47 @@ mod tests {
         dt.with_nanosecond(micros * 1_000).unwrap()
     }
 
+    /// Helper function to create a test dataset with sensible defaults
+    async fn create_test_dataset(
+        pool: &PgPool,
+        param: &DatasetParam,
+        username: &str,
+        modified_date: DateTime<Utc>,
+    ) -> Dataset {
+        let mut tx = pool.begin().await.unwrap();
+        let dataset = dataset_upsert(&mut tx, param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        dataset
+    }
+
+    /// Helper function to create a test data product with sensible defaults
+    async fn create_test_data_product(
+        pool: &PgPool,
+        dataset_id: Uuid,
+        param: &DataProductParam,
+        username: &str,
+        modified_date: DateTime<Utc>,
+    ) -> DataProduct {
+        let mut tx = pool.begin().await.unwrap();
+        let data_product = data_product_upsert(&mut tx, dataset_id, param, username, modified_date)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        data_product
+    }
+
     /// Test Insert of new Dataset
     #[sqlx::test]
     async fn test_dataset_insert(pool: PgPool) {
         // Inputs
-        let param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "data"})),
-        };
+        let param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
         // Test our function
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &param, username, modified_date).await;
 
         // Did we get what we wanted?
         assert_eq!(
@@ -374,31 +431,19 @@ mod tests {
     #[sqlx::test]
     async fn test_dataset_update(pool: PgPool) {
         // Inputs
-        let mut param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: None,
-        };
+        let mut param: DatasetParam = Default::default();
         let username = "test";
         let mut modified_date = Utc::now();
 
         // Setup first record
-        let mut tx = pool.begin().await.unwrap();
-        dataset_upsert(&mut tx, &param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        create_test_dataset(&pool, &param, username, modified_date).await;
 
         // Update parameters
         param.paused = true;
         modified_date = Utc::now();
 
         // Update to new values
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &param, username, modified_date).await;
 
         // Did we get what we wanted?
         assert_eq!(
@@ -416,20 +461,12 @@ mod tests {
     #[sqlx::test]
     async fn test_dataset_select(pool: PgPool) {
         // Inputs
-        let param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: true,
-            extra: Some(json!({"test": "data"})),
-        };
+        let param: DatasetParam = Default::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
         // First insert a dataset to select later
-        let mut tx = pool.begin().await.unwrap();
-        let inserted_dataset = dataset_upsert(&mut tx, &param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let inserted_dataset = create_test_dataset(&pool, &param, username, modified_date).await;
 
         // Now test dataset_select
         let mut tx = pool.begin().await.unwrap();
@@ -473,43 +510,24 @@ mod tests {
     #[sqlx::test]
     async fn test_data_product_insert(pool: PgPool) {
         // First create a dataset since data_product has a foreign key constraint
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Now create the data product
-        let data_product_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "test-data-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: Some(json!({"test": "passthrough"})),
-            extra: Some(json!({"test": "extra"})),
-        };
+        let data_product_param: DataProductParam = Default::default();
 
         // Test our function
-        let mut tx = pool.begin().await.unwrap();
-        let data_product = data_product_upsert(
-            &mut tx,
+        let data_product = create_test_data_product(
+            &pool,
             dataset.id,
             &data_product_param,
             username,
             modified_date,
         )
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
+        .await;
 
         // Did we get what we wanted?
         assert_eq!(
