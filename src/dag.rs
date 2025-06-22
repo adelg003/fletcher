@@ -127,19 +127,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use petgraph::graph::DiGraph;
-    use std::collections::HashSet;
+    use pretty_assertions::assert_eq;
 
     /// Test building a valid DAG with nodes and edges
     #[test]
     fn test_build_dag_success() {
         // Test: Can we build a dag?
-        let nodes: HashSet<i32> = [1, 2, 3, 4].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
-            (1, 2, "edge1"),
-            (2, 3, "edge2"),
-            (2, 4, "edge3"),
-        ].iter().cloned().collect();
+        let nodes: HashSet<u32> = [1, 2, 3, 4].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [(1, 2, "edge1"), (2, 3, "edge2"), (2, 4, "edge3")]
+            .iter()
+            .copied()
+            .collect();
 
         let result = DiGraph::build_dag(nodes, edges);
         assert!(result.is_ok());
@@ -153,48 +151,49 @@ mod tests {
     #[test]
     fn test_build_dag_rejects_self_loop() {
         // Test: Do we reject if an edge has the same parent and child?
-        let nodes: HashSet<i32> = [1, 2].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
+        let nodes: HashSet<u32> = [1, 2].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [
             (1, 1, "self_loop"), // Self-loop
-        ].iter().cloned().collect();
+        ]
+        .iter()
+        .copied()
+        .collect();
 
         let result = DiGraph::build_dag(nodes, edges);
         assert!(result.is_err());
-
-        match result.unwrap_err() {
-            Error::Cyclical => (),
-            _ => panic!("Expected Cyclical error"),
-        }
+        assert!(matches!(result.unwrap_err(), Error::Cyclical));
     }
 
     /// Test rejection of cyclical graphs
     #[test]
     fn test_build_dag_rejects_cycle() {
         // Test: Do we reject dags that are cyclical?
-        let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
+        let nodes: HashSet<u32> = [1, 2, 3].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [
             (1, 2, "edge1"),
             (2, 3, "edge2"),
             (3, 1, "edge3"), // Creates a cycle
-        ].iter().cloned().collect();
+        ]
+        .iter()
+        .copied()
+        .collect();
 
         let result = DiGraph::build_dag(nodes, edges);
         assert!(result.is_err());
-
-        match result.unwrap_err() {
-            Error::Cyclical => (),
-            _ => panic!("Expected Cyclical error"),
-        }
+        assert!(matches!(result.unwrap_err(), Error::Cyclical));
     }
 
     /// Test handling of invalid edge references
     #[test]
     fn test_build_dag_invalid_edge() {
         // Test edge references non-existent node
-        let nodes: HashSet<i32> = [1, 2].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
+        let nodes: HashSet<u32> = [1, 2].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [
             (1, 3, "invalid_edge"), // Node 3 doesn't exist
-        ].iter().cloned().collect();
+        ]
+        .iter()
+        .copied()
+        .collect();
 
         let result = DiGraph::build_dag(nodes, edges);
         assert!(result.is_err());
@@ -204,14 +203,13 @@ mod tests {
     #[test]
     fn test_find_node_index_existing_node() {
         // Test: If given a node value, can we find its index in the graph?
-        let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
-            (1, 2, "edge1"),
-        ].iter().cloned().collect();
+        let nodes: HashSet<u32> = [1, 2, 3].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [(1, 2, "edge1")].iter().copied().collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let index = dag.find_node_index(2);
+
         assert!(index.is_some());
 
         // Verify the index actually points to the correct node
@@ -222,8 +220,8 @@ mod tests {
     /// Test finding index of non-existing node
     #[test]
     fn test_find_node_index_non_existing_node() {
-        let nodes: HashSet<i32> = [1, 2].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [].iter().cloned().collect();
+        let nodes: HashSet<u32> = [1, 2].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [].iter().copied().collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
@@ -235,18 +233,21 @@ mod tests {
     #[test]
     fn test_downstream_nodes_simple_tree() {
         // Test: If given a dag, can we return all the children and subsequent generations from the start_node?
-        let nodes: HashSet<i32> = [1, 2, 3, 4, 5].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
+        let nodes: HashSet<u32> = [1, 2, 3, 4, 5].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [
             (1, 2, "edge1"),
             (1, 3, "edge2"),
             (2, 4, "edge3"),
             (3, 5, "edge4"),
-        ].iter().cloned().collect();
+        ]
+        .iter()
+        .copied()
+        .collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let downstream = dag.downstream_nodes(1);
-        let expected: HashSet<i32> = [2, 3, 4, 5].iter().cloned().collect();
+        let expected: HashSet<u32> = [2, 3, 4, 5].iter().copied().collect();
         assert_eq!(downstream, expected);
     }
 
@@ -254,36 +255,37 @@ mod tests {
     #[test]
     fn test_downstream_nodes_complex_dag() {
         // Test with a more complex DAG structure
-        let nodes: HashSet<i32> = [1, 2, 3, 4, 5, 6].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
+        let nodes: HashSet<u32> = [1, 2, 3, 4, 5, 6].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [
             (1, 2, "edge1"),
             (1, 3, "edge2"),
             (2, 4, "edge3"),
             (3, 4, "edge4"), // Multiple paths to node 4
             (4, 5, "edge5"),
             (3, 6, "edge6"),
-        ].iter().cloned().collect();
+        ]
+        .iter()
+        .copied()
+        .collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let downstream = dag.downstream_nodes(1);
-        let expected: HashSet<i32> = [2, 3, 4, 5, 6].iter().cloned().collect();
+        let expected: HashSet<u32> = [2, 3, 4, 5, 6].iter().copied().collect();
         assert_eq!(downstream, expected);
 
         // Test from intermediate node
         let downstream_from_3 = dag.downstream_nodes(3);
-        let expected_from_3: HashSet<i32> = [4, 5, 6].iter().cloned().collect();
+        let expected_from_3: HashSet<u32> = [4, 5, 6].iter().copied().collect();
         assert_eq!(downstream_from_3, expected_from_3);
     }
 
     /// Test downstream nodes from leaf node
     #[test]
     fn test_downstream_nodes_leaf_node() {
-        let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
-            (1, 2, "edge1"),
-            (2, 3, "edge2"),
-        ].iter().cloned().collect();
+        let nodes: HashSet<u32> = [1, 2, 3].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> =
+            [(1, 2, "edge1"), (2, 3, "edge2")].iter().copied().collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
@@ -294,8 +296,8 @@ mod tests {
     /// Test downstream nodes for non-existing node
     #[test]
     fn test_downstream_nodes_non_existing_node() {
-        let nodes: HashSet<i32> = [1, 2].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [].iter().cloned().collect();
+        let nodes: HashSet<u32> = [1, 2].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [].iter().copied().collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
@@ -307,44 +309,43 @@ mod tests {
     #[test]
     fn test_parent_nodes_simple_case() {
         // Test: Can we return the parents of a node, and just the direct parents?
-        let nodes: HashSet<i32> = [1, 2, 3, 4].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
+        let nodes: HashSet<u32> = [1, 2, 3, 4].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [
             (1, 3, "edge1"),
             (2, 3, "edge2"), // Multiple parents for node 3
             (3, 4, "edge3"),
-        ].iter().cloned().collect();
+        ]
+        .iter()
+        .copied()
+        .collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let parents = dag.parent_nodes(3);
-        let expected: HashSet<i32> = [1, 2].iter().cloned().collect();
+        let expected: HashSet<u32> = [1, 2].iter().copied().collect();
         assert_eq!(parents, expected);
     }
 
     /// Test parent nodes with single parent
     #[test]
     fn test_parent_nodes_single_parent() {
-        let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
-            (1, 2, "edge1"),
-            (2, 3, "edge2"),
-        ].iter().cloned().collect();
+        let nodes: HashSet<u32> = [1, 2, 3].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> =
+            [(1, 2, "edge1"), (2, 3, "edge2")].iter().copied().collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let parents = dag.parent_nodes(2);
-        let expected: HashSet<i32> = [1].iter().cloned().collect();
+        let expected: HashSet<u32> = [1].iter().copied().collect();
         assert_eq!(parents, expected);
     }
 
     /// Test parent nodes for root node
     #[test]
     fn test_parent_nodes_root_node() {
-        let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
-            (1, 2, "edge1"),
-            (1, 3, "edge2"),
-        ].iter().cloned().collect();
+        let nodes: HashSet<u32> = [1, 2, 3].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> =
+            [(1, 2, "edge1"), (1, 3, "edge2")].iter().copied().collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
@@ -355,8 +356,8 @@ mod tests {
     /// Test parent nodes for non-existing node
     #[test]
     fn test_parent_nodes_non_existing_node() {
-        let nodes: HashSet<i32> = [1, 2].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [].iter().cloned().collect();
+        let nodes: HashSet<u32> = [1, 2].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> = [].iter().copied().collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
@@ -367,12 +368,11 @@ mod tests {
     /// Test validation of acyclic graph
     #[test]
     fn test_validate_acyclic_valid_dag() {
-        let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
-        let edges: HashSet<(i32, i32, &str)> = [
-            (1, 2, "edge1"),
-            (2, 3, "edge2"),
-        ].iter().cloned().collect();
+        let nodes: HashSet<u32> = [1, 2, 3].iter().copied().collect();
+        let edges: HashSet<(u32, u32, &str)> =
+            [(1, 2, "edge1"), (2, 3, "edge2")].iter().copied().collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
         assert!(dag.validate_acyclic().is_ok());
     }
+}
