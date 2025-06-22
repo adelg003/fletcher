@@ -30,14 +30,13 @@ fn to_poem_error(err: Error) -> poem::Error {
 fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<()> {
     // Does Plan have any dup data products?
     if let Some(data_product_id) = param.has_dup_data_products() {
-        return Err(BadRequest(Error::Duplicate(data_product_id.to_owned())));
+        return Err(BadRequest(Error::Duplicate(data_product_id)));
     }
 
     // Does Plan have any dup dependencies?
     if let Some((parent_id, child_id)) = param.has_dup_dependencies() {
         return Err(BadRequest(Error::DuplicateDependencies(
-            parent_id.to_owned(),
-            child_id.to_owned(),
+            parent_id, child_id,
         )));
     }
 
@@ -61,7 +60,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
         .find(|id: &DataProductId| !data_product_ids.contains(id));
 
     if let Some(parent_id) = data_productless_parent {
-        return Err(BadRequest(Error::Missing(parent_id.to_owned())));
+        return Err(BadRequest(Error::Missing(parent_id)));
     }
 
     // Do all children have a data product?
@@ -71,21 +70,17 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
         .find(|id: &DataProductId| !data_product_ids.contains(id));
 
     if let Some(child_id) = data_productless_child {
-        return Err(BadRequest(Error::Missing(child_id.to_owned())));
+        return Err(BadRequest(Error::Missing(child_id)));
     }
 
     // Collect all parent / child relationships
-    let edges: HashSet<Edge> = {
-        let mut param_edges: Vec<Edge> = param.dependency_edges();
+    let mut edges: HashSet<Edge> = param.edges().into_iter().collect();
 
-        // If we got a plan from the DB, add its edges
-        if let Some(plan) = plan {
-            let plan_edges: Vec<Edge> = plan.edges();
-            param_edges.extend(plan_edges);
-        }
-
-        param_edges.into_iter().collect()
-    };
+    // If we got a plan from the DB, add its edges
+    if let Some(plan) = plan {
+        let plan_edges: Vec<Edge> = plan.edges();
+        edges.extend(plan_edges);
+    }
 
     // If you take all our data products and map them to a graph are they a valid dag?
     DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges).map_err(to_poem_error)?;
@@ -121,7 +116,7 @@ pub async fn plan_add(
         .map_err(to_poem_error)?;
 
     // Triger the next batch of data products
-    trigger_next_data_product_batch(tx, &mut plan, username, modified_date).await?;
+    trigger_next_batch(tx, &mut plan, username, modified_date).await?;
 
     Ok(plan)
 }
@@ -222,7 +217,7 @@ async fn clear_downstream_nodes(
 }
 
 /// Triger the next batch of data products
-async fn trigger_next_data_product_batch(
+async fn trigger_next_batch(
     tx: &mut Transaction<'_, Postgres>,
     plan: &mut Plan,
     username: &str,
@@ -315,7 +310,7 @@ pub async fn states_edit(
     clear_downstream_nodes(tx, &mut plan, states, username, modified_date).await?;
 
     // Triger the next batch of data products
-    trigger_next_data_product_batch(tx, &mut plan, username, modified_date).await?;
+    trigger_next_batch(tx, &mut plan, username, modified_date).await?;
 
     Ok(plan)
 }

@@ -94,7 +94,7 @@ impl Plan {
 }
 
 /// Dataset details
-#[derive(Object)]
+#[derive(Debug, Object, PartialEq)]
 pub struct Dataset {
     pub id: DatasetId,
     pub paused: bool,
@@ -104,7 +104,7 @@ pub struct Dataset {
 }
 
 /// The Types of compute OaaS can call
-#[derive(Clone, Copy, Enum, Type)]
+#[derive(Clone, Copy, Debug, Enum, PartialEq, Type)]
 #[oai(rename_all = "lowercase")]
 #[sqlx(type_name = "compute", rename_all = "lowercase")]
 pub enum Compute {
@@ -139,7 +139,7 @@ impl fmt::Display for State {
 }
 
 /// Data Product details
-#[derive(Object)]
+#[derive(Debug, Object, PartialEq)]
 pub struct DataProduct {
     pub id: DataProductId,
     pub compute: Compute,
@@ -172,7 +172,7 @@ impl DataProduct {
 }
 
 /// Dependency from one Data Product to another Data Product
-#[derive(Object)]
+#[derive(Debug, Object, PartialEq)]
 pub struct Dependency {
     pub parent_id: DataProductId,
     pub child_id: DataProductId,
@@ -280,7 +280,7 @@ impl PlanParam {
     }
 
     /// Return all Parent / Child dependencies
-    pub fn dependency_edges(&self) -> Vec<Edge> {
+    pub fn edges(&self) -> Vec<Edge> {
         self.dependencies
             .iter()
             .map(|dep: &DependencyParam| (dep.parent_id, dep.child_id, 1))
@@ -316,7 +316,6 @@ pub struct StateParam {
     pub run_id: Option<Uuid>,
     pub link: Option<String>,
     pub passback: Option<Value>,
-    pub extra: Option<Value>,
 }
 
 impl From<&mut DataProduct> for StateParam {
@@ -327,7 +326,6 @@ impl From<&mut DataProduct> for StateParam {
             run_id: data_product.run_id,
             link: data_product.link.clone(),
             passback: data_product.passback.clone(),
-            extra: data_product.extra.clone(),
         }
     }
 }
