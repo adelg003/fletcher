@@ -962,7 +962,7 @@ mod tests {
 
         // Try to create dependency with non-existent parent
         let dependency_param = DependencyParam {
-            parent_id: Uuid::new_v4(), // Foke parent id
+            parent_id: Uuid::new_v4(), // Fake parent id
             child_id: child_dp.id,
             extra: Some(json!({"test": "dependency"})),
         };
@@ -1010,7 +1010,7 @@ mod tests {
         // Try to create dependency with non-existent child
         let dependency_param = DependencyParam {
             parent_id: parent_dp.id,
-            child_id: Uuid::new_v4(), // Fake chile id
+            child_id: Uuid::new_v4(), // Fake child id
             extra: Some(json!({"test": "dependency"})),
         };
 
