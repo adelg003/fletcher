@@ -172,7 +172,7 @@ impl DataProduct {
 }
 
 /// Dependency from one Data Product to another Data Product
-#[derive(Object)]
+#[derive(Debug, Object, PartialEq)]
 pub struct Dependency {
     pub parent_id: DataProductId,
     pub child_id: DataProductId,

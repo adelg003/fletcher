@@ -779,7 +779,8 @@ mod tests {
             Error::Sqlx(sqlx::Error::RowNotFound),
         ));
     }
-/// Test data_products_by_dataset_select returns all data products for a dataset
+
+    /// Test data_products_by_dataset_select returns all data products for a dataset
     #[sqlx::test]
     async fn test_data_products_by_dataset_select(pool: PgPool) {
         // Create a dataset
@@ -819,12 +820,24 @@ mod tests {
         };
 
         let mut tx = pool.begin().await.unwrap();
-        let inserted_dp1 = data_product_upsert(&mut tx, dataset.id, &data_product_1, username, modified_date)
-            .await
-            .unwrap();
-        let inserted_dp2 = data_product_upsert(&mut tx, dataset.id, &data_product_2, username, modified_date)
-            .await
-            .unwrap();
+        let inserted_dp1 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_1,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+        let inserted_dp2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
 
         // Test data_products_by_dataset_select
@@ -880,12 +893,14 @@ mod tests {
         };
 
         let mut tx = pool.begin().await.unwrap();
-        let parent_dp = data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
-            .await
-            .unwrap();
-        let child_dp = data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
-            .await
-            .unwrap();
+        let parent_dp =
+            data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
+                .await
+                .unwrap();
+        let child_dp =
+            data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
+                .await
+                .unwrap();
         tx.commit().await.unwrap();
 
         // Create a dependency
@@ -897,9 +912,15 @@ mod tests {
 
         // Test dependency_upsert
         let mut tx = pool.begin().await.unwrap();
-        let dependency = dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
-            .await
-            .unwrap();
+        let dependency = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
 
         // Verify the dependency was created correctly
@@ -955,12 +976,14 @@ mod tests {
         };
 
         let mut tx = pool.begin().await.unwrap();
-        let parent_dp = data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
-            .await
-            .unwrap();
-        let child_dp = data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
-            .await
-            .unwrap();
+        let parent_dp =
+            data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
+                .await
+                .unwrap();
+        let child_dp =
+            data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
+                .await
+                .unwrap();
         tx.commit().await.unwrap();
 
         // Create initial dependency
@@ -971,9 +994,15 @@ mod tests {
         };
 
         let mut tx = pool.begin().await.unwrap();
-        dependency_upsert(&mut tx, dataset.id, &initial_dependency_param, username, modified_date)
-            .await
-            .unwrap();
+        dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &initial_dependency_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
 
         // Update the dependency
@@ -993,7 +1022,7 @@ mod tests {
             dataset.id,
             &updated_dependency_param,
             updated_username,
-            updated_modified_date
+            updated_modified_date,
         )
         .await
         .unwrap();
@@ -1042,9 +1071,10 @@ mod tests {
         };
 
         let mut tx = pool.begin().await.unwrap();
-        let child_dp = data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
-            .await
-            .unwrap();
+        let child_dp =
+            data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
+                .await
+                .unwrap();
         tx.commit().await.unwrap();
 
         // Try to create dependency with non-existent parent
@@ -1057,7 +1087,14 @@ mod tests {
 
         // Test dependency_upsert - should fail with foreign key constraint
         let mut tx = pool.begin().await.unwrap();
-        let result = dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date).await;
+        let result = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency_param,
+            username,
+            modified_date,
+        )
+        .await;
         tx.rollback().await.unwrap();
 
         // Should get a database error due to foreign key constraint
@@ -1098,9 +1135,10 @@ mod tests {
         };
 
         let mut tx = pool.begin().await.unwrap();
-        let parent_dp = data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
-            .await
-            .unwrap();
+        let parent_dp =
+            data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
+                .await
+                .unwrap();
         tx.commit().await.unwrap();
 
         // Try to create dependency with non-existent child
@@ -1113,7 +1151,14 @@ mod tests {
 
         // Test dependency_upsert - should fail with foreign key constraint
         let mut tx = pool.begin().await.unwrap();
-        let result = dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date).await;
+        let result = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency_param,
+            username,
+            modified_date,
+        )
+        .await;
         tx.rollback().await.unwrap();
 
         // Should get a database error due to foreign key constraint
@@ -1154,9 +1199,15 @@ mod tests {
         };
 
         let mut tx = pool.begin().await.unwrap();
-        let data_product = data_product_upsert(&mut tx, dataset.id, &data_product_param, username, modified_date)
-            .await
-            .unwrap();
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
 
         // Try to create a self-referencing dependency
@@ -1168,7 +1219,14 @@ mod tests {
 
         // Test dependency_upsert - should fail with check constraint
         let mut tx = pool.begin().await.unwrap();
-        let result = dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date).await;
+        let result = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency_param,
+            username,
+            modified_date,
+        )
+        .await;
         tx.rollback().await.unwrap();
 
         // Should get a database error due to check constraint
@@ -1254,12 +1312,24 @@ mod tests {
         };
 
         let mut tx = pool.begin().await.unwrap();
-        let dep1 = dependency_upsert(&mut tx, dataset.id, &dependency1_param, username, modified_date)
-            .await
-            .unwrap();
-        let dep2 = dependency_upsert(&mut tx, dataset.id, &dependency2_param, username, modified_date)
-            .await
-            .unwrap();
+        let dep1 = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency1_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+        let dep2 = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency2_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
 
         // Test dependencies_by_dataset_select
