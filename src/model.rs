@@ -24,7 +24,7 @@ pub type DataProductId = Uuid;
 pub type Edge = (DataProductId, DataProductId, u32);
 
 /// Plan Details
-#[derive(Object)]
+#[derive(Debug, Object, PartialEq)]
 pub struct Plan {
     pub dataset: Dataset,
     pub data_products: Vec<DataProduct>,
@@ -203,24 +203,21 @@ impl PlanParam {
         let dataset: Dataset = dataset_upsert(tx, &self.dataset, username, modified_date).await?;
 
         // Write our data to the DB for Data Products
-        let mut data_products: Vec<DataProduct> = Vec::new();
         for data_product_param in &self.data_products {
-            let data_product: DataProduct =
-                data_product_upsert(tx, dataset_id, data_product_param, username, modified_date)
-                    .await?;
-
-            data_products.push(data_product);
+            data_product_upsert(tx, dataset_id, data_product_param, username, modified_date)
+                .await?;
         }
+
+        // Pull both new and old data products from the DB
+        let data_products = data_products_by_dataset_select(tx, dataset_id).await?;
 
         // Write our data to the DB for Dependencies
-        let mut dependencies: Vec<Dependency> = Vec::new();
         for dependency_param in &self.dependencies {
-            let dependency: Dependency =
-                dependency_upsert(tx, dataset_id, dependency_param, username, modified_date)
-                    .await?;
-
-            dependencies.push(dependency);
+            dependency_upsert(tx, dataset_id, dependency_param, username, modified_date).await?;
         }
+
+        // Pull both new and old dependencies from the DB
+        let dependencies = dependencies_by_dataset_select(tx, dataset_id).await?;
 
         Ok(Plan {
             dataset,
@@ -341,14 +338,34 @@ pub struct DependencyParam {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
-    use serde_json::json;
+    use crate::{db::tests::trim_to_microseconds, error::Error};
     use pretty_assertions::assert_eq;
+    use serde_json::json;
     use sqlx::PgPool;
-    use uuid::Uuid;
-    use std::collections::HashSet;
 
     // Default implementations following db.rs patterns
+    impl Default for PlanParam {
+        fn default() -> Self {
+            let dp1_param = DataProductParam::default();
+            let dp2_param = DataProductParam {
+                id: Uuid::new_v4(),
+                ..Default::default()
+            };
+
+            let dependency_param = DependencyParam {
+                parent_id: dp1_param.id,
+                child_id: dp2_param.id,
+                ..Default::default()
+            };
+
+            PlanParam {
+                dataset: DatasetParam::default(),
+                data_products: vec![dp1_param, dp2_param],
+                dependencies: vec![dependency_param],
+            }
+        }
+    }
+
     impl Default for DatasetParam {
         fn default() -> Self {
             Self {
@@ -396,7 +413,7 @@ mod tests {
     }
 
     // Helper function to create a test plan
-    fn create_test_plan() -> Plan {
+    fn dummy_test_plan() -> Plan {
         let now = Utc::now();
         let dataset_id = Uuid::new_v4();
         let dp1_id = Uuid::new_v4();
@@ -442,15 +459,13 @@ mod tests {
                     modified_date: now,
                 },
             ],
-            dependencies: vec![
-                Dependency {
-                    parent_id: dp1_id,
-                    child_id: dp2_id,
-                    extra: Some(json!({"test":"dependency"})),
-                    modified_by: "test_user".to_string(),
-                    modified_date: now,
-                },
-            ],
+            dependencies: vec![Dependency {
+                parent_id: dp1_id,
+                child_id: dp2_id,
+                extra: Some(json!({"test":"dependency"})),
+                modified_by: "test_user".to_string(),
+                modified_date: now,
+            }],
         }
     }
 
@@ -462,34 +477,35 @@ mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create test data
-        let dataset_param = DatasetParam::default();
-        let data_product_param = DataProductParam::default();
-        let dependency_param = DependencyParam {
-            parent_id: data_product_param.id,
-            child_id: Uuid::new_v4(),
-            ..Default::default()
-        };
-
-        let plan_param = PlanParam {
-            dataset: dataset_param,
-            data_products: vec![data_product_param],
-            dependencies: vec![dependency_param],
-        };
-
+        let plan_param = PlanParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
         // Insert test data
-        let inserted_plan = plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        let inserted_plan = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
         // Test: Can we pull an existing plan if we have its dataset id?
-        let retrieved_plan = Plan::from_dataset_id(&mut tx, inserted_plan.dataset.id).await.unwrap();
+        let retrieved_plan = Plan::from_dataset_id(&mut tx, inserted_plan.dataset.id)
+            .await
+            .unwrap();
 
-        assert_eq!(retrieved_plan.dataset.id, inserted_plan.dataset.id);
-        assert_eq!(retrieved_plan.data_products.len(), 1);
-        assert_eq!(retrieved_plan.dependencies.len(), 1);
+        assert_eq!(retrieved_plan.dataset, inserted_plan.dataset);
+        assert_eq!(retrieved_plan.dependencies, inserted_plan.dependencies);
 
-        tx.rollback().await.unwrap();
+        assert_eq!(retrieved_plan.data_products.len(), 2);
+        assert!(
+            retrieved_plan
+                .data_products
+                .contains(&inserted_plan.data_products[0])
+        );
+        assert!(
+            retrieved_plan
+                .data_products
+                .contains(&inserted_plan.data_products[1])
+        );
     }
 
     /// Test Plan::from_dataset_id - Do we get rejected if the dataset does not exist?
@@ -502,8 +518,10 @@ mod tests {
         let result = Plan::from_dataset_id(&mut tx, non_existent_id).await;
 
         assert!(result.is_err());
-
-        tx.rollback().await.unwrap();
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
     }
 
     /// Test DataProduct::state_update - Do we see an update to the Data Product in memory?
@@ -512,18 +530,14 @@ mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create test data
-        let dataset_param = DatasetParam::default();
-        let data_product_param = DataProductParam::default();
-        let plan_param = PlanParam {
-            dataset: dataset_param,
-            data_products: vec![data_product_param],
-            dependencies: vec![],
-        };
-
+        let plan_param = PlanParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
-        let plan = plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        let plan = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
         let mut data_product = plan.data_products.into_iter().next().unwrap();
 
         // Test: If we update a data product's state, do we see an update in memory?
@@ -537,14 +551,21 @@ mod tests {
             passback: Some(json!({"status":"running"})),
         };
 
-        data_product.state_update(&mut tx, plan.dataset.id, &state_param, username, modified_date).await.unwrap();
+        data_product
+            .state_update(
+                &mut tx,
+                plan.dataset.id,
+                &state_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
 
         assert_ne!(data_product.state, old_state);
         assert_eq!(data_product.state, new_state);
         assert_eq!(data_product.link, state_param.link);
         assert_eq!(data_product.passback, state_param.passback);
-
-        tx.rollback().await.unwrap();
     }
 
     /// Test DataProduct::state_update - Do we see an update to the Data Product in the db?
@@ -553,18 +574,14 @@ mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create test data
-        let dataset_param = DatasetParam::default();
-        let data_product_param = DataProductParam::default();
-        let plan_param = PlanParam {
-            dataset: dataset_param,
-            data_products: vec![data_product_param],
-            dependencies: vec![],
-        };
-
+        let plan_param = PlanParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
-        let plan = plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        let plan = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
         let mut data_product = plan.data_products.into_iter().next().unwrap();
 
         // Update state
@@ -577,17 +594,23 @@ mod tests {
             passback: Some(json!({"error":"test failure"})),
         };
 
-        data_product.state_update(&mut tx, plan.dataset.id, &state_param, username, modified_date).await.unwrap();
+        data_product
+            .state_update(
+                &mut tx,
+                plan.dataset.id,
+                &state_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
 
         // Test: If we update a data product's state, do we see an update in the DB?
-        let retrieved_plan = Plan::from_dataset_id(&mut tx, plan.dataset.id).await.unwrap();
-        let retrieved_data_product = retrieved_plan.data_products.into_iter().next().unwrap();
+        let retrieved_plan = Plan::from_dataset_id(&mut tx, plan.dataset.id)
+            .await
+            .unwrap();
 
-        assert_eq!(retrieved_data_product.state, new_state);
-        assert_eq!(retrieved_data_product.link, state_param.link);
-        assert_eq!(retrieved_data_product.passback, state_param.passback);
-
-        tx.rollback().await.unwrap();
+        assert!(retrieved_plan.data_products.contains(&data_product));
     }
 
     /// Test PlanParam::upsert - Can we insert a new dataset?
@@ -595,25 +618,31 @@ mod tests {
     async fn test_plan_param_upsert_insert_dataset(pool: PgPool) {
         let mut tx = pool.begin().await.unwrap();
 
-        let dataset_param = DatasetParam::default();
-        let plan_param = PlanParam {
-            dataset: dataset_param,
-            data_products: vec![],
-            dependencies: vec![],
-        };
-
+        let plan_param = PlanParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
         // Test: Can we insert a new dataset?
-        let result = plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        let result = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
         assert_eq!(result.dataset.id, plan_param.dataset.id);
         assert_eq!(result.dataset.paused, plan_param.dataset.paused);
         assert_eq!(result.dataset.extra, plan_param.dataset.extra);
         assert_eq!(result.dataset.modified_by, username);
 
-        tx.rollback().await.unwrap();
+        assert_eq!(
+            result.dataset,
+            Dataset {
+                id: plan_param.dataset.id,
+                paused: plan_param.dataset.paused,
+                extra: plan_param.dataset.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
     }
 
     /// Test PlanParam::upsert - Can we update an existing dataset?
@@ -622,17 +651,14 @@ mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Insert initial dataset
-        let dataset_param = DatasetParam::default();
-        let plan_param = PlanParam {
-            dataset: dataset_param,
-            data_products: vec![],
-            dependencies: vec![],
-        };
-
+        let plan_param = PlanParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
-        plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
         // Test: Can we update an existing dataset?
         let updated_dataset_param = DatasetParam {
@@ -647,13 +673,21 @@ mod tests {
             dependencies: vec![],
         };
 
-        let result = updated_plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        let result = updated_plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
-        assert_eq!(result.dataset.id, updated_plan_param.dataset.id);
-        assert_eq!(result.dataset.paused, true);
-        assert_eq!(result.dataset.extra, Some(json!({"updated":true})));
-
-        tx.rollback().await.unwrap();
+        assert_eq!(
+            result.dataset,
+            Dataset {
+                id: updated_plan_param.dataset.id,
+                paused: true,
+                extra: Some(json!({"updated":true})),
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
     }
 
     /// Test PlanParam::upsert - Can we insert a new data product?
@@ -661,26 +695,34 @@ mod tests {
     async fn test_plan_param_upsert_insert_data_product(pool: PgPool) {
         let mut tx = pool.begin().await.unwrap();
 
-        let dataset_param = DatasetParam::default();
-        let data_product_param = DataProductParam::default();
-        let plan_param = PlanParam {
-            dataset: dataset_param,
-            data_products: vec![data_product_param],
-            dependencies: vec![],
-        };
-
+        let plan_param = PlanParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
         // Test: Can we insert a new data product?
-        let result = plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        let result = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
-        assert_eq!(result.data_products.len(), 1);
-        assert_eq!(result.data_products[0].id, plan_param.data_products[0].id);
-        assert_eq!(result.data_products[0].name, plan_param.data_products[0].name);
-        assert_eq!(result.data_products[0].compute, plan_param.data_products[0].compute);
+        let data_product_param = &plan_param.data_products[0];
 
-        tx.rollback().await.unwrap();
+        assert_eq!(result.data_products.len(), 2);
+        assert!(result.data_products.contains(&DataProduct {
+            id: data_product_param.id,
+            compute: data_product_param.compute,
+            name: data_product_param.name.clone(),
+            version: data_product_param.version.clone(),
+            eager: data_product_param.eager,
+            passthrough: data_product_param.passthrough.clone(),
+            state: State::Waiting,
+            run_id: None,
+            link: None,
+            passback: None,
+            extra: data_product_param.extra.clone(),
+            modified_by: username.to_string(),
+            modified_date: trim_to_microseconds(modified_date),
+        }));
     }
 
     /// Test PlanParam::upsert - Can we update an existing data product?
@@ -689,18 +731,14 @@ mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Insert initial data product
-        let dataset_param = DatasetParam::default();
-        let data_product_param = DataProductParam::default();
-        let plan_param = PlanParam {
-            dataset: dataset_param,
-            data_products: vec![data_product_param],
-            dependencies: vec![],
-        };
-
+        let plan_param = PlanParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
-        plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
         // Test: Can we update an existing data product?
         let updated_data_product_param = DataProductParam {
@@ -719,15 +757,27 @@ mod tests {
             dependencies: vec![],
         };
 
-        let result = updated_plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        let result = updated_plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
-        assert_eq!(result.data_products.len(), 1);
-        assert_eq!(result.data_products[0].name, "updated_product");
-        assert_eq!(result.data_products[0].version, "2.0.0");
-        assert_eq!(result.data_products[0].eager, false);
-        assert_eq!(result.data_products[0].compute, Compute::Dbxaas);
-
-        tx.rollback().await.unwrap();
+        assert_eq!(result.data_products.len(), 2);
+        assert!(result.data_products.contains(&DataProduct {
+            id: plan_param.data_products[0].id,
+            name: "updated_product".to_string(),
+            version: "2.0.0".to_string(),
+            eager: false,
+            compute: Compute::Dbxaas,
+            passthrough: Some(json!({"updated":"passthrough"})),
+            extra: Some(json!({"updated":"extra"})),
+            state: State::Waiting,
+            run_id: None,
+            link: None,
+            passback: None,
+            modified_by: username.to_string(),
+            modified_date: trim_to_microseconds(modified_date),
+        }));
     }
 
     /// Test PlanParam::upsert - Can we insert a new dependency?
@@ -735,33 +785,40 @@ mod tests {
     async fn test_plan_param_upsert_insert_dependency(pool: PgPool) {
         let mut tx = pool.begin().await.unwrap();
 
-        let dataset_param = DatasetParam::default();
-        let dp1_param = DataProductParam::default();
-        let dp2_param = DataProductParam::default();
-        let dependency_param = DependencyParam {
-            parent_id: dp1_param.id,
-            child_id: dp2_param.id,
-            extra: Some(json!({"test":"dependency"})),
-        };
-
-        let plan_param = PlanParam {
-            dataset: dataset_param,
-            data_products: vec![dp1_param, dp2_param],
-            dependencies: vec![dependency_param],
-        };
-
+        let plan_param = PlanParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
         // Test: Can we insert a new dependency?
-        let result = plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        let result = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
         assert_eq!(result.dependencies.len(), 1);
-        assert_eq!(result.dependencies[0].parent_id, plan_param.dependencies[0].parent_id);
-        assert_eq!(result.dependencies[0].child_id, plan_param.dependencies[0].child_id);
-        assert_eq!(result.dependencies[0].extra, plan_param.dependencies[0].extra);
+        assert_eq!(
+            result.dependencies[0].parent_id,
+            plan_param.dependencies[0].parent_id
+        );
+        assert_eq!(
+            result.dependencies[0].child_id,
+            plan_param.dependencies[0].child_id
+        );
+        assert_eq!(
+            result.dependencies[0].extra,
+            plan_param.dependencies[0].extra
+        );
 
-        tx.rollback().await.unwrap();
+        assert_eq!(
+            result.dependencies,
+            vec![Dependency {
+                parent_id: plan_param.dependencies[0].parent_id,
+                child_id: plan_param.dependencies[0].child_id,
+                extra: plan_param.dependencies[0].extra.clone(),
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }]
+        );
     }
 
     /// Test PlanParam::upsert - Can we update an existing dependency?
@@ -770,25 +827,14 @@ mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Insert initial dependency
-        let dataset_param = DatasetParam::default();
-        let dp1_param = DataProductParam::default();
-        let dp2_param = DataProductParam::default();
-        let dependency_param = DependencyParam {
-            parent_id: dp1_param.id,
-            child_id: dp2_param.id,
-            extra: Some(json!({"initial":"value"})),
-        };
-
-        let plan_param = PlanParam {
-            dataset: dataset_param,
-            data_products: vec![dp1_param, dp2_param],
-            dependencies: vec![dependency_param],
-        };
-
+        let plan_param = PlanParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
-        plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
         // Test: Can we update an existing dependency?
         let updated_dependency_param = DependencyParam {
@@ -803,12 +849,26 @@ mod tests {
             dependencies: vec![updated_dependency_param],
         };
 
-        let result = updated_plan_param.upsert(&mut tx, username, modified_date).await.unwrap();
+        let result = updated_plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
 
         assert_eq!(result.dependencies.len(), 1);
-        assert_eq!(result.dependencies[0].extra, Some(json!({"updated":"value"})));
-
-        tx.rollback().await.unwrap();
+        assert_eq!(
+            result.dependencies[0].extra,
+            Some(json!({"updated":"value"}))
+        );
+        assert_eq!(
+            result.dependencies,
+            vec![Dependency {
+                parent_id: updated_plan_param.dependencies[0].parent_id,
+                child_id: updated_plan_param.dependencies[0].child_id,
+                extra: updated_plan_param.dependencies[0].extra.clone(),
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }]
+        );
     }
 
     // ------------ Pure unit tests (#[test]) ------------
@@ -816,7 +876,7 @@ mod tests {
     /// Test Plan::data_product_ids - Do we get all the data product ids for all data products in a plan?
     #[test]
     fn test_plan_data_product_ids() {
-        let plan = create_test_plan();
+        let plan = dummy_test_plan();
         let ids = plan.data_product_ids();
 
         assert_eq!(ids.len(), 2);
@@ -827,7 +887,7 @@ mod tests {
     /// Test Plan::edges - Do we get all the parent / child data product ids for all dependencies in a plan?
     #[test]
     fn test_plan_edges() {
-        let plan = create_test_plan();
+        let plan = dummy_test_plan();
         let edges = plan.edges();
 
         assert_eq!(edges.len(), 1);
@@ -839,7 +899,7 @@ mod tests {
     /// Test Plan::data_product - Do we get a data product if we feed in its id?
     #[test]
     fn test_plan_data_product() {
-        let plan = create_test_plan();
+        let plan = dummy_test_plan();
         let target_id = plan.data_products[0].id;
 
         // Test successful lookup
@@ -857,7 +917,7 @@ mod tests {
     /// Test Plan::data_product_mut - Do we get a data product in a mutable state if we feed in its id?
     #[test]
     fn test_plan_data_product_mut() {
-        let mut plan = create_test_plan();
+        let mut plan = dummy_test_plan();
         let target_id = plan.data_products[0].id;
 
         // Test successful lookup
@@ -882,7 +942,7 @@ mod tests {
     /// Test Plan::to_dag - Can we convert a plan to a dag?
     #[test]
     fn test_plan_to_dag() {
-        let plan = create_test_plan();
+        let plan = dummy_test_plan();
         let dag_result = plan.to_dag();
 
         assert!(dag_result.is_ok());
@@ -963,7 +1023,13 @@ mod tests {
 
         let result = plan_param.has_dup_dependencies();
         assert!(result.is_some());
-        assert_eq!(result.unwrap(), (plan_param.dependencies[0].parent_id, plan_param.dependencies[0].child_id));
+        assert_eq!(
+            result.unwrap(),
+            (
+                plan_param.dependencies[0].parent_id,
+                plan_param.dependencies[0].child_id
+            )
+        );
     }
 
     /// Test PlanParam::data_product_ids - Do we get all the data product ids for all data products in a plan?
