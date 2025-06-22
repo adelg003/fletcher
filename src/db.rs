@@ -555,15 +555,12 @@ mod tests {
     async fn test_data_product_insert_nonexistent_dataset(pool: PgPool) {
         // Create data product with a fake dataset_id
         let fake_dataset_id = Uuid::new_v4();
-        let data_product_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Dbxaas,
-            name: "test-data-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: false,
-            passthrough: None,
-            extra: None,
-        };
+        /// Test rejection when data product references non-existent dataset
+        #[sqlx::test]
+        async fn test_data_product_insert_nonexistent_dataset(pool: PgPool) {
+        // Create data product with a fake dataset_id
+        let fake_dataset_id = Uuid::new_v4();
+        let data_product_param: DataProductParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -585,42 +582,28 @@ mod tests {
             result.unwrap_err(),
             Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some(),
         ));
-    }
+        }
 
-    /// Test Update of existing Data Product
-    #[sqlx::test]
-    async fn test_data_product_update(pool: PgPool) {
-        // First create a dataset
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        /// Test Update of existing Data Product
+        #[sqlx::test]
+        async fn test_data_product_update(pool: PgPool) {
+        // First create a dataset  
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Create initial data product
-        let initial_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "initial-name".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: Some(json!({"initial": "data"})),
-            extra: Some(json!({"initial": "extra"})),
-        };
+        let mut initial_param: DataProductParam = Default::default();
+        initial_param.compute = Compute::Cams;
+        initial_param.name = "initial-name".to_string();
+        initial_param.version = "1.0.0".to_string();
+        initial_param.eager = true;
+        initial_param.passthrough = Some(json!({"initial": "data"}));
+        initial_param.extra = Some(json!({"initial": "extra"}));
 
-        let mut tx = pool.begin().await.unwrap();
-        data_product_upsert(&mut tx, dataset.id, &initial_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        create_test_data_product(&pool, dataset.id, &initial_param, username, modified_date).await;
 
         // Now update with different values (same id, same dataset_id)
         let updated_param = DataProductParam {
@@ -668,48 +651,34 @@ mod tests {
                 modified_date: trim_to_microseconds(updated_modified_date),
             },
         );
-    }
+        }
 
-    /// Test successful update of Data Product State
-    #[sqlx::test]
-    async fn test_state_update_success(pool: PgPool) {
+        /// Test successful update of Data Product State
+        #[sqlx::test]
+        async fn test_state_update_success(pool: PgPool) {
         // First create a dataset
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Create initial data product
-        let data_product_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "test-data-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: Some(json!({"test": "passthrough"})),
-            extra: Some(json!({"test": "extra"})),
-        };
+        let mut data_product_param: DataProductParam = Default::default();
+        data_product_param.compute = Compute::Cams;
+        data_product_param.name = "test-data-product".to_string();
+        data_product_param.version = "1.0.0".to_string();
+        data_product_param.eager = true;
+        data_product_param.passthrough = Some(json!({"test": "passthrough"}));
+        data_product_param.extra = Some(json!({"test": "extra"}));
 
-        let mut tx = pool.begin().await.unwrap();
-        let initial_data_product = data_product_upsert(
-            &mut tx,
+        let initial_data_product = create_test_data_product(
+            &pool,
             dataset.id,
             &data_product_param,
             username,
             modified_date,
-        )
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
+        ).await;
 
         // Now update the state
         let state_param = StateParam {
@@ -755,25 +724,17 @@ mod tests {
                 modified_date: trim_to_microseconds(updated_modified_date),
             }
         );
-    }
+        }
 
-    /// Test rejection when updating state of non-existent data product
-    #[sqlx::test]
-    async fn test_state_update_nonexistent_data_product(pool: PgPool) {
+        /// Test rejection when updating state of non-existent data product
+        #[sqlx::test]
+        async fn test_state_update_nonexistent_data_product(pool: PgPool) {
         // Create a dataset so dataset exists but no data product
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Try to update state for a non-existent data product
         let fake_data_product_id = Uuid::new_v4();
@@ -796,67 +757,37 @@ mod tests {
             result.unwrap_err(),
             Error::Sqlx(sqlx::Error::RowNotFound),
         ));
-    }
+        }
 
-    /// Test data_products_by_dataset_select returns all data products for a dataset
-    #[sqlx::test]
-    async fn test_data_products_by_dataset_select(pool: PgPool) {
+        /// Test data_products_by_dataset_select returns all data products for a dataset
+        #[sqlx::test]
+        async fn test_data_products_by_dataset_select(pool: PgPool) {
         // Create a dataset
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Create multiple data products for this dataset
-        let data_product_1 = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "data-product-1".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: Some(json!({"test1": "data1"})),
-            extra: Some(json!({"extra1": "data1"})),
-        };
+        let mut data_product_1: DataProductParam = Default::default();
+        data_product_1.compute = Compute::Cams;
+        data_product_1.name = "data-product-1".to_string();
+        data_product_1.version = "1.0.0".to_string();
+        data_product_1.eager = true;
+        data_product_1.passthrough = Some(json!({"test1": "data1"}));
+        data_product_1.extra = Some(json!({"extra1": "data1"}));
 
-        let data_product_2 = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Dbxaas,
-            name: "data-product-2".to_string(),
-            version: "2.0.0".to_string(),
-            eager: false,
-            passthrough: None,
-            extra: Some(json!({"extra2": "data2"})),
-        };
+        let mut data_product_2: DataProductParam = Default::default();
+        data_product_2.compute = Compute::Dbxaas;
+        data_product_2.name = "data-product-2".to_string();
+        data_product_2.version = "2.0.0".to_string();
+        data_product_2.eager = false;
+        data_product_2.passthrough = None;
+        data_product_2.extra = Some(json!({"extra2": "data2"}));
 
-        let mut tx = pool.begin().await.unwrap();
-        let inserted_dp1 = data_product_upsert(
-            &mut tx,
-            dataset.id,
-            &data_product_1,
-            username,
-            modified_date,
-        )
-        .await
-        .unwrap();
-        let inserted_dp2 = data_product_upsert(
-            &mut tx,
-            dataset.id,
-            &data_product_2,
-            username,
-            modified_date,
-        )
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
+        let inserted_dp1 = create_test_data_product(&pool, dataset.id, &data_product_1, username, modified_date).await;
+        let inserted_dp2 = create_test_data_product(&pool, dataset.id, &data_product_2, username, modified_date).await;
 
         // Test data_products_by_dataset_select
         let mut tx = pool.begin().await.unwrap();
@@ -869,57 +800,31 @@ mod tests {
         assert_eq!(retrieved_data_products.len(), 2);
         assert!(retrieved_data_products.contains(&inserted_dp1));
         assert!(retrieved_data_products.contains(&inserted_dp2));
-    }
+        }
 
-    /// Test dependency_upsert can add a new dependency
-    #[sqlx::test]
-    async fn test_dependency_upsert_insert(pool: PgPool) {
+        /// Test dependency_upsert can add a new dependency
+        #[sqlx::test]
+        async fn test_dependency_upsert_insert(pool: PgPool) {
         // Create a dataset
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Create two data products to create a dependency between them
-        let parent_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "parent-data-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: None,
-            extra: None,
-        };
+        let mut parent_param: DataProductParam = Default::default();
+        parent_param.compute = Compute::Cams;
+        parent_param.name = "parent-data-product".to_string();
+        parent_param.eager = true;
 
-        let child_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Dbxaas,
-            name: "child-data-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: false,
-            passthrough: None,
-            extra: None,
-        };
+        let mut child_param: DataProductParam = Default::default();
+        child_param.compute = Compute::Dbxaas;
+        child_param.name = "child-data-product".to_string();
+        child_param.eager = false;
 
-        let mut tx = pool.begin().await.unwrap();
-        let parent_dp =
-            data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
-                .await
-                .unwrap();
-        let child_dp =
-            data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
-                .await
-                .unwrap();
-        tx.commit().await.unwrap();
+        let parent_dp = create_test_data_product(&pool, dataset.id, &parent_param, username, modified_date).await;
+        let child_dp = create_test_data_product(&pool, dataset.id, &child_param, username, modified_date).await;
 
         // Create a dependency
         let dependency_param = DependencyParam {
@@ -952,57 +857,31 @@ mod tests {
                 modified_date: trim_to_microseconds(modified_date),
             }
         );
-    }
+        }
 
-    /// Test dependency_upsert can update an existing dependency
-    #[sqlx::test]
-    async fn test_dependency_upsert_update(pool: PgPool) {
+        /// Test dependency_upsert can update an existing dependency
+        #[sqlx::test]
+        async fn test_dependency_upsert_update(pool: PgPool) {
         // Create a dataset
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Create two data products
-        let parent_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "parent-data-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: None,
-            extra: None,
-        };
+        let mut parent_param: DataProductParam = Default::default();
+        parent_param.compute = Compute::Cams;
+        parent_param.name = "parent-data-product".to_string();
+        parent_param.eager = true;
 
-        let child_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Dbxaas,
-            name: "child-data-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: false,
-            passthrough: None,
-            extra: None,
-        };
+        let mut child_param: DataProductParam = Default::default();
+        child_param.compute = Compute::Dbxaas;
+        child_param.name = "child-data-product".to_string();
+        child_param.eager = false;
 
-        let mut tx = pool.begin().await.unwrap();
-        let parent_dp =
-            data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
-                .await
-                .unwrap();
-        let child_dp =
-            data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
-                .await
-                .unwrap();
-        tx.commit().await.unwrap();
+        let parent_dp = create_test_data_product(&pool, dataset.id, &parent_param, username, modified_date).await;
+        let child_dp = create_test_data_product(&pool, dataset.id, &child_param, username, modified_date).await;
 
         // Create initial dependency
         let initial_dependency_param = DependencyParam {
@@ -1057,43 +936,25 @@ mod tests {
                 modified_date: trim_to_microseconds(updated_modified_date),
             }
         );
-    }
+        }
 
-    /// Test dependency_upsert rejects dependency with non-existent parent
-    #[sqlx::test]
-    async fn test_dependency_upsert_nonexistent_parent(pool: PgPool) {
+        /// Test dependency_upsert rejects dependency with non-existent parent
+        #[sqlx::test]
+        async fn test_dependency_upsert_nonexistent_parent(pool: PgPool) {
         // Create a dataset
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Create only a child data product (no parent)
-        let child_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Dbxaas,
-            name: "child-data-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: false,
-            passthrough: None,
-            extra: None,
-        };
+        let mut child_param: DataProductParam = Default::default();
+        child_param.compute = Compute::Dbxaas;
+        child_param.name = "child-data-product".to_string();
+        child_param.eager = false;
 
-        let mut tx = pool.begin().await.unwrap();
-        let child_dp =
-            data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
-                .await
-                .unwrap();
-        tx.commit().await.unwrap();
+        let child_dp = create_test_data_product(&pool, dataset.id, &child_param, username, modified_date).await;
 
         // Try to create dependency with non-existent parent
         let fake_parent_id = Uuid::new_v4();
@@ -1121,43 +982,25 @@ mod tests {
             result.unwrap_err(),
             Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some(),
         ));
-    }
+        }
 
-    /// Test dependency_upsert rejects dependency with non-existent child
-    #[sqlx::test]
-    async fn test_dependency_upsert_nonexistent_child(pool: PgPool) {
+        /// Test dependency_upsert rejects dependency with non-existent child
+        #[sqlx::test]
+        async fn test_dependency_upsert_nonexistent_child(pool: PgPool) {
         // Create a dataset
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Create only a parent data product (no child)
-        let parent_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "parent-data-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: None,
-            extra: None,
-        };
+        let mut parent_param: DataProductParam = Default::default();
+        parent_param.compute = Compute::Cams;
+        parent_param.name = "parent-data-product".to_string();
+        parent_param.eager = true;
 
-        let mut tx = pool.begin().await.unwrap();
-        let parent_dp =
-            data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
-                .await
-                .unwrap();
-        tx.commit().await.unwrap();
+        let parent_dp = create_test_data_product(&pool, dataset.id, &parent_param, username, modified_date).await;
 
         // Try to create dependency with non-existent child
         let fake_child_id = Uuid::new_v4();
@@ -1185,48 +1028,25 @@ mod tests {
             result.unwrap_err(),
             Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some(),
         ));
-    }
+        }
 
-    /// Test dependency_upsert rejects self-referencing dependency
-    #[sqlx::test]
-    async fn test_dependency_upsert_self_reference(pool: PgPool) {
+        /// Test dependency_upsert rejects self-referencing dependency
+        #[sqlx::test]
+        async fn test_dependency_upsert_self_reference(pool: PgPool) {
         // Create a dataset
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Create a data product
-        let data_product_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "self-referencing-product".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: None,
-            extra: None,
-        };
+        let mut data_product_param: DataProductParam = Default::default();
+        data_product_param.compute = Compute::Cams;
+        data_product_param.name = "self-referencing-product".to_string();
+        data_product_param.eager = true;
 
-        let mut tx = pool.begin().await.unwrap();
-        let data_product = data_product_upsert(
-            &mut tx,
-            dataset.id,
-            &data_product_param,
-            username,
-            modified_date,
-        )
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
+        let data_product = create_test_data_product(&pool, dataset.id, &data_product_param, username, modified_date).await;
 
         // Try to create a self-referencing dependency
         let dependency_param = DependencyParam {
@@ -1253,68 +1073,37 @@ mod tests {
             result.unwrap_err(),
             Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some(),
         ));
-    }
+        }
 
-    /// Test dependencies_by_dataset_select returns all dependencies for a dataset
-    #[sqlx::test]
-    async fn test_dependencies_by_dataset_select(pool: PgPool) {
+        /// Test dependencies_by_dataset_select returns all dependencies for a dataset
+        #[sqlx::test]
+        async fn test_dependencies_by_dataset_select(pool: PgPool) {
         // Create a dataset
-        let dataset_param = DatasetParam {
-            id: Uuid::new_v4(),
-            paused: false,
-            extra: Some(json!({"test": "dataset"})),
-        };
+        let dataset_param: DatasetParam = Default::default();
         let username = "test";
         let modified_date = Utc::now();
 
-        let mut tx = pool.begin().await.unwrap();
-        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dataset = create_test_dataset(&pool, &dataset_param, username, modified_date).await;
 
         // Create three data products to create multiple dependencies
-        let dp1_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "data-product-1".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: None,
-            extra: None,
-        };
+        let mut dp1_param: DataProductParam = Default::default();
+        dp1_param.compute = Compute::Cams;
+        dp1_param.name = "data-product-1".to_string();
+        dp1_param.eager = true;
 
-        let dp2_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Dbxaas,
-            name: "data-product-2".to_string(),
-            version: "1.0.0".to_string(),
-            eager: false,
-            passthrough: None,
-            extra: None,
-        };
+        let mut dp2_param: DataProductParam = Default::default();
+        dp2_param.compute = Compute::Dbxaas;
+        dp2_param.name = "data-product-2".to_string();
+        dp2_param.eager = false;
 
-        let dp3_param = DataProductParam {
-            id: Uuid::new_v4(),
-            compute: Compute::Cams,
-            name: "data-product-3".to_string(),
-            version: "1.0.0".to_string(),
-            eager: true,
-            passthrough: None,
-            extra: None,
-        };
+        let mut dp3_param: DataProductParam = Default::default();
+        dp3_param.compute = Compute::Cams;
+        dp3_param.name = "data-product-3".to_string();
+        dp3_param.eager = true;
 
-        let mut tx = pool.begin().await.unwrap();
-        let dp1 = data_product_upsert(&mut tx, dataset.id, &dp1_param, username, modified_date)
-            .await
-            .unwrap();
-        let dp2 = data_product_upsert(&mut tx, dataset.id, &dp2_param, username, modified_date)
-            .await
-            .unwrap();
-        let dp3 = data_product_upsert(&mut tx, dataset.id, &dp3_param, username, modified_date)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
+        let dp1 = create_test_data_product(&pool, dataset.id, &dp1_param, username, modified_date).await;
+        let dp2 = create_test_data_product(&pool, dataset.id, &dp2_param, username, modified_date).await;
+        let dp3 = create_test_data_product(&pool, dataset.id, &dp3_param, username, modified_date).await;
 
         // Create multiple dependencies: dp1 -> dp2, dp2 -> dp3
         let dependency1_param = DependencyParam {
@@ -1361,5 +1150,5 @@ mod tests {
         assert_eq!(retrieved_dependencies.len(), 2);
         assert!(retrieved_dependencies.contains(&dep1));
         assert!(retrieved_dependencies.contains(&dep2));
-    }
+        }
 }
