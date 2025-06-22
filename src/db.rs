@@ -325,7 +325,7 @@ pub async fn dependencies_by_dataset_select(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{error::Error, model::DataProductId};
+    use crate::error::Error;
     use chrono::Timelike;
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -364,16 +364,6 @@ mod tests {
                 run_id: Some(Uuid::new_v4()),
                 link: Some("https://example.com/run".to_string()),
                 passback: Some(json!({"status": "running"})),
-            }
-        }
-    }
-
-    impl DependencyParam {
-        pub fn new(parent_id: DataProductId, child_id: DataProductId) -> Self {
-            Self {
-                parent_id,
-                child_id,
-                extra: Some(json!({"test":"dependency"})),
             }
         }
     }
