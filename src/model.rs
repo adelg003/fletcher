@@ -337,3 +337,6 @@ pub struct DependencyParam {
     pub child_id: DataProductId,
     pub extra: Option<Value>,
 }
+
+#[cfg(test)]
+mod tests {}
