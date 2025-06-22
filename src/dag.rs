@@ -130,6 +130,7 @@ mod tests {
     use petgraph::graph::DiGraph;
     use std::collections::HashSet;
 
+    /// Test building a valid DAG with nodes and edges
     #[test]
     fn test_build_dag_success() {
         // Test: Can we build a dag?
@@ -148,6 +149,7 @@ mod tests {
         assert_eq!(dag.edge_count(), 3);
     }
 
+    /// Test rejection of self-loop edges
     #[test]
     fn test_build_dag_rejects_self_loop() {
         // Test: Do we reject if an edge has the same parent and child?
@@ -165,6 +167,7 @@ mod tests {
         }
     }
 
+    /// Test rejection of cyclical graphs
     #[test]
     fn test_build_dag_rejects_cycle() {
         // Test: Do we reject dags that are cyclical?
@@ -184,6 +187,7 @@ mod tests {
         }
     }
 
+    /// Test handling of invalid edge references
     #[test]
     fn test_build_dag_invalid_edge() {
         // Test edge references non-existent node
@@ -196,6 +200,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Test finding index of existing node
     #[test]
     fn test_find_node_index_existing_node() {
         // Test: If given a node value, can we find its index in the graph?
@@ -214,6 +219,7 @@ mod tests {
         assert_eq!(dag.node_weight(found_index), Some(&2));
     }
 
+    /// Test finding index of non-existing node
     #[test]
     fn test_find_node_index_non_existing_node() {
         let nodes: HashSet<i32> = [1, 2].iter().cloned().collect();
@@ -225,6 +231,7 @@ mod tests {
         assert!(index.is_none());
     }
 
+    /// Test downstream nodes from simple tree structure
     #[test]
     fn test_downstream_nodes_simple_tree() {
         // Test: If given a dag, can we return all the children and subsequent generations from the start_node?
@@ -243,6 +250,7 @@ mod tests {
         assert_eq!(downstream, expected);
     }
 
+    /// Test downstream nodes from complex DAG structure
     #[test]
     fn test_downstream_nodes_complex_dag() {
         // Test with a more complex DAG structure
@@ -268,6 +276,7 @@ mod tests {
         assert_eq!(downstream_from_3, expected_from_3);
     }
 
+    /// Test downstream nodes from leaf node
     #[test]
     fn test_downstream_nodes_leaf_node() {
         let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
@@ -282,6 +291,7 @@ mod tests {
         assert!(downstream.is_empty());
     }
 
+    /// Test downstream nodes for non-existing node
     #[test]
     fn test_downstream_nodes_non_existing_node() {
         let nodes: HashSet<i32> = [1, 2].iter().cloned().collect();
@@ -293,6 +303,7 @@ mod tests {
         assert!(downstream.is_empty());
     }
 
+    /// Test parent nodes with multiple parents
     #[test]
     fn test_parent_nodes_simple_case() {
         // Test: Can we return the parents of a node, and just the direct parents?
@@ -310,6 +321,7 @@ mod tests {
         assert_eq!(parents, expected);
     }
 
+    /// Test parent nodes with single parent
     #[test]
     fn test_parent_nodes_single_parent() {
         let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
@@ -325,6 +337,7 @@ mod tests {
         assert_eq!(parents, expected);
     }
 
+    /// Test parent nodes for root node
     #[test]
     fn test_parent_nodes_root_node() {
         let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
@@ -339,6 +352,7 @@ mod tests {
         assert!(parents.is_empty());
     }
 
+    /// Test parent nodes for non-existing node
     #[test]
     fn test_parent_nodes_non_existing_node() {
         let nodes: HashSet<i32> = [1, 2].iter().cloned().collect();
@@ -350,6 +364,7 @@ mod tests {
         assert!(parents.is_empty());
     }
 
+    /// Test validation of acyclic graph
     #[test]
     fn test_validate_acyclic_valid_dag() {
         let nodes: HashSet<i32> = [1, 2, 3].iter().cloned().collect();
@@ -361,4 +376,3 @@ mod tests {
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
         assert!(dag.validate_acyclic().is_ok());
     }
-}
