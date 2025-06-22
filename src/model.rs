@@ -339,4 +339,36 @@ pub struct DependencyParam {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // --- common imports
+    use super::*;
+    use chrono::Utc;
+    use serde_json::json;
+    use pretty_assertions::assert_eq;
+    use sqlx::PgPool;
+    use uuid::Uuid;
+    use std::collections::HashSet;
+
+    // --- default helper impls mirroring db.rs test style
+    impl Default for DatasetParam { … }
+    impl Default for DataProductParam { … }
+    impl Default for StateParam { … }
+
+    // helper fn create_test_plan() -> Plan { … }
+
+    // ------------ DB-layer tests (#[sqlx::test]) ------------
+    //  • Plan::from_dataset_id happy-path + not-found
+    //  • DataProduct::state_update (memory + DB checks)
+    //  • PlanParam::upsert covering dataset / data_product /
+    //    dependency insert & update permutations
+
+    // ------------ Pure unit tests (#[test]) ------------
+    //  • Plan helpers: data_product_ids, edges, data_product,
+    //    data_product_mut, to_dag (incl empty & cyclic)
+    //  • PlanParam helpers: has_dup_data_products,
+    //    has_dup_dependencies, data_product_ids, edges
+    //  • StateParam ::from(&DataProduct)
+
+    // Each test contains clear asserts that mirror the reviewer
+    // bullet list.
+}
