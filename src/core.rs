@@ -168,7 +168,7 @@ async fn state_update(
 async fn clear_downstream_nodes(
     tx: &mut Transaction<'_, Postgres>,
     plan: &mut Plan,
-    nodes: &Vec<DataProductId>,
+    nodes: &[DataProductId],
     username: &str,
     modified_date: DateTime<Utc>,
 ) -> poem::Result<()> {
@@ -1103,7 +1103,7 @@ mod tests {
 
         // Clear and check resuts.
         let result =
-            clear_downstream_nodes(&mut tx, &mut plan, &vec![dp1_id], username, modified_date)
+            clear_downstream_nodes(&mut tx, &mut plan, &[dp1_id], username, modified_date)
                 .await;
         assert!(result.is_ok());
         assert_eq!(plan.data_product(dp2_id).unwrap().state, State::Waiting);
@@ -1132,7 +1132,7 @@ mod tests {
             link: None,
             passback: None,
         }];
-        let nodes = states.into_iter().map(|state| state.id).collect();
+        let nodes: Vec<DataProductId> = states.into_iter().map(|state| state.id).collect();
 
         let result =
             clear_downstream_nodes(&mut tx, &mut plan, &nodes, username, modified_date).await;
