@@ -268,7 +268,7 @@ mod tests {
             "dependencies": [
                 {
                     "parent_id": dp_id,
-                    "child_id": dp_id,
+                    "child_id": dp_id, // Cyclical dependency
                     "extra": {"test":"dependency"},
                 }
             ]
