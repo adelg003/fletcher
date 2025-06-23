@@ -1103,8 +1103,7 @@ mod tests {
 
         // Clear and check resuts.
         let result =
-            clear_downstream_nodes(&mut tx, &mut plan, &[dp1_id], username, modified_date)
-                .await;
+            clear_downstream_nodes(&mut tx, &mut plan, &[dp1_id], username, modified_date).await;
         assert!(result.is_ok());
         assert_eq!(plan.data_product(dp2_id).unwrap().state, State::Waiting);
         assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Waiting);
