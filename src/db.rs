@@ -323,7 +323,7 @@ pub async fn dependencies_by_dataset_select(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::error::Error;
     use chrono::Timelike;
@@ -332,44 +332,8 @@ mod tests {
     use sqlx::PgPool;
     use uuid::Uuid;
 
-    impl Default for DatasetParam {
-        fn default() -> Self {
-            Self {
-                id: Uuid::new_v4(),
-                paused: false,
-                extra: Some(json!({"test":"dataset"})),
-            }
-        }
-    }
-
-    impl Default for DataProductParam {
-        fn default() -> Self {
-            Self {
-                id: Uuid::new_v4(),
-                compute: Compute::Cams,
-                name: "test-data-product".to_string(),
-                version: "1.0.0".to_string(),
-                eager: true,
-                passthrough: Some(json!({"test":"passthrough"})),
-                extra: Some(json!({"test":"extra"})),
-            }
-        }
-    }
-
-    impl Default for StateParam {
-        fn default() -> Self {
-            Self {
-                id: Uuid::new_v4(),
-                state: State::Running,
-                run_id: Some(Uuid::new_v4()),
-                link: Some("https://example.com/run".to_string()),
-                passback: Some(json!({"status": "running"})),
-            }
-        }
-    }
-
     /// Trim a DateTime to micro-seconds (aka the level that Postgres stores timestamps to)
-    fn trim_to_microseconds(dt: DateTime<Utc>) -> DateTime<Utc> {
+    pub fn trim_to_microseconds(dt: DateTime<Utc>) -> DateTime<Utc> {
         let micros = dt.timestamp_subsec_micros();
         dt.with_nanosecond(micros * 1_000).unwrap()
     }
@@ -828,7 +792,7 @@ mod tests {
         let dependency_param = DependencyParam {
             parent_id: parent_dp.id,
             child_id: child_dp.id,
-            extra: Some(json!({"dependency": "test"})),
+            ..Default::default()
         };
 
         // Test dependency_upsert
@@ -891,7 +855,7 @@ mod tests {
         let initial_dependency_param = DependencyParam {
             parent_id: parent_dp.id,
             child_id: child_dp.id,
-            extra: Some(json!({"initial": "data"})),
+            ..Default::default()
         };
 
         dependency_upsert(
@@ -908,7 +872,7 @@ mod tests {
         let updated_dependency_param = DependencyParam {
             parent_id: parent_dp.id,
             child_id: child_dp.id,
-            extra: Some(json!({"updated": "data"})),
+            ..Default::default()
         };
 
         let updated_modified_date = Utc::now();
@@ -964,7 +928,7 @@ mod tests {
         let dependency_param = DependencyParam {
             parent_id: Uuid::new_v4(), // Fake parent id
             child_id: child_dp.id,
-            extra: Some(json!({"test": "dependency"})),
+            ..Default::default()
         };
 
         // Test dependency_upsert - should fail with foreign key constraint
@@ -1011,7 +975,7 @@ mod tests {
         let dependency_param = DependencyParam {
             parent_id: parent_dp.id,
             child_id: Uuid::new_v4(), // Fake child id
-            extra: Some(json!({"test": "dependency"})),
+            ..Default::default()
         };
 
         // Test dependency_upsert - should fail with foreign key constraint
@@ -1047,10 +1011,7 @@ mod tests {
             .unwrap();
 
         // Create a data product
-        let mut data_product_param: DataProductParam = Default::default();
-        data_product_param.compute = Compute::Cams;
-        data_product_param.name = "self-referencing-product".to_string();
-        data_product_param.eager = true;
+        let data_product_param: DataProductParam = Default::default();
 
         let data_product = data_product_upsert(
             &mut tx,
@@ -1066,7 +1027,7 @@ mod tests {
         let dependency_param = DependencyParam {
             parent_id: data_product.id,
             child_id: data_product.id, // Same as parent - should be rejected
-            extra: Some(json!({"test": "self-reference"})),
+            ..Default::default()
         };
 
         // Test dependency_upsert - should fail with check constraint
@@ -1133,13 +1094,13 @@ mod tests {
         let dependency1_param = DependencyParam {
             parent_id: dp1.id,
             child_id: dp2.id,
-            extra: Some(json!({"dependency": "1-2"})),
+            ..Default::default()
         };
 
         let dependency2_param = DependencyParam {
             parent_id: dp2.id,
             child_id: dp3.id,
-            extra: Some(json!({"dependency": "2-3"})),
+            ..Default::default()
         };
 
         let dep1 = dependency_upsert(
