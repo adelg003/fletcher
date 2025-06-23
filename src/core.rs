@@ -307,10 +307,7 @@ pub async fn states_edit(
     }
 
     // Clear all nodes that are downstream of the ones we just updated.
-    let nodes: Vec<DataProductId> = states
-        .into_iter()
-        .map(|state: &StateParam| state.id)
-        .collect();
+    let nodes: Vec<DataProductId> = states.iter().map(|state: &StateParam| state.id).collect();
     clear_downstream_nodes(tx, &mut plan, &nodes, username, modified_date).await?;
 
     // Triger the next batch of data products
@@ -323,8 +320,8 @@ pub async fn states_edit(
 mod tests {
     use super::*;
     use crate::model::{
-        Compute, DataProduct, DataProductParam, Dataset, DatasetParam, DependencyParam, Plan,
-        PlanParam, State, StateParam,
+        Compute, DataProduct, DataProductParam, Dataset, DatasetParam, Dependency, DependencyParam,
+        Plan, PlanParam, State, StateParam,
     };
     use chrono::Utc;
     use poem::http::StatusCode;
@@ -359,7 +356,7 @@ mod tests {
                     compute: Compute::Dbxaas,
                     name: "test-product-2".to_string(),
                     version: "2.0.0".to_string(),
-                    eager: false,
+                    eager: true,
                     passthrough: None,
                     extra: None,
                 },
@@ -383,67 +380,6 @@ mod tests {
                     parent_id: dp2_id,
                     child_id: dp3_id,
                     extra: Some(json!({"dep": "2->3"})),
-                },
-            ],
-        }
-    }
-
-    /// Helper function to create a simple plan param with cyclical dependencies
-    fn create_cyclical_plan_param() -> PlanParam {
-        let dp1_id = Uuid::new_v4();
-        let dp2_id = Uuid::new_v4();
-        let dp3_id = Uuid::new_v4();
-
-        PlanParam {
-            dataset: DatasetParam {
-                id: Uuid::new_v4(),
-                paused: false,
-                extra: None,
-            },
-            data_products: vec![
-                DataProductParam {
-                    id: dp1_id,
-                    compute: Compute::Cams,
-                    name: "cycle-1".to_string(),
-                    version: "1.0.0".to_string(),
-                    eager: true,
-                    passthrough: None,
-                    extra: None,
-                },
-                DataProductParam {
-                    id: dp2_id,
-                    compute: Compute::Cams,
-                    name: "cycle-2".to_string(),
-                    version: "1.0.0".to_string(),
-                    eager: true,
-                    passthrough: None,
-                    extra: None,
-                },
-                DataProductParam {
-                    id: dp3_id,
-                    compute: Compute::Cams,
-                    name: "cycle-3".to_string(),
-                    version: "1.0.0".to_string(),
-                    eager: true,
-                    passthrough: None,
-                    extra: None,
-                },
-            ],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: dp1_id,
-                    child_id: dp2_id,
-                    extra: None,
-                },
-                DependencyParam {
-                    parent_id: dp2_id,
-                    child_id: dp3_id,
-                    extra: None,
-                },
-                DependencyParam {
-                    parent_id: dp3_id,
-                    child_id: dp1_id, // Creates cycle
-                    extra: None,
                 },
             ],
         }
@@ -671,7 +607,63 @@ mod tests {
     /// Test validate_plan_param rejects cyclical dependencies in new plan
     #[test]
     fn test_validate_plan_param_rejects_cyclical_new_plan() {
-        let param = create_cyclical_plan_param();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                paused: false,
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "cycle-1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp2_id,
+                    compute: Compute::Cams,
+                    name: "cycle-2".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp3_id,
+                    compute: Compute::Cams,
+                    name: "cycle-3".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp2_id,
+                    extra: None,
+                },
+                DependencyParam {
+                    parent_id: dp2_id,
+                    child_id: dp3_id,
+                    extra: None,
+                },
+                DependencyParam {
+                    parent_id: dp3_id,
+                    child_id: dp1_id, // Creates cycle
+                    extra: None,
+                },
+            ],
+        };
 
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
@@ -683,8 +675,8 @@ mod tests {
     /// Test validate_plan_param rejects cyclical dependencies when combined with existing plan
     #[test]
     fn test_validate_plan_param_rejects_cyclical_combined_plan() {
-        let existing_dp_id = Uuid::new_v4();
-        let new_dp_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
 
         let existing_plan = Plan {
             dataset: Dataset {
@@ -694,22 +686,45 @@ mod tests {
                 modified_by: "test".to_string(),
                 modified_date: Utc::now(),
             },
-            data_products: vec![DataProduct {
-                id: existing_dp_id,
-                compute: Compute::Cams,
-                name: "existing-product".to_string(),
-                version: "1.0.0".to_string(),
-                eager: true,
-                passthrough: None,
-                state: State::Waiting,
-                run_id: None,
-                link: None,
-                passback: None,
+            data_products: vec![
+                DataProduct {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "data product-1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    state: State::Waiting,
+                    run_id: None,
+                    link: None,
+                    passback: None,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+                DataProduct {
+                    id: dp2_id,
+                    compute: Compute::Cams,
+                    name: "data product-2".to_string(),
+                    version: "2.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    state: State::Waiting,
+                    run_id: None,
+                    link: None,
+                    passback: None,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+            ],
+            dependencies: vec![Dependency {
+                parent_id: dp1_id,
+                child_id: dp2_id,
                 extra: None,
                 modified_by: "test".to_string(),
                 modified_date: Utc::now(),
             }],
-            dependencies: vec![],
         };
 
         let param = PlanParam {
@@ -718,27 +733,12 @@ mod tests {
                 paused: false,
                 extra: None,
             },
-            data_products: vec![DataProductParam {
-                id: new_dp_id,
-                compute: Compute::Cams,
-                name: "new-product".to_string(),
-                version: "1.0.0".to_string(),
-                eager: true,
-                passthrough: None,
+            data_products: vec![],
+            dependencies: vec![DependencyParam {
+                parent_id: dp2_id,
+                child_id: dp1_id, // Creates cycle with existing
                 extra: None,
             }],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: existing_dp_id,
-                    child_id: new_dp_id,
-                    extra: None,
-                },
-                DependencyParam {
-                    parent_id: new_dp_id,
-                    child_id: existing_dp_id, // Creates cycle with existing
-                    extra: None,
-                },
-            ],
         };
 
         let result = validate_plan_param(&param, &Some(existing_plan));
@@ -1415,12 +1415,12 @@ mod tests {
                 .state,
             State::Success
         );
-        // Second DP is non-eager in test data, remains Waiting
+        // Second DP is eager in test data, change to Queued
         let second_state = updated_plan
             .data_product(param.data_products[1].id)
             .unwrap()
             .state;
-        assert!(matches!(second_state, State::Waiting));
+        assert!(matches!(second_state, State::Queued));
         // Third DP remains Waiting
         assert_eq!(
             updated_plan
