@@ -1011,10 +1011,7 @@ pub mod tests {
             .unwrap();
 
         // Create a data product
-        let mut data_product_param: DataProductParam = Default::default();
-        data_product_param.compute = Compute::Cams;
-        data_product_param.name = "self-referencing-product".to_string();
-        data_product_param.eager = true;
+        let data_product_param: DataProductParam = Default::default();
 
         let data_product = data_product_upsert(
             &mut tx,

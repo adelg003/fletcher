@@ -891,9 +891,14 @@ mod tests {
         let edges = plan.edges();
 
         assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].0, plan.dependencies[0].parent_id);
-        assert_eq!(edges[0].1, plan.dependencies[0].child_id);
-        assert_eq!(edges[0].2, 1);
+        assert_eq!(
+            edges[0],
+            (
+                plan.dependencies[0].parent_id,
+                plan.dependencies[0].child_id,
+                1
+            )
+        );
     }
 
     /// Test Plan::data_product - Do we get a data product if we feed in its id?
@@ -905,8 +910,7 @@ mod tests {
         // Test successful lookup
         let found_dp = plan.data_product(target_id);
         assert!(found_dp.is_some());
-        assert_eq!(found_dp.unwrap().id, target_id);
-        assert_eq!(found_dp.unwrap().name, "product_1");
+        assert_eq!(*found_dp.unwrap(), plan.data_products[0]);
 
         // Test with non-existent id
         let non_existent_id = Uuid::new_v4();
@@ -956,14 +960,7 @@ mod tests {
     /// Test PlanParam::has_dup_data_products - If there are no duplicate data products, do we get None?
     #[test]
     fn test_plan_param_has_dup_data_products_none() {
-        let dp1 = DataProductParam::default();
-        let dp2 = DataProductParam::default();
-
-        let plan_param = PlanParam {
-            dataset: DatasetParam::default(),
-            data_products: vec![dp1, dp2],
-            dependencies: vec![],
-        };
+        let plan_param = PlanParam::default();
 
         let result = plan_param.has_dup_data_products();
         assert!(result.is_none());
@@ -992,14 +989,7 @@ mod tests {
     /// Test PlanParam::has_dup_dependencies - If there are no duplicate dependencies, do we get None?
     #[test]
     fn test_plan_param_has_dup_dependencies_none() {
-        let dep1 = DependencyParam::default();
-        let dep2 = DependencyParam::default();
-
-        let plan_param = PlanParam {
-            dataset: DatasetParam::default(),
-            data_products: vec![],
-            dependencies: vec![dep1, dep2],
-        };
+        let plan_param = PlanParam::default();
 
         let result = plan_param.has_dup_dependencies();
         assert!(result.is_none());
@@ -1035,14 +1025,7 @@ mod tests {
     /// Test PlanParam::data_product_ids - Do we get all the data product ids for all data products in a plan?
     #[test]
     fn test_plan_param_data_product_ids() {
-        let dp1 = DataProductParam::default();
-        let dp2 = DataProductParam::default();
-
-        let plan_param = PlanParam {
-            dataset: DatasetParam::default(),
-            data_products: vec![dp1, dp2],
-            dependencies: vec![],
-        };
+        let plan_param = PlanParam::default();
 
         let ids = plan_param.data_product_ids();
         assert_eq!(ids.len(), 2);
@@ -1053,23 +1036,18 @@ mod tests {
     /// Test PlanParam::edges - Do we get all the parent / child data product ids for all dependencies in a plan?
     #[test]
     fn test_plan_param_edges() {
-        let dep1 = DependencyParam::default();
-        let dep2 = DependencyParam::default();
-
-        let plan_param = PlanParam {
-            dataset: DatasetParam::default(),
-            data_products: vec![],
-            dependencies: vec![dep1, dep2],
-        };
+        let plan_param = PlanParam::default();
 
         let edges = plan_param.edges();
-        assert_eq!(edges.len(), 2);
-        assert_eq!(edges[0].0, plan_param.dependencies[0].parent_id);
-        assert_eq!(edges[0].1, plan_param.dependencies[0].child_id);
-        assert_eq!(edges[0].2, 1);
-        assert_eq!(edges[1].0, plan_param.dependencies[1].parent_id);
-        assert_eq!(edges[1].1, plan_param.dependencies[1].child_id);
-        assert_eq!(edges[1].2, 1);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(
+            edges[0],
+            (
+                plan_param.dependencies[0].parent_id,
+                plan_param.dependencies[0].child_id,
+                1
+            )
+        );
     }
 
     /// Test StateParam::from - Can we convert a DataProduct to a StateParam?
