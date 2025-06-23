@@ -291,4 +291,327 @@ mod tests {
         response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
         response.assert_text("Graph is cyclical").await;
     }
-}
+
+    /// Test Plan Get - Success Case
+    #[sqlx::test]
+    async fn test_plan_get_success(pool: PgPool) {
+        let dataset_id = Uuid::new_v4().to_string();
+        let dp1_id = Uuid::new_v4().to_string();
+        let dp2_id = Uuid::new_v4().to_string();
+
+        // First create a plan via POST
+        let param = json!({
+            "dataset": {
+                "id": dataset_id,
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id,
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id,
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": false,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id,
+                    "child_id": dp2_id,
+                    "extra": {"test":"dependency"},
+                }
+            ]
+        });
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Now test the GET endpoint
+        let response: TestResponse = cli
+            .get(&format!("/plan/{}", dataset_id))
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        // Pull response json
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        // Validate Dataset
+        let dataset = json_value.object().get("dataset").object();
+        dataset.get("id").assert_string(&dataset_id);
+        dataset.get("paused").assert_bool(false);
+        dataset.get("extra").object().get("test").assert_string("dataset");
+        dataset.get("modified_by").assert_string("placeholder_user");
+
+        // Validate Data Products
+        let data_products = json_value.object().get("data_products").object_array();
+        assert_eq!(data_products.len(), 2);
+
+        let data_product_1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id)
+            .unwrap();
+        data_product_1.get("state").assert_string("queued");
+
+        let data_product_2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id)
+            .unwrap();
+        data_product_2.get("state").assert_string("waiting");
+
+        // Validate Dependencies
+        let dependencies = json_value.object().get("dependencies").object_array();
+        assert_eq!(dependencies.len(), 1);
+        let dependency = &dependencies[0];
+        dependency.get("parent_id").assert_string(&dp1_id);
+        dependency.get("child_id").assert_string(&dp2_id);
+    }
+
+    /// Test Plan Get - Not Found Case
+    #[sqlx::test]
+    async fn test_plan_get_not_found(pool: PgPool) {
+        let non_existent_dataset_id = Uuid::new_v4().to_string();
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let response: TestResponse = cli
+            .get(&format!("/plan/{}", non_existent_dataset_id))
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status(StatusCode::NOT_FOUND);
+    }
+
+    /// Test State Put - Success Case
+    #[sqlx::test]
+    async fn test_state_put_success(pool: PgPool) {
+        let dataset_id = Uuid::new_v4().to_string();
+        let dp1_id = Uuid::new_v4().to_string();
+        let dp2_id = Uuid::new_v4().to_string();
+
+        // Create initial plan
+        let create_param = json!({
+            "dataset": { "id": dataset_id, "paused": false, "extra": {"test":"dataset"} },
+            "data_products": [
+                {"id": dp1_id, "compute": "cams", "name": "data-product-1", "version": "1.0.0", "eager": true, "passthrough": {"test":"passthrough1"}, "extra": {"test":"extra1"}},
+                {"id": dp2_id, "compute": "dbxaas", "name": "data-product-2", "version": "2.0.0", "eager": false, "passthrough": {"test":"passthrough2"}, "extra": {"test":"extra2"}},
+            ],
+            "dependencies": [{"parent_id": dp1_id, "child_id": dp2_id, "extra": {"test":"dependency"}}]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update states
+        let state_param = json!([
+            { "id": dp1_id, "state": "running", "run_id": "12345678-1234-1234-1234-123456789abc", "link": "https://example.com/run-123", "passback": {"status": "started"} },
+            { "id": dp2_id, "state": "success", "run_id": "12345678-1234-1234-1234-123456789def", "link": "https://example.com/run-456", "passback": {"status": "finished", "result": "success"} }
+        ]);
+
+        let response: TestResponse = cli
+            .put(&format!("/data_product/{}", dataset_id))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+        let data_products = json_value.object().get("data_products").object_array();
+
+        let dp1 = data_products.iter().find(|dp| dp.get("id").string() == dp1_id).unwrap();
+        dp1.get("state").assert_string("running");
+        dp1.get("run_id").assert_string("12345678-1234-1234-1234-123456789abc");
+
+        let dp2 = data_products.iter().find(|dp| dp.get("id").string() == dp2_id).unwrap();
+        dp2.get("state").assert_string("success");
+        dp2.get("run_id").assert_string("12345678-1234-1234-1234-123456789def");
+    }
+
+    /// Test State Put - Dataset Not Found Case
+    #[sqlx::test]
+    async fn test_state_put_dataset_not_found(pool: PgPool) {
+        let non_existent_dataset_id = Uuid::new_v4().to_string();
+        let dp_id = Uuid::new_v4().to_string();
+        let state_param = json!([{ "id": dp_id, "state": "running", "run_id": "12345678-1234-1234-1234-123456789abc", "link": "https://example.com/run-123", "passback": {"status": "started"} }]);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+        let response: TestResponse = cli
+            .put(&format!("/data_product/{}", non_existent_dataset_id))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status(StatusCode::NOT_FOUND);
+    }
+
+    /// Test State Put - Data Product Not Found Case
+    #[sqlx::test]
+    async fn test_state_put_data_product_not_found(pool: PgPool) {
+        let dataset_id = Uuid::new_v4().to_string();
+        let dp1_id = Uuid::new_v4().to_string();
+        let missing_dp_id = Uuid::new_v4().to_string();
+
+        let create_param = json!({
+            "dataset": { "id": dataset_id, "paused": false, "extra": {"test":"dataset"} },
+            "data_products": [{ "id": dp1_id, "compute": "cams", "name": "data-product-1", "version": "1.0.0", "eager": true, "passthrough": {"test":"passthrough1"}, "extra": {"test":"extra1"} }],
+            "dependencies": []
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        let state_param = json!([{ "id": missing_dp_id, "state": "running", "run_id": "12345678-1234-1234-1234-123456789abc", "link": "https://example.com/run-123", "passback": {"status": "started"} }]);
+        let response: TestResponse = cli
+            .put(&format!("/data_product/{}", dataset_id))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status(StatusCode::NOT_FOUND);
+    }
+
+    /// Test Plan Post - Invalid JSON Payload (Missing Required Fields)
+    #[sqlx::test]
+    async fn test_plan_post_invalid_payload(pool: PgPool) {
+        let param = json!({
+            "dataset": { "id": "invalid-uuid", "paused": false },
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+        let response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    /// Test Plan Post - Empty Data Products Array
+    #[sqlx::test]
+    async fn test_plan_post_empty_data_products(pool: PgPool) {
+        let dataset_id = Uuid::new_v4().to_string();
+        let param = json!({
+            "dataset": { "id": dataset_id, "paused": false, "extra": {"test":"dataset"} },
+            "data_products": [], "dependencies": []
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+        let response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+        let data_products = json_value.object().get("data_products").object_array();
+        assert_eq!(data_products.len(), 0);
+        let dependencies = json_value.object().get("dependencies").object_array();
+        assert_eq!(dependencies.len(), 0);
+    }
+
+    /// Test Plan Post - Duplicate Data Product IDs in Payload
+    #[sqlx::test]
+    async fn test_plan_post_duplicate_data_product_ids(pool: PgPool) {
+        let dataset_id = Uuid::new_v4().to_string();
+        let dp_id = Uuid::new_v4().to_string();
+        let param = json!({
+            "dataset": { "id": dataset_id, "paused": false, "extra": {"test":"dataset"} },
+            "data_products": [
+                { "id": dp_id, "compute": "cams", "name": "data-product-1", "version": "1.0.0", "eager": true, "passthrough": {"test":"passthrough1"}, "extra": {"test":"extra1"} },
+                { "id": dp_id, "compute": "dbxaas", "name": "data-product-2", "version": "2.0.0", "eager": false, "passthrough": {"test":"passthrough2"}, "extra": {"test":"extra2"} }
+            ],
+            "dependencies": []
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+        let response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    /// Test Plan Post - Missing Data Product for Dependency
+    #[sqlx::test]
+    async fn test_plan_post_missing_data_product_for_dependency(pool: PgPool) {
+        let dataset_id = Uuid::new_v4().to_string();
+        let dp_id = Uuid::new_v4().to_string();
+        let missing_dp_id = Uuid::new_v4().to_string();
+        let param = json!({
+            "dataset": { "id": dataset_id, "paused": false, "extra": {"test":"dataset"} },
+            "data_products": [{ "id": dp_id, "compute": "cams", "name": "data-product-1", "version": "1.0.0", "eager": true, "passthrough": {"test":"passthrough1"}, "extra": {"test":"extra1"} }],
+            "dependencies": [{ "parent_id": missing_dp_id, "child_id": dp_id, "extra": {"test":"dependency"} }]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+        let response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status(StatusCode::BAD_REQUEST);
+    }
+    }
