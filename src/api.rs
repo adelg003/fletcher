@@ -166,7 +166,6 @@ mod tests {
         dp1.get("run_id").assert_null();
         dp1.get("link").assert_null();
         dp1.get("passback").assert_null();
-        dp1.get("passback").assert_null();
         dp1.get("extra")
             .object()
             .get("test")
@@ -189,7 +188,6 @@ mod tests {
         dp2.get("state").assert_string("waiting");
         dp2.get("run_id").assert_null();
         dp2.get("link").assert_null();
-        dp2.get("passback").assert_null();
         dp2.get("passback").assert_null();
         dp2.get("extra")
             .object()
