@@ -388,7 +388,6 @@ mod tests {
                 "state": "success",
                 "run_id": "12345678-1234-1234-1234-123456789abc",
                 "link": "https://example.com/run-123",
-                "passback": {"status": "started"},
                 "passback": {
                     "status": "finished",
                     "result": "success",
@@ -403,7 +402,7 @@ mod tests {
                     "status": "finished",
                     "result": "failed",
                 },
-            }
+            },
         ]);
 
         let response: TestResponse = cli
