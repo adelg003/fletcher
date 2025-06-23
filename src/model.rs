@@ -24,7 +24,7 @@ pub type DataProductId = Uuid;
 pub type Edge = (DataProductId, DataProductId, u32);
 
 /// Plan Details
-#[derive(Debug, Object, PartialEq)]
+#[derive(Clone, Debug, Object, PartialEq)]
 pub struct Plan {
     pub dataset: Dataset,
     pub data_products: Vec<DataProduct>,
@@ -94,7 +94,7 @@ impl Plan {
 }
 
 /// Dataset details
-#[derive(Debug, Object, PartialEq)]
+#[derive(Clone, Debug, Object, PartialEq)]
 pub struct Dataset {
     pub id: DatasetId,
     pub paused: bool,
@@ -139,7 +139,7 @@ impl fmt::Display for State {
 }
 
 /// Data Product details
-#[derive(Debug, Object, PartialEq)]
+#[derive(Clone, Debug, Object, PartialEq)]
 pub struct DataProduct {
     pub id: DataProductId,
     pub compute: Compute,
@@ -172,7 +172,7 @@ impl DataProduct {
 }
 
 /// Dependency from one Data Product to another Data Product
-#[derive(Debug, Object, PartialEq)]
+#[derive(Clone, Debug, Object, PartialEq)]
 pub struct Dependency {
     pub parent_id: DataProductId,
     pub child_id: DataProductId,
@@ -182,7 +182,7 @@ pub struct Dependency {
 }
 
 /// Input for a Plan
-#[derive(Object)]
+#[derive(Clone, Object)]
 pub struct PlanParam {
     pub dataset: DatasetParam,
     pub data_products: Vec<DataProductParam>,
@@ -286,7 +286,7 @@ impl PlanParam {
 }
 
 /// Input parameters for a Dataset
-#[derive(Object)]
+#[derive(Clone, Object)]
 pub struct DatasetParam {
     pub id: DatasetId,
     pub paused: bool,
@@ -294,7 +294,7 @@ pub struct DatasetParam {
 }
 
 /// Input parameters for a Data Product
-#[derive(Object)]
+#[derive(Clone, Object)]
 pub struct DataProductParam {
     pub id: DataProductId,
     pub compute: Compute,
@@ -306,7 +306,7 @@ pub struct DataProductParam {
 }
 
 /// Input parameters for State
-#[derive(Object)]
+#[derive(Clone, Object)]
 pub struct StateParam {
     pub id: DataProductId,
     pub state: State,
@@ -328,7 +328,7 @@ impl From<&mut DataProduct> for StateParam {
 }
 
 /// Input for adding a Dependency
-#[derive(Object)]
+#[derive(Clone, Object)]
 pub struct DependencyParam {
     pub parent_id: DataProductId,
     pub child_id: DataProductId,
@@ -413,7 +413,7 @@ mod tests {
     }
 
     // Helper function to create a test plan
-    fn dummy_test_plan() -> Plan {
+    fn create_test_plan() -> Plan {
         let now = Utc::now();
         let dataset_id = Uuid::new_v4();
         let dp1_id = Uuid::new_v4();
@@ -876,7 +876,7 @@ mod tests {
     /// Test Plan::data_product_ids - Do we get all the data product ids for all data products in a plan?
     #[test]
     fn test_plan_data_product_ids() {
-        let plan = dummy_test_plan();
+        let plan = create_test_plan();
         let ids = plan.data_product_ids();
 
         assert_eq!(ids.len(), 2);
@@ -887,7 +887,7 @@ mod tests {
     /// Test Plan::edges - Do we get all the parent / child data product ids for all dependencies in a plan?
     #[test]
     fn test_plan_edges() {
-        let plan = dummy_test_plan();
+        let plan = create_test_plan();
         let edges = plan.edges();
 
         assert_eq!(edges.len(), 1);
@@ -904,7 +904,7 @@ mod tests {
     /// Test Plan::data_product - Do we get a data product if we feed in its id?
     #[test]
     fn test_plan_data_product() {
-        let plan = dummy_test_plan();
+        let plan = create_test_plan();
         let target_id = plan.data_products[0].id;
 
         // Test successful lookup
@@ -921,7 +921,7 @@ mod tests {
     /// Test Plan::data_product_mut - Do we get a data product in a mutable state if we feed in its id?
     #[test]
     fn test_plan_data_product_mut() {
-        let mut plan = dummy_test_plan();
+        let mut plan = create_test_plan();
         let target_id = plan.data_products[0].id;
 
         // Test successful lookup
@@ -946,7 +946,7 @@ mod tests {
     /// Test Plan::to_dag - Can we convert a plan to a dag?
     #[test]
     fn test_plan_to_dag() {
-        let plan = dummy_test_plan();
+        let plan = create_test_plan();
         let dag_result = plan.to_dag();
 
         assert!(dag_result.is_ok());
