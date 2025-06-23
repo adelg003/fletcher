@@ -168,7 +168,7 @@ async fn state_update(
 async fn clear_downstream_nodes(
     tx: &mut Transaction<'_, Postgres>,
     plan: &mut Plan,
-    states: &Vec<StateParam>,
+    nodes: &Vec<DataProductId>,
     username: &str,
     modified_date: DateTime<Utc>,
 ) -> poem::Result<()> {
@@ -180,8 +180,8 @@ async fn clear_downstream_nodes(
 
     // What are all the downstream nodes of our updated states?
     let mut downstream_ids = HashSet::<DataProductId>::new();
-    for state in states {
-        let new_ids: HashSet<DataProductId> = dag.downstream_nodes(state.id);
+    for node in nodes {
+        let new_ids: HashSet<DataProductId> = dag.downstream_nodes(*node);
         downstream_ids.extend(new_ids);
     }
 
@@ -307,7 +307,11 @@ pub async fn states_edit(
     }
 
     // Clear all nodes that are downstream of the ones we just updated.
-    clear_downstream_nodes(tx, &mut plan, states, username, modified_date).await?;
+    let nodes: Vec<DataProductId> = states
+        .into_iter()
+        .map(|state: &StateParam| state.id)
+        .collect();
+    clear_downstream_nodes(tx, &mut plan, &nodes, username, modified_date).await?;
 
     // Triger the next batch of data products
     trigger_next_batch(tx, &mut plan, username, modified_date).await?;
@@ -318,20 +322,17 @@ pub async fn states_edit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        error::Error,
-        model::{Compute, DataProduct, DataProductParam, Dataset, DatasetParam, DependencyParam, Plan, PlanParam, State, StateParam},
+    use crate::model::{
+        Compute, DataProduct, DataProductParam, Dataset, DatasetParam, DependencyParam, Plan,
+        PlanParam, State, StateParam,
     };
     use chrono::Utc;
+    use poem::http::StatusCode;
     use serde_json::json;
     use sqlx::PgPool;
-    use std::collections::HashSet;
     use uuid::Uuid;
 
-    // Make private helper functions accessible for testing
-    pub(crate) use super::{validate_plan_param, state_update, clear_downstream_nodes, trigger_next_batch, states_edit};
-
-    // Helper function to create test data
+    /// Helper function to create test data
     fn create_test_plan_param() -> PlanParam {
         let dp1_id = Uuid::new_v4();
         let dp2_id = Uuid::new_v4();
@@ -387,7 +388,7 @@ mod tests {
         }
     }
 
-    // Helper function to create a simple plan param with cyclical dependencies
+    /// Helper function to create a simple plan param with cyclical dependencies
     fn create_cyclical_plan_param() -> PlanParam {
         let dp1_id = Uuid::new_v4();
         let dp2_id = Uuid::new_v4();
@@ -449,7 +450,7 @@ mod tests {
     }
 
     // Tests for validate_plan_param function
-    
+
     /// Test validate_plan_param accepts valid plan with no existing plan
     #[test]
     fn test_validate_plan_param_valid_new_plan() {
@@ -494,7 +495,11 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, BadRequest(Error::Duplicate(_))));
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            format!("{err}"),
+            format!("Duplicate data-product id in parameter: {duplicate_id}"),
+        );
     }
 
     /// Test validate_plan_param rejects duplicate dependencies in payload
@@ -502,7 +507,7 @@ mod tests {
     fn test_validate_plan_param_rejects_duplicate_dependencies() {
         let dp1_id = Uuid::new_v4();
         let dp2_id = Uuid::new_v4();
-        
+
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
@@ -546,44 +551,45 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, BadRequest(Error::DuplicateDependencies(_, _))));
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            format!("{err}"),
+            format!("Duplicate dependency in parameter: {dp1_id} -> {dp2_id}")
+        );
     }
 
     /// Test validate_plan_param rejects self-referencing dependencies
     #[test]
     fn test_validate_plan_param_rejects_self_reference() {
         let dp_id = Uuid::new_v4();
-        
+
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
                 paused: false,
                 extra: None,
             },
-            data_products: vec![
-                DataProductParam {
-                    id: dp_id,
-                    compute: Compute::Cams,
-                    name: "product-1".to_string(),
-                    version: "1.0.0".to_string(),
-                    eager: true,
-                    passthrough: None,
-                    extra: None,
-                },
-            ],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: dp_id,
-                    child_id: dp_id, // Self-reference
-                    extra: None,
-                },
-            ],
+            data_products: vec![DataProductParam {
+                id: dp_id,
+                compute: Compute::Cams,
+                name: "product-1".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: None,
+                extra: None,
+            }],
+            dependencies: vec![DependencyParam {
+                parent_id: dp_id,
+                child_id: dp_id, // Self-reference
+                extra: None,
+            }],
         };
 
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, UnprocessableEntity(Error::Cyclical)));
+        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
     /// Test validate_plan_param rejects parent dependencies with no data product
@@ -591,37 +597,37 @@ mod tests {
     fn test_validate_plan_param_rejects_missing_parent() {
         let dp1_id = Uuid::new_v4();
         let missing_parent_id = Uuid::new_v4();
-        
+
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
                 paused: false,
                 extra: None,
             },
-            data_products: vec![
-                DataProductParam {
-                    id: dp1_id,
-                    compute: Compute::Cams,
-                    name: "product-1".to_string(),
-                    version: "1.0.0".to_string(),
-                    eager: true,
-                    passthrough: None,
-                    extra: None,
-                },
-            ],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: missing_parent_id, // Parent doesn't exist
-                    child_id: dp1_id,
-                    extra: None,
-                },
-            ],
+            data_products: vec![DataProductParam {
+                id: dp1_id,
+                compute: Compute::Cams,
+                name: "product-1".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: None,
+                extra: None,
+            }],
+            dependencies: vec![DependencyParam {
+                parent_id: missing_parent_id, // Parent doesn't exist
+                child_id: dp1_id,
+                extra: None,
+            }],
         };
 
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, BadRequest(Error::Missing(_))));
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product not found for: {missing_parent_id}")
+        );
     }
 
     /// Test validate_plan_param rejects child dependencies with no data product
@@ -629,48 +635,49 @@ mod tests {
     fn test_validate_plan_param_rejects_missing_child() {
         let dp1_id = Uuid::new_v4();
         let missing_child_id = Uuid::new_v4();
-        
+
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
                 paused: false,
                 extra: None,
             },
-            data_products: vec![
-                DataProductParam {
-                    id: dp1_id,
-                    compute: Compute::Cams,
-                    name: "product-1".to_string(),
-                    version: "1.0.0".to_string(),
-                    eager: true,
-                    passthrough: None,
-                    extra: None,
-                },
-            ],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: dp1_id,
-                    child_id: missing_child_id, // Child doesn't exist
-                    extra: None,
-                },
-            ],
+            data_products: vec![DataProductParam {
+                id: dp1_id,
+                compute: Compute::Cams,
+                name: "product-1".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: None,
+                extra: None,
+            }],
+            dependencies: vec![DependencyParam {
+                parent_id: dp1_id,
+                child_id: missing_child_id, // Child doesn't exist
+                extra: None,
+            }],
         };
 
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, BadRequest(Error::Missing(_))));
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product not found for: {missing_child_id}")
+        );
     }
 
     /// Test validate_plan_param rejects cyclical dependencies in new plan
     #[test]
     fn test_validate_plan_param_rejects_cyclical_new_plan() {
         let param = create_cyclical_plan_param();
-        
+
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, UnprocessableEntity(Error::Cyclical)));
+        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
     /// Test validate_plan_param rejects cyclical dependencies when combined with existing plan
@@ -678,7 +685,7 @@ mod tests {
     fn test_validate_plan_param_rejects_cyclical_combined_plan() {
         let existing_dp_id = Uuid::new_v4();
         let new_dp_id = Uuid::new_v4();
-        
+
         let existing_plan = Plan {
             dataset: Dataset {
                 id: Uuid::new_v4(),
@@ -687,43 +694,39 @@ mod tests {
                 modified_by: "test".to_string(),
                 modified_date: Utc::now(),
             },
-            data_products: vec![
-                DataProduct {
-                    id: existing_dp_id,
-                    compute: Compute::Cams,
-                    name: "existing-product".to_string(),
-                    version: "1.0.0".to_string(),
-                    eager: true,
-                    passthrough: None,
-                    state: State::Waiting,
-                    run_id: None,
-                    link: None,
-                    passback: None,
-                    extra: None,
-                    modified_by: "test".to_string(),
-                    modified_date: Utc::now(),
-                },
-            ],
+            data_products: vec![DataProduct {
+                id: existing_dp_id,
+                compute: Compute::Cams,
+                name: "existing-product".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: None,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: None,
+                modified_by: "test".to_string(),
+                modified_date: Utc::now(),
+            }],
             dependencies: vec![],
         };
-        
+
         let param = PlanParam {
             dataset: DatasetParam {
                 id: existing_plan.dataset.id,
                 paused: false,
                 extra: None,
             },
-            data_products: vec![
-                DataProductParam {
-                    id: new_dp_id,
-                    compute: Compute::Cams,
-                    name: "new-product".to_string(),
-                    version: "1.0.0".to_string(),
-                    eager: true,
-                    passthrough: None,
-                    extra: None,
-                },
-            ],
+            data_products: vec![DataProductParam {
+                id: new_dp_id,
+                compute: Compute::Cams,
+                name: "new-product".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: None,
+                extra: None,
+            }],
             dependencies: vec![
                 DependencyParam {
                     parent_id: existing_dp_id,
@@ -741,7 +744,8 @@ mod tests {
         let result = validate_plan_param(&param, &Some(existing_plan));
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, UnprocessableEntity(Error::Cyclical)));
+        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
     // Tests for plan_add function
@@ -755,7 +759,7 @@ mod tests {
 
         let result = plan_add(&mut tx, &param, username).await;
         assert!(result.is_ok());
-        
+
         let plan = result.unwrap();
         assert_eq!(plan.dataset.id, param.dataset.id);
         assert_eq!(plan.data_products.len(), 3);
@@ -777,23 +781,21 @@ mod tests {
         let new_dp_id = Uuid::new_v4();
         let update_param = PlanParam {
             dataset: initial_param.dataset.clone(),
-            data_products: vec![
-                DataProductParam {
-                    id: new_dp_id,
-                    compute: Compute::Dbxaas,
-                    name: "new-product".to_string(),
-                    version: "3.0.0".to_string(),
-                    eager: true,
-                    passthrough: Some(json!({"new": "product"})),
-                    extra: Some(json!({"added": "later"})),
-                },
-            ],
+            data_products: vec![DataProductParam {
+                id: new_dp_id,
+                compute: Compute::Dbxaas,
+                name: "new-product".to_string(),
+                version: "3.0.0".to_string(),
+                eager: true,
+                passthrough: Some(json!({"new": "product"})),
+                extra: Some(json!({"added": "later"})),
+            }],
             dependencies: vec![],
         };
 
         let result = plan_add(&mut tx, &update_param, username).await;
         assert!(result.is_ok());
-        
+
         let updated_plan = result.unwrap();
         assert_eq!(updated_plan.data_products.len(), 4);
         let new_dp = updated_plan.data_product(new_dp_id);
@@ -808,31 +810,30 @@ mod tests {
         let username = "test_user";
 
         let initial_param = create_test_plan_param();
-        let initial_plan = plan_add(&mut tx, &initial_param, username).await.unwrap();
-        
+        plan_add(&mut tx, &initial_param, username).await.unwrap();
+
         let dp1_id = initial_param.data_products[0].id;
         let dp3_id = initial_param.data_products[2].id;
 
         let update_param = PlanParam {
             dataset: initial_param.dataset.clone(),
             data_products: vec![],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: dp1_id,
-                    child_id: dp3_id,
-                    extra: Some(json!({"shortcut": "dependency"})),
-                },
-            ],
+            dependencies: vec![DependencyParam {
+                parent_id: dp1_id,
+                child_id: dp3_id,
+                extra: Some(json!({"shortcut": "dependency"})),
+            }],
         };
 
         let result = plan_add(&mut tx, &update_param, username).await;
         assert!(result.is_ok());
-        
+
         let updated_plan = result.unwrap();
         assert_eq!(updated_plan.dependencies.len(), 3);
-        let new_dep = updated_plan.dependencies.iter().find(|dep| {
-            dep.parent_id == dp1_id && dep.child_id == dp3_id
-        });
+        let new_dep = updated_plan
+            .dependencies
+            .iter()
+            .find(|dep| dep.parent_id == dp1_id && dep.child_id == dp3_id);
         assert!(new_dep.is_some());
     }
 
@@ -848,23 +849,21 @@ mod tests {
         let dp1_id = initial_param.data_products[0].id;
         let update_param = PlanParam {
             dataset: initial_param.dataset.clone(),
-            data_products: vec![
-                DataProductParam {
-                    id: dp1_id,
-                    compute: Compute::Dbxaas,
-                    name: "updated-product-name".to_string(),
-                    version: "2.5.0".to_string(),
-                    eager: false,
-                    passthrough: Some(json!({"updated": "passthrough"})),
-                    extra: Some(json!({"updated": "extra"})),
-                },
-            ],
+            data_products: vec![DataProductParam {
+                id: dp1_id,
+                compute: Compute::Dbxaas,
+                name: "updated-product-name".to_string(),
+                version: "2.5.0".to_string(),
+                eager: false,
+                passthrough: Some(json!({"updated": "passthrough"})),
+                extra: Some(json!({"updated": "extra"})),
+            }],
             dependencies: vec![],
         };
 
         let result = plan_add(&mut tx, &update_param, username).await;
         assert!(result.is_ok());
-        
+
         let updated_plan = result.unwrap();
         let updated_dp = updated_plan.data_product(dp1_id).unwrap();
         assert_eq!(updated_dp.name, "updated-product-name");
@@ -888,23 +887,26 @@ mod tests {
         let update_param = PlanParam {
             dataset: initial_param.dataset.clone(),
             data_products: vec![],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: dp1_id,
-                    child_id: dp2_id,
-                    extra: Some(json!({"updated": "dependency_extra"})),
-                },
-            ],
+            dependencies: vec![DependencyParam {
+                parent_id: dp1_id,
+                child_id: dp2_id,
+                extra: Some(json!({"updated": "dependency_extra"})),
+            }],
         };
 
         let result = plan_add(&mut tx, &update_param, username).await;
         assert!(result.is_ok());
-        
+
         let updated_plan = result.unwrap();
-        let updated_dep = updated_plan.dependencies.iter().find(|dep| {
-            dep.parent_id == dp1_id && dep.child_id == dp2_id
-        }).unwrap();
-        assert_eq!(updated_dep.extra, Some(json!({"updated": "dependency_extra"})));
+        let updated_dep = updated_plan
+            .dependencies
+            .iter()
+            .find(|dep| dep.parent_id == dp1_id && dep.child_id == dp2_id)
+            .unwrap();
+        assert_eq!(
+            updated_dep.extra,
+            Some(json!({"updated": "dependency_extra"}))
+        );
     }
 
     // Tests for plan_read function
@@ -919,10 +921,13 @@ mod tests {
         let added_plan = plan_add(&mut tx, &param, username).await.unwrap();
         let result = plan_read(&mut tx, added_plan.dataset.id).await;
         assert!(result.is_ok());
-        
+
         let read_plan = result.unwrap();
         assert_eq!(read_plan.dataset.id, added_plan.dataset.id);
-        assert_eq!(read_plan.data_products.len(), added_plan.data_products.len());
+        assert_eq!(
+            read_plan.data_products.len(),
+            added_plan.data_products.len()
+        );
         assert_eq!(read_plan.dependencies.len(), added_plan.dependencies.len());
     }
 
@@ -935,7 +940,11 @@ mod tests {
         let result = plan_read(&mut tx, nonexistent_id).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, NotFound(_)));
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            format!("{err}"),
+            "no rows returned by a query that expected to return at least one row"
+        );
     }
 
     // Tests for state_update function
@@ -959,7 +968,8 @@ mod tests {
                 link: Some(format!("http://{:?}.com", new_state).to_string()),
                 passback: Some(json!({"status": format!("{:?}", new_state)})),
             };
-            let result = state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
+            let result =
+                state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
             assert!(result.is_ok());
         }
     }
@@ -983,9 +993,15 @@ mod tests {
                 link: None,
                 passback: None,
             };
-            let result = state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
+            let result =
+                state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
             assert!(result.is_err());
-            assert!(matches!(result.unwrap_err(), BadRequest(_)));
+            let err = result.unwrap_err();
+            assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                format!("{err}"),
+                format!("The requested state for {dp_id} is invalid: {invalid_state}")
+            );
         }
     }
 
@@ -1009,7 +1025,12 @@ mod tests {
 
         let result = state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), NotFound(_)));
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product not found for: {nonexistent_id}")
+        );
     }
 
     /// Test state_update rejects updates to disabled data products
@@ -1034,7 +1055,9 @@ mod tests {
 
         let result = state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Forbidden(_)));
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+        assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
     }
 
     // Tests for clear_downstream_nodes function
@@ -1047,22 +1070,44 @@ mod tests {
         let username = "test_user";
         let modified_date = Utc::now();
 
+        let dp1_id = param.data_products[0].id;
+        let dp2_id = param.data_products[1].id;
+        let dp3_id = param.data_products[2].id;
+
         let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
-        plan.data_products[1].state = State::Success;
-        plan.data_products[2].state = State::Running;
 
-        let states = vec![StateParam {
-            id: plan.data_products[0].id,
-            state: State::Failed,
-            run_id: None,
-            link: None,
-            passback: None,
-        }];
+        // Update the state of our nodes
+        let states = vec![
+            StateParam {
+                id: dp1_id,
+                state: State::Failed,
+                ..Default::default()
+            },
+            StateParam {
+                id: dp2_id,
+                state: State::Success,
+                ..Default::default()
+            },
+            StateParam {
+                id: dp3_id,
+                state: State::Running,
+                ..Default::default()
+            },
+        ];
 
-        let result = clear_downstream_nodes(&mut tx, &mut plan, &states, username, modified_date).await;
+        for state in states {
+            state_update(&mut tx, &mut plan, &state, username, modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Clear and check resuts.
+        let result =
+            clear_downstream_nodes(&mut tx, &mut plan, &vec![dp1_id], username, modified_date)
+                .await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[1].state, State::Waiting);
-        assert_eq!(plan.data_products[2].state, State::Waiting);
+        assert_eq!(plan.data_product(dp2_id).unwrap().state, State::Waiting);
+        assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Waiting);
     }
 
     /// Test clear_downstream_nodes skips nodes already in Waiting or Disabled state
@@ -1087,8 +1132,10 @@ mod tests {
             link: None,
             passback: None,
         }];
+        let nodes = states.into_iter().map(|state| state.id).collect();
 
-        let result = clear_downstream_nodes(&mut tx, &mut plan, &states, username, modified_date).await;
+        let result =
+            clear_downstream_nodes(&mut tx, &mut plan, &nodes, username, modified_date).await;
         assert!(result.is_ok());
         assert_eq!(plan.data_products[1].state, State::Waiting);
         assert_eq!(plan.data_products[2].state, State::Disabled);
@@ -1107,7 +1154,7 @@ mod tests {
 
         let dp1_id = Uuid::new_v4();
         let dp2_id = Uuid::new_v4();
-        
+
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
@@ -1134,13 +1181,11 @@ mod tests {
                     extra: None,
                 },
             ],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: dp1_id,
-                    child_id: dp2_id,
-                    extra: None,
-                },
-            ],
+            dependencies: vec![DependencyParam {
+                parent_id: dp1_id,
+                child_id: dp2_id,
+                extra: None,
+            }],
         };
 
         let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
@@ -1161,7 +1206,7 @@ mod tests {
 
         let dp1_id = Uuid::new_v4();
         let dp2_id = Uuid::new_v4();
-        
+
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
@@ -1188,13 +1233,11 @@ mod tests {
                     extra: None,
                 },
             ],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: dp1_id,
-                    child_id: dp2_id,
-                    extra: None,
-                },
-            ],
+            dependencies: vec![DependencyParam {
+                parent_id: dp1_id,
+                child_id: dp2_id,
+                extra: None,
+            }],
         };
 
         let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
@@ -1215,7 +1258,7 @@ mod tests {
 
         let dp1_id = Uuid::new_v4();
         let dp2_id = Uuid::new_v4();
-        
+
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
@@ -1242,22 +1285,33 @@ mod tests {
                     extra: None,
                 },
             ],
-            dependencies: vec![
-                DependencyParam {
-                    parent_id: dp1_id,
-                    child_id: dp2_id,
-                    extra: None,
-                },
-            ],
+            dependencies: vec![DependencyParam {
+                parent_id: dp1_id,
+                child_id: dp2_id,
+                extra: None,
+            }],
         };
 
         let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
-        plan.data_products[0].state = State::Success;
-        plan.data_products[1].state = State::Waiting;
+
+        // Update the state of our nodes
+        state_update(
+            &mut tx,
+            &mut plan,
+            &StateParam {
+                id: dp1_id,
+                state: State::Success,
+                ..Default::default()
+            },
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
 
         let result = trigger_next_batch(&mut tx, &mut plan, username, modified_date).await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[1].state, State::Waiting);
+        assert_eq!(plan.data_product(dp2_id).unwrap().state, State::Waiting);
     }
 
     /// Test trigger_next_batch with multiple successful parents
@@ -1270,7 +1324,7 @@ mod tests {
         let dp1_id = Uuid::new_v4();
         let dp2_id = Uuid::new_v4();
         let dp3_id = Uuid::new_v4();
-        
+
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
@@ -1355,15 +1409,24 @@ mod tests {
         let updated_plan = result.unwrap();
 
         assert_eq!(
-            updated_plan.data_product(param.data_products[0].id).unwrap().state,
+            updated_plan
+                .data_product(param.data_products[0].id)
+                .unwrap()
+                .state,
             State::Success
         );
         // Second DP is non-eager in test data, remains Waiting
-        let second_state = updated_plan.data_product(param.data_products[1].id).unwrap().state;
+        let second_state = updated_plan
+            .data_product(param.data_products[1].id)
+            .unwrap()
+            .state;
         assert!(matches!(second_state, State::Waiting));
         // Third DP remains Waiting
         assert_eq!(
-            updated_plan.data_product(param.data_products[2].id).unwrap().state,
+            updated_plan
+                .data_product(param.data_products[2].id)
+                .unwrap()
+                .state,
             State::Waiting
         );
     }
