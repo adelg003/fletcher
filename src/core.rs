@@ -244,7 +244,7 @@ async fn trigger_next_batch(
         })
         .collect();
 
-    // Generate Dag representation of the plan
+    // Generate Dag representation of the plan (Disabled nodes are not part of the dag.)
     let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
 
     // Check each data product's parents to see if any of them are blocking
