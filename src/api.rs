@@ -1,6 +1,6 @@
 use crate::{
-    core::{plan_add, plan_read, states_edit},
-    model::{DatasetId, Plan, PlanParam, StateParam},
+    core::{disable_drop, plan_add, plan_read, states_edit},
+    model::{DataProductId, DatasetId, Plan, PlanParam, StateParam},
 };
 use poem::{error::InternalServerError, web::Data};
 use poem_openapi::{OpenApi, Tags, param::Path, payload::Json};
@@ -69,6 +69,27 @@ impl Api {
 
         // Update data product states and return the updated plan
         let plan: Plan = states_edit(&mut tx, dataset_id, &states, "placeholder_user").await?;
+
+        // Commit Transaction
+        tx.commit().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+    }
+
+    /// Disable one or multiple data product
+    #[oai(path = "/data_product/:dataset_id", method = "delete", tag = Tag::State)]
+    async fn disable_delete(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+        Json(data_product_ids): Json<Vec<DataProductId>>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Mark Data Products as disabled.
+        let plan: Plan =
+            disable_drop(&mut tx, dataset_id, &data_product_ids, "placeholder_user").await?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;

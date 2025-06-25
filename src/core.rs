@@ -61,7 +61,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&parent_id) {
                 Ok(())
             } else {
-                Err(BadRequest(Error::Missing(parent_id)))
+                Err(NotFound(Error::Missing(parent_id)))
             }
         })?;
 
@@ -73,7 +73,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&child_id) {
                 Ok(())
             } else {
-                Err(BadRequest(Error::Missing(child_id)))
+                Err(NotFound(Error::Missing(child_id)))
             }
         })?;
 
@@ -140,14 +140,6 @@ async fn state_update(
 ) -> poem::Result<()> {
     // Pull before we mutably borrow via plan.data_product()
     let dataset_id: DatasetId = plan.dataset.id;
-
-    // Check the new state to update to, and make sure is valid.
-    match state.state {
-        State::Failed | State::Running | State::Success => Ok(()),
-        State::Disabled | State::Queued | State::Waiting => {
-            Err(BadRequest(Error::BadState(state.id, state.state)))
-        }
-    }?;
 
     // Pull our Data Product
     let data_product: &mut DataProduct = plan
@@ -296,11 +288,21 @@ async fn trigger_next_batch(
 pub async fn states_edit(
     tx: &mut Transaction<'_, Postgres>,
     id: DatasetId,
-    states: &Vec<StateParam>,
+    states: &[StateParam],
     username: &str,
 ) -> poem::Result<Plan> {
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
+
+    // Check the new state to update to, and make sure is valid.
+    states
+        .into_iter()
+        .try_for_each(|state: &StateParam| match state.state {
+            State::Failed | State::Running | State::Success => Ok(()),
+            State::Disabled | State::Queued | State::Waiting => {
+                Err(BadRequest(Error::BadState(state.id, state.state)))
+            }
+        })?;
 
     // Pull the Plan so we know what we are working with
     let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
@@ -313,6 +315,41 @@ pub async fn states_edit(
     // Clear all nodes that are downstream of the ones we just updated.
     let nodes: Vec<DataProductId> = states.iter().map(|state: &StateParam| state.id).collect();
     clear_downstream_nodes(tx, &mut plan, &nodes, username, modified_date).await?;
+
+    // Trigger the next batch of data products
+    trigger_next_batch(tx, &mut plan, username, modified_date).await?;
+
+    Ok(plan)
+}
+
+/// Mark a Data Product as Disabled
+pub async fn disable_drop(
+    tx: &mut Transaction<'_, Postgres>,
+    id: DatasetId,
+    data_product_ids: &[DataProductId],
+    username: &str,
+) -> poem::Result<Plan> {
+    // Timestamp of the transaction
+    let modified_date: DateTime<Utc> = Utc::now();
+
+    // Pull the Plan so we know what we are working with
+    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+
+    for id in data_product_ids {
+        // Pull the Data Product we want
+        let data_product: &DataProduct = plan
+            .data_product(*id)
+            .ok_or(NotFound(Error::Missing(*id)))?;
+
+        // Get the new state params for the selected data product by using the old state params.
+        let state = StateParam {
+            state: State::Disabled,
+            ..data_product.into()
+        };
+
+        // Apply our updates to the data products
+        state_update(tx, &mut plan, &state, username, modified_date).await?;
+    }
 
     // Triger the next batch of data products
     trigger_next_batch(tx, &mut plan, username, modified_date).await?;

@@ -332,6 +332,18 @@ pub struct StateParam {
     pub passback: Option<Value>,
 }
 
+impl From<&DataProduct> for StateParam {
+    fn from(data_product: &DataProduct) -> Self {
+        StateParam {
+            id: data_product.id,
+            state: data_product.state,
+            run_id: data_product.run_id,
+            link: data_product.link.clone(),
+            passback: data_product.passback.clone(),
+        }
+    }
+}
+
 impl From<&mut DataProduct> for StateParam {
     fn from(data_product: &mut DataProduct) -> Self {
         StateParam {
