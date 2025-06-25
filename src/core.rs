@@ -296,7 +296,7 @@ pub async fn states_edit(
 
     // Check the new state to update to, and make sure is valid.
     states
-        .into_iter()
+        .iter()
         .try_for_each(|state: &StateParam| match state.state {
             State::Failed | State::Running | State::Success => Ok(()),
             State::Disabled | State::Queued | State::Waiting => {
@@ -600,7 +600,7 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
         assert_eq!(
             format!("{err}"),
             format!("Data product not found for: {missing_parent_id}")
@@ -638,7 +638,7 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
         assert_eq!(
             format!("{err}"),
             format!("Data product not found for: {missing_child_id}")
@@ -990,7 +990,7 @@ mod tests {
 
     // Tests for state_update function
 
-    /// Test state_update accepts valid state transitions
+    /// Test state_update
     #[sqlx::test]
     async fn test_state_update_accepts_valid_states(pool: PgPool) {
         let mut tx = pool.begin().await.unwrap();
@@ -1001,49 +1001,15 @@ mod tests {
         let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
         let dp_id = plan.data_products[0].id;
 
-        for new_state in [State::Failed, State::Running, State::Success] {
-            let state_param = StateParam {
-                id: dp_id,
-                state: new_state,
-                run_id: Some(Uuid::new_v4()),
-                link: Some(format!("http://{:?}.com", new_state).to_string()),
-                passback: Some(json!({"status": format!("{:?}", new_state)})),
-            };
-            let result =
-                state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
-            assert!(result.is_ok());
-        }
-    }
-
-    /// Test state_update rejects invalid state transitions
-    #[sqlx::test]
-    async fn test_state_update_rejects_invalid_states(pool: PgPool) {
-        let mut tx = pool.begin().await.unwrap();
-        let param = create_test_plan_param();
-        let username = "test_user";
-        let modified_date = Utc::now();
-
-        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
-        let dp_id = plan.data_products[0].id;
-
-        for invalid_state in [State::Disabled, State::Queued, State::Waiting] {
-            let state_param = StateParam {
-                id: dp_id,
-                state: invalid_state,
-                run_id: None,
-                link: None,
-                passback: None,
-            };
-            let result =
-                state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-            assert_eq!(
-                format!("{err}"),
-                format!("The requested state for {dp_id} is invalid: {invalid_state}")
-            );
-        }
+        let state_param = StateParam {
+            id: dp_id,
+            state: State::Running,
+            run_id: Some(Uuid::new_v4()),
+            link: Some(format!("http://{:?}.com", State::Running).to_string()),
+            passback: Some(json!({"status": format!("{:?}", State::Running)})),
+        };
+        let result = state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
+        assert!(result.is_ok());
     }
 
     /// Test state_update rejects updates to non-existent data products
@@ -1469,5 +1435,63 @@ mod tests {
                 .state,
             State::Waiting
         );
+    }
+
+    /// Test states_edit rejects invalid state transitions
+    #[sqlx::test]
+    async fn test_state_edit_rejects_invalid_states(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        let param = create_test_plan_param();
+        let plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let dataset_id = plan.dataset.id;
+        let dp_id = plan.data_products[0].id;
+
+        for invalid_state in [State::Disabled, State::Queued, State::Waiting] {
+            let states = vec![StateParam {
+                id: dp_id,
+                state: invalid_state,
+                run_id: Some(Uuid::new_v4()),
+                link: Some("http://success.com".to_string()),
+                passback: Some(json!({"completed": true})),
+            }];
+
+            let result = states_edit(&mut tx, dataset_id, &states, username).await;
+
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                format!("{err}"),
+                format!("The requested state for {dp_id} is invalid: {invalid_state}")
+            );
+        }
+    }
+
+    /// Test states_edit accepts valid state transitions
+    #[sqlx::test]
+    async fn test_state_edit_accept_valid_states(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        let param = create_test_plan_param();
+        let plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let dataset_id = plan.dataset.id;
+        let dp_id = plan.data_products[0].id;
+
+        for invalid_state in [State::Failed, State::Running, State::Success] {
+            let states = vec![StateParam {
+                id: dp_id,
+                state: invalid_state,
+                run_id: Some(Uuid::new_v4()),
+                link: Some("http://success.com".to_string()),
+                passback: Some(json!({"completed": true})),
+            }];
+
+            let result = states_edit(&mut tx, dataset_id, &states, username).await;
+
+            assert!(result.is_ok());
+        }
     }
 }

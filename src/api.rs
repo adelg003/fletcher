@@ -709,7 +709,7 @@ mod tests {
             .data(pool)
             .send()
             .await;
-        response.assert_status(StatusCode::BAD_REQUEST);
+        response.assert_status(StatusCode::NOT_FOUND);
         response
             .assert_text(format!("Data product not found for: {missing_dp_id}"))
             .await;
