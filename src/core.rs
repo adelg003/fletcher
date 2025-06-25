@@ -53,25 +53,29 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
         param_ids.into_iter().collect()
     };
 
-    // Do all parents have a data product?
-    let data_productless_parent: Option<DataProductId> = param
+    // Do all edge parents have a data product?
+    param
         .parent_ids()
         .into_iter()
-        .find(|id: &DataProductId| !data_product_ids.contains(id));
+        .try_for_each(|parent_id: DataProductId| {
+            if data_product_ids.contains(&parent_id) {
+                Ok(())
+            } else {
+                Err(BadRequest(Error::Missing(parent_id)))
+            }
+        })?;
 
-    if let Some(parent_id) = data_productless_parent {
-        return Err(BadRequest(Error::Missing(parent_id)));
-    }
-
-    // Do all children have a data product?
-    let data_productless_child: Option<DataProductId> = param
+    // Do all edge children have a data product?
+    param
         .child_ids()
         .into_iter()
-        .find(|id: &DataProductId| !data_product_ids.contains(id));
-
-    if let Some(child_id) = data_productless_child {
-        return Err(BadRequest(Error::Missing(child_id)));
-    }
+        .try_for_each(|child_id: DataProductId| {
+            if data_product_ids.contains(&child_id) {
+                Ok(())
+            } else {
+                Err(BadRequest(Error::Missing(child_id)))
+            }
+        })?;
 
     // Collect all parent / child relationships
     let mut edges: HashSet<Edge> = param.edges().into_iter().collect();
