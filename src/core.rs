@@ -185,7 +185,7 @@ async fn clear_downstream_nodes(
     downstream_ids.retain(|id: &DataProductId| {
         !matches!(
             plan.data_product(*id),
-            Some(dp) if matches!(dp.state, State::Waiting | State::Disabled),
+            Some(dp) if dp.state == State::Waiting,
         )
     });
 
@@ -267,10 +267,9 @@ async fn trigger_next_batch(
                 .ok_or(InternalServerError(Error::Missing(waiting_id)))?;
 
             // Params for the current and new state. Make our change and dump the current state to fill the rest.
-            let current_state: StateParam = data_product.into();
             let new_state = StateParam {
                 state: State::Queued,
-                ..current_state
+                ..data_product.into()
             };
 
             // Now record what we triggered the data product in the OaaS Wrapper
@@ -295,14 +294,14 @@ pub async fn states_edit(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Check the new state to update to, and make sure is valid.
-    states
-        .iter()
-        .try_for_each(|state: &StateParam| match state.state {
-            State::Failed | State::Running | State::Success => Ok(()),
-            State::Disabled | State::Queued | State::Waiting => {
-                Err(BadRequest(Error::BadState(state.id, state.state)))
-            }
-        })?;
+    for state in states {
+        if matches!(
+            state.state,
+            State::Disabled | State::Queued | State::Waiting
+        ) {
+            return Err(BadRequest(Error::BadState(state.id, state.state)));
+        }
+    }
 
     // Pull the Plan so we know what we are working with
     let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
@@ -315,6 +314,45 @@ pub async fn states_edit(
     // Clear all nodes that are downstream of the ones we just updated.
     let nodes: Vec<DataProductId> = states.iter().map(|state: &StateParam| state.id).collect();
     clear_downstream_nodes(tx, &mut plan, &nodes, username, modified_date).await?;
+
+    // Trigger the next batch of data products
+    trigger_next_batch(tx, &mut plan, username, modified_date).await?;
+
+    Ok(plan)
+}
+
+/// Clear Data Products so then can be rerun
+pub async fn clear_edit(
+    tx: &mut Transaction<'_, Postgres>,
+    id: DatasetId,
+    data_product_ids: &[DataProductId],
+    username: &str,
+) -> poem::Result<Plan> {
+    // Timestamp of the transaction
+    let modified_date: DateTime<Utc> = Utc::now();
+
+    // Pull the Plan so we know what we are working with
+    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+
+    // Clear the data products
+    for id in data_product_ids {
+        // Pull Data Product of interest
+        let data_product: &DataProduct = plan
+            .data_product(*id)
+            .ok_or(NotFound(Error::Missing(*id)))?;
+
+        // Build new cleared state
+        let state = StateParam {
+            state: State::Waiting,
+            ..data_product.into()
+        };
+
+        // Update the state to waiting
+        state_update(tx, &mut plan, &state, username, modified_date).await?;
+    }
+
+    // Clear all nodes that are downstream of the ones we just updated.
+    clear_downstream_nodes(tx, &mut plan, data_product_ids, username, modified_date).await?;
 
     // Trigger the next batch of data products
     trigger_next_batch(tx, &mut plan, username, modified_date).await?;

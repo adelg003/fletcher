@@ -1,5 +1,5 @@
 use crate::{
-    core::{disable_drop, plan_add, plan_read, states_edit},
+    core::{clear_edit, disable_drop, plan_add, plan_read, states_edit},
     model::{DataProductId, DatasetId, Plan, PlanParam, StateParam},
 };
 use poem::{error::InternalServerError, web::Data};
@@ -57,7 +57,7 @@ impl Api {
     }
 
     /// Update one or multiple data product states
-    #[oai(path = "/data_product/:dataset_id", method = "put", tag = Tag::State)]
+    #[oai(path = "/data_product/update/:dataset_id", method = "put", tag = Tag::State)]
     async fn state_put(
         &self,
         Data(pool): Data<&PgPool>,
@@ -76,8 +76,29 @@ impl Api {
         Ok(Json(plan))
     }
 
+    /// Clear one or multiple data product and clear all their downsteam data products.
+    #[oai(path = "/data_product/clear/:dataset_id", method = "put", tag = Tag::State)]
+    async fn clear_put(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+        Json(data_product_ids): Json<Vec<DataProductId>>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Clear Data Products and clear all downsteam data products.
+        let plan: Plan =
+            clear_edit(&mut tx, dataset_id, &data_product_ids, "placeholder_user").await?;
+
+        // Commit Transaction
+        tx.commit().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+    }
+
     /// Disable one or multiple data product
-    #[oai(path = "/data_product/:dataset_id", method = "delete", tag = Tag::State)]
+    #[oai(path = "/data_product/disable/:dataset_id", method = "delete", tag = Tag::State)]
     async fn disable_delete(
         &self,
         Data(pool): Data<&PgPool>,
@@ -427,7 +448,7 @@ mod tests {
         ]);
 
         let response: TestResponse = cli
-            .put(format!("/data_product/{dataset_id}"))
+            .put(format!("/data_product/update/{dataset_id}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
             .data(pool)
@@ -495,7 +516,7 @@ mod tests {
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
         let response: TestResponse = cli
-            .put(format!("/data_product/{non_existent_dataset_id}"))
+            .put(format!("/data_product/update/{non_existent_dataset_id}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
             .data(pool)
@@ -540,7 +561,7 @@ mod tests {
         ]);
 
         let response: TestResponse = cli
-            .put(format!("/data_product/{dataset_id}"))
+            .put(format!("/data_product/update/{dataset_id}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
             .data(pool)
@@ -741,7 +762,7 @@ mod tests {
         // Test disable_delete endpoint
         let disable_param = json!([dp1_id.to_string()]);
         let response: TestResponse = cli
-            .delete(format!("/data_product/{dataset_id}"))
+            .delete(format!("/data_product/disable/{dataset_id}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
             .data(pool)
@@ -786,7 +807,7 @@ mod tests {
         // Try to disable non-existent data product
         let disable_param = json!([nonexistent_dp_id.to_string()]);
         let response: TestResponse = cli
-            .delete(format!("/data_product/{dataset_id}"))
+            .delete(format!("/data_product/disable/{dataset_id}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
             .data(pool)
@@ -824,7 +845,7 @@ mod tests {
         // First disable
         let disable_param = json!([dp1_id.to_string()]);
         let first_response: TestResponse = cli
-            .delete(format!("/data_product/{dataset_id}"))
+            .delete(format!("/data_product/disable/{dataset_id}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
             .data(pool.clone())
@@ -834,7 +855,7 @@ mod tests {
 
         // Try to disable again
         let second_response: TestResponse = cli
-            .delete(format!("/data_product/{dataset_id}"))
+            .delete(format!("/data_product/disable/{dataset_id}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
             .data(pool)
