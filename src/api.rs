@@ -714,4 +714,136 @@ mod tests {
             .assert_text(format!("Data product not found for: {missing_dp_id}"))
             .await;
     }
+
+    /// Test disable_delete - Success Case
+    #[sqlx::test]
+    async fn test_disable_delete_success(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Test disable_delete endpoint
+        let disable_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .delete(format!("/data_product/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("disabled");
+    }
+
+    /// Test disable_delete - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_disable_delete_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to disable non-existent data product
+        let disable_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .delete(format!("/data_product/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test disable_delete - Already Disabled Data Product
+    #[sqlx::test]
+    async fn test_disable_delete_already_disabled(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable
+        let disable_param = json!([dp1_id.to_string()]);
+        let first_response: TestResponse = cli
+            .delete(format!("/data_product/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        first_response.assert_status_is_ok();
+
+        // Try to disable again
+        let second_response: TestResponse = cli
+            .delete(format!("/data_product/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool)
+            .send()
+            .await;
+
+        second_response.assert_status(StatusCode::FORBIDDEN);
+        second_response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
 }
