@@ -76,7 +76,7 @@ impl Api {
         Ok(Json(plan))
     }
 
-    /// Clear one or multiple data product and clear all their downsteam data products.
+    /// Clear one or multiple data products and clear all their downsteam data products.
     #[oai(path = "/data_product/clear/:dataset_id", method = "put", tag = Tag::State)]
     async fn clear_put(
         &self,
