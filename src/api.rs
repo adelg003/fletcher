@@ -35,105 +35,84 @@ impl Api {
         tx.commit().await.map_err(InternalServerError)?;
 
         Ok(Json(plan))
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
     }
 
-    /// Read a Plan
-    #[oai(path = "/plan/:dataset_id", method = "get", tag = Tag::Plan)]
-    async fn plan_get(
-        &self,
-        Data(pool): Data<&PgPool>,
-        Path(dataset_id): Path<DatasetId>,
-    ) -> poem::Result<Json<Plan>> {
-        // Start Transaction
-        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
 
-        // Read the plan from the DB
-        let plan: Plan = plan_read(&mut tx, dataset_id).await?;
-
-        // Rollback transaction (read-only operation)
-        tx.rollback().await.map_err(InternalServerError)?;
-
-        Ok(Json(plan))
-    }
-
-    /// Update one or multiple data product states
-    #[oai(path = "/data_product/update/:dataset_id", method = "put", tag = Tag::State)]
-    async fn state_put(
-        &self,
-        Data(pool): Data<&PgPool>,
-        Path(dataset_id): Path<DatasetId>,
-        Json(states): Json<Vec<StateParam>>,
-    ) -> poem::Result<Json<Plan>> {
-        // Start Transaction
-        let mut tx = pool.begin().await.map_err(InternalServerError)?;
-
-        // Update data product states and return the updated plan
-        let plan: Plan = states_edit(&mut tx, dataset_id, &states, "placeholder_user").await?;
-
-        // Commit Transaction
-        tx.commit().await.map_err(InternalServerError)?;
-
-        Ok(Json(plan))
-    }
-
-    /// Clear one or multiple data products and clear all their downsteam data products.
-    #[oai(path = "/data_product/clear/:dataset_id", method = "put", tag = Tag::State)]
-    async fn clear_put(
-        &self,
-        Data(pool): Data<&PgPool>,
-        Path(dataset_id): Path<DatasetId>,
-        Json(data_product_ids): Json<Vec<DataProductId>>,
-    ) -> poem::Result<Json<Plan>> {
-        // Start Transaction
-        let mut tx = pool.begin().await.map_err(InternalServerError)?;
-
-        // Clear Data Products and clear all downsteam data products.
-        let plan: Plan =
-            clear_edit(&mut tx, dataset_id, &data_product_ids, "placeholder_user").await?;
-
-        // Commit Transaction
-        tx.commit().await.map_err(InternalServerError)?;
-
-        Ok(Json(plan))
-    }
-
-    /// Disable one or multiple data product
-    #[oai(path = "/data_product/disable/:dataset_id", method = "delete", tag = Tag::State)]
-    async fn disable_delete(
-        &self,
-        Data(pool): Data<&PgPool>,
-        Path(dataset_id): Path<DatasetId>,
-        Json(data_product_ids): Json<Vec<DataProductId>>,
-    ) -> poem::Result<Json<Plan>> {
-        // Start Transaction
-        let mut tx = pool.begin().await.map_err(InternalServerError)?;
-
-        // Mark Data Products as disabled.
-        let plan: Plan =
-            disable_drop(&mut tx, dataset_id, &data_product_ids, "placeholder_user").await?;
-
-        // Commit Transaction
-        tx.commit().await.map_err(InternalServerError)?;
-
-        Ok(Json(plan))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use poem::{
-        http::StatusCode,
-        test::{TestClient, TestJsonValue, TestResponse},
-    };
-    use poem_openapi::OpenApiService;
-    use serde_json::{Value, json};
-    use sqlx::PgPool;
-    use uuid::Uuid;
-
-    /// Help function to return the parameter for plan post endpoint
-    fn create_test_plan_param(dataset_id: Uuid, dp1_id: Uuid, dp2_id: Uuid) -> Value {
-        json!({
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
             "dataset": {
                 "id": dataset_id.to_string(),
                 "paused": false,
@@ -158,86 +137,6966 @@ mod tests {
                     "passthrough": {"test":"passthrough2"},
                     "extra": {"test":"extra2"},
                 },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
             ],
             "dependencies": [
                 {
                     "parent_id": dp1_id.to_string(),
                     "child_id": dp2_id.to_string(),
-                    "extra": {"test":"dependency"},
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
                 }
             ]
-        })
-    }
+        });
 
-    /// Helper function to validate all the data elements of the standard plan
-    fn validate_test_plan(
-        json_value: &TestJsonValue,
-        dataset_id: Uuid,
-        dp1_id: Uuid,
-        dp2_id: Uuid,
-    ) {
-        // Test response from API for Dataset
-        let dataset = json_value.object().get("dataset").object();
-        dataset.get("id").assert_string(&dataset_id.to_string());
-        dataset.get("paused").assert_bool(false);
-        dataset
-            .get("extra")
-            .object()
-            .get("test")
-            .assert_string("dataset");
-        dataset.get("modified_by").assert_string("placeholder_user");
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
 
-        // Test response from API for Data Products
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
         let data_products = json_value.object().get("data_products").object_array();
-        assert_eq!(data_products.len(), 2);
-
+        
+        // dp1 should be waiting (reset)
         let dp1 = data_products
             .iter()
             .find(|dp| dp.get("id").string() == dp1_id.to_string())
             .unwrap();
-        dp1.get("id").assert_string(&dp1_id.to_string());
-        dp1.get("compute").assert_string("cams");
-        dp1.get("name").assert_string("data-product-1");
-        dp1.get("version").assert_string("1.0.0");
-        dp1.get("eager").assert_bool(true);
-        dp1.get("passthrough")
-            .object()
-            .get("test")
-            .assert_string("passthrough1");
-        dp1.get("state").assert_string("queued");
-        dp1.get("run_id").assert_null();
-        dp1.get("link").assert_null();
-        dp1.get("passback").assert_null();
-        dp1.get("extra")
-            .object()
-            .get("test")
-            .assert_string("extra1");
-        dp1.get("modified_by").assert_string("placeholder_user");
-
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
         let dp2 = data_products
             .iter()
             .find(|dp| dp.get("id").string() == dp2_id.to_string())
             .unwrap();
-        dp2.get("id").assert_string(&dp2_id.to_string());
-        dp2.get("compute").assert_string("dbxaas");
-        dp2.get("name").assert_string("data-product-2");
-        dp2.get("version").assert_string("2.0.0");
-        dp2.get("eager").assert_bool(true);
-        dp2.get("passthrough")
-            .object()
-            .get("test")
-            .assert_string("passthrough2");
         dp2.get("state").assert_string("waiting");
-        dp2.get("run_id").assert_null();
-        dp2.get("link").assert_null();
-        dp2.get("passback").assert_null();
-        dp2.get("extra")
-            .object()
-            .get("test")
-            .assert_string("extra2");
-        dp2.get("modified_by").assert_string("placeholder_user");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
 
-        // Test response from API for Dependencies
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    // Tests for clear_put function
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+}
+    /// Read a Plan
+    #[oai(path = "/plan/:dataset_id", method = "get", tag = Tag::Plan)]
+    async fn plan_get(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Read the plan from the DB
+        let plan: Plan = plan_read(&mut tx, dataset_id).await?;
+
+        // Rollback transaction (read-only operation)
+        tx.rollback().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    // Tests for clear_put function
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+}
+    /// Update one or multiple data product states
+    #[oai(path = "/data_product/update/:dataset_id", method = "put", tag = Tag::State)]
+    async fn state_put(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+        Json(states): Json<Vec<StateParam>>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Update data product states and return the updated plan
+        let plan: Plan = states_edit(&mut tx, dataset_id, &states, "placeholder_user").await?;
+
+        // Commit Transaction
+        tx.commit().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    // Tests for clear_put function
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+}
+    /// Clear one or multiple data products and clear all their downsteam data products.
+    #[oai(path = "/data_product/clear/:dataset_id", method = "put", tag = Tag::State)]
+    async fn clear_put(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+        Json(data_product_ids): Json<Vec<DataProductId>>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Clear Data Products and clear all downsteam data products.
+        let plan: Plan =
+            clear_edit(&mut tx, dataset_id, &data_product_ids, "placeholder_user").await?;
+
+        // Commit Transaction
+        tx.commit().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    // Tests for clear_put function
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Clear dp1 (should reset dp2 and dp3 to waiting)
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        
+        // dp1 should be waiting (reset)
+        let dp1 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp1_id.to_string())
+            .unwrap();
+        dp1.get("state").assert_string("waiting");
+        
+        // dp2 should be waiting (downstream cleared)
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("waiting");
+        
+        // dp3 should be waiting (downstream cleared)
+        let dp3 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp3_id.to_string())
+            .unwrap();
+        dp3.get("state").assert_string("waiting");
+    }
+
+    /// Test clear_put - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_clear_put_nonexistent_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Try to clear non-existent data product
+        let clear_param = json!([nonexistent_dp_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .await;
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+    }
+    }
+
+    /// Test clear_put - Disabled Data Product
+    #[sqlx::test]
+    async fn test_clear_put_disabled_data_product(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First disable dp1
+        let disable_param = json!([dp1_id.to_string()]);
+        let _disable_response: TestResponse = cli
+            .delete(format!("/data_product/disable/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+disable_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Try to clear disabled data product
+        let clear_param = json!([dp1_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(    }
+clear_param)
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::FORBIDDEN);
+        response
+            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .await;
+
+    /// Test clear_put - Success Case: Clear data product to queued state
+    #[sqlx::test]
+    async fn test_clear_put_success_queued_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Update dp1 to success so dp2 can be cleared to queued
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(pool.clone())
+            .send()
+            .await;
+
+        // Now clear dp2 (should go to queued since dp1 is success)
+        let clear_param = json!([dp2_id.to_string()]);
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        let data_products = json_value.object().get("data_products").object_array();
+        let dp2 = data_products
+            .iter()
+            .find(|dp| dp.get("id").string() == dp2_id.to_string())
+            .unwrap();
+        dp2.get("state").assert_string("queued");
+    }
+
+    /// Test clear_put - Downstream children updated to waiting state
+    #[sqlx::test]
+    async fn test_clear_put_downstream_waiting_state(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create plan with dp1 -> dp2 -> dp3 dependency chain
+        let create_param = json!({
+            "dataset": {
+                "id": dataset_id.to_string(),
+                "paused": false,
+                "extra": {"test":"dataset"},
+            },
+            "data_products": [
+                {
+                    "id": dp1_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-1",
+                    "version": "1.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough1"},
+                    "extra": {"test":"extra1"},
+                },
+                {
+                    "id": dp2_id.to_string(),
+                    "compute": "dbxaas",
+                    "name": "data-product-2",
+                    "version": "2.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough2"},
+                    "extra": {"test":"extra2"},
+                },
+                {
+                    "id": dp3_id.to_string(),
+                    "compute": "cams",
+                    "name": "data-product-3",
+                    "version": "3.0.0",
+                    "eager": true,
+                    "passthrough": {"test":"passthrough3"},
+                    "extra": {"test":"extra3"},
+                },
+            ],
+            "dependencies": [
+                {
+                    "parent_id": dp1_id.to_string(),
+                    "child_id": dp2_id.to_string(),
+                    "extra": {"test":"dependency1"},
+                },
+                {
+                    "parent_id": dp2_id.to_string(),
+                    "child_id": dp3_id.to_string(),
+                    "extra": {"test":"dependency2"},
+                }
+            ]
+        });
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Set dp2 and dp3 to success
+        let state_param = json!([
+            {
+                "id": dp2_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789def",
+                "link": "https://example.com/run-456",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            },
+            {
+                "id": dp3_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789ghi",
+                "link": "https://example.com/run-789",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let _state_response: TestResponse = cli
+            .put(format!("/data_
         let dependencies = json_value.object().get("dependencies").object_array();
         assert_eq!(dependencies.len(), 1);
 
