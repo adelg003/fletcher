@@ -1012,13 +1012,14 @@ mod tests {
 
         // First disable dp1
         let disable_param = json!([dp1_id.to_string()]);
-        let _disable_response: TestResponse = cli
+        let disable_response: TestResponse = cli
             .delete(format!("/data_product/disable/{dataset_id}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
             .data(pool.clone())
             .send()
             .await;
+        disable_response.assert_status_is_ok();
 
         // Try to clear disabled data product
         let clear_param = json!([dp1_id.to_string()]);
