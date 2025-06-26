@@ -1751,6 +1751,248 @@ mod tests {
         }
     }
 
+    // Tests for clear_edit function
+
+    /// Test clear_edit can clear a data product to queued state when conditions are met
+    #[sqlx::test]
+    async fn test_clear_edit_clears_to_queued_when_ready(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                paused: false, // Dataset is unpaused
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "parent".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp2_id,
+                    compute: Compute::Cams,
+                    name: "child".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true, // Child is eager
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![DependencyParam {
+                parent_id: dp1_id,
+                child_id: dp2_id,
+                extra: None,
+            }],
+        };
+
+        let dataset_id = param.dataset.id;
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Set parent to Success so child can be triggered when cleared
+        let modified_date = Utc::now();
+        state_update(
+            &mut tx,
+            &mut plan,
+            &StateParam {
+                id: dp1_id,
+                state: State::Success,
+                ..Default::default()
+            },
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Set child to some other state (like Failed)
+        state_update(
+            &mut tx,
+            &mut plan,
+            &StateParam {
+                id: dp2_id,
+                state: State::Failed,
+                ..Default::default()
+            },
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Clear the child data product
+        let result = clear_edit(&mut tx, dataset_id, &[dp2_id], username).await;
+        assert!(result.is_ok());
+
+        let updated_plan = result.unwrap();
+        // Child should be queued since parent is successful, dataset is unpaused, and child is eager
+        assert_eq!(updated_plan.data_product(dp2_id).unwrap().state, State::Queued);
+    }
+
+    /// Test clear_edit sets downstream children to waiting state
+    #[sqlx::test]
+    async fn test_clear_edit_sets_downstream_children_to_waiting(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                paused: false,
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "parent".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp2_id,
+                    compute: Compute::Cams,
+                    name: "child1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp3_id,
+                    compute: Compute::Cams,
+                    name: "child2".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp2_id,
+                    extra: None,
+                },
+                DependencyParam {
+                    parent_id: dp2_id,
+                    child_id: dp3_id,
+                    extra: None,
+                },
+            ],
+        };
+
+        let dataset_id = param.dataset.id;
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Set downstream children to different states
+        let modified_date = Utc::now();
+        let states = vec![
+            StateParam {
+                id: dp2_id,
+                state: State::Success,
+                ..Default::default()
+            },
+            StateParam {
+                id: dp3_id,
+                state: State::Running,
+                ..Default::default()
+            },
+        ];
+
+        for state in states {
+            state_update(&mut tx, &mut plan, &state, username, modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Clear the parent data product
+        let result = clear_edit(&mut tx, dataset_id, &[dp1_id], username).await;
+        assert!(result.is_ok());
+
+        let updated_plan = result.unwrap();
+        // Both downstream children should be set to waiting
+        assert_eq!(updated_plan.data_product(dp2_id).unwrap().state, State::Waiting);
+        assert_eq!(updated_plan.data_product(dp3_id).unwrap().state, State::Waiting);
+    }
+
+    /// Test clear_edit returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_clear_edit_rejects_nonexistent_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+        let dataset_id = param.dataset.id;
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Try to clear non-existent data product
+        let result = clear_edit(&mut tx, dataset_id, &[nonexistent_dp_id], username).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product not found for: {nonexistent_dp_id}")
+        );
+    }
+
+    /// Test clear_edit returns error for disabled data product
+    #[sqlx::test]
+    async fn test_clear_edit_rejects_disabled_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+        let dataset_id = param.dataset.id;
+        let dp_id = param.data_products[0].id;
+
+        // Create initial plan
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // First disable the data product
+        let modified_date = Utc::now();
+        state_update(
+            &mut tx,
+            &mut plan,
+            &StateParam {
+                id: dp_id,
+                state: State::Disabled,
+                ..Default::default()
+            },
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Try to clear the disabled data product
+        let result = clear_edit(&mut tx, dataset_id, &[dp_id], username).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+        assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
+    }
+
+
     // Tests for disable_drop function
 
     /// Test disable_drop - Success Case
