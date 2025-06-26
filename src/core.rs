@@ -789,6 +789,224 @@ mod tests {
         assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
+    // Tests for validate_plan_param with disabled nodes
+    #[test]
+    fn test_validate_plan_param_cyclical_dag_with_disabled_node() {
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create an existing plan with a disabled node that would create a cycle if enabled
+        let existing_plan = Plan {
+            dataset: Dataset {
+                id: Uuid::new_v4(),
+                paused: false,
+                extra: None,
+                modified_by: "test".to_string(),
+                modified_date: Utc::now(),
+            },
+            data_products: vec![
+                DataProduct {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "data-product-1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    state: State::Waiting,
+                    run_id: None,
+                    link: None,
+                    passback: None,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+                DataProduct {
+                    id: dp2_id,
+                    compute: Compute::Cams,
+                    name: "data-product-2".to_string(),
+                    version: "2.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    state: State::Waiting,
+                    run_id: None,
+                    link: None,
+                    passback: None,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+                DataProduct {
+                    id: dp3_id,
+                    compute: Compute::Cams,
+                    name: "data-product-3".to_string(),
+                    version: "3.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    state: State::Disabled, // This node is disabled
+                    run_id: None,
+                    link: None,
+                    passback: None,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+            ],
+            dependencies: vec![
+                Dependency {
+                    parent_id: dp1_id,
+                    child_id: dp2_id,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+                Dependency {
+                    parent_id: dp2_id,
+                    child_id: dp3_id, // dp2 -> dp3
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+                Dependency {
+                    parent_id: dp3_id,
+                    child_id: dp1_id, // dp3 -> dp1 (would create cycle)
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+            ],
+        };
+
+        // Create a new plan param that adds no new dependencies
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: existing_plan.dataset.id,
+                paused: false,
+                extra: None,
+            },
+            data_products: vec![],
+            dependencies: vec![],
+        };
+
+        // This should NOT be considered cyclical because dp3 is disabled
+        // and disabled nodes are excluded from the DAG validation
+        let result = validate_plan_param(&param, &Some(existing_plan));
+        assert!(
+            result.is_ok(),
+            "DAG should not be cyclical when the cycle includes a disabled node"
+        );
+    }
+
+    /// Test validate_plan_param - Cyclical DAG without Disabled Node Should Be Cyclical
+    #[test]
+    fn test_validate_plan_param_cyclical_dag_without_disabled_node() {
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        // Create an existing plan with all nodes enabled (would create a cycle)
+        let existing_plan = Plan {
+            dataset: Dataset {
+                id: Uuid::new_v4(),
+                paused: false,
+                extra: None,
+                modified_by: "test".to_string(),
+                modified_date: Utc::now(),
+            },
+            data_products: vec![
+                DataProduct {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "data-product-1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    state: State::Waiting, // All nodes are enabled
+                    run_id: None,
+                    link: None,
+                    passback: None,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+                DataProduct {
+                    id: dp2_id,
+                    compute: Compute::Cams,
+                    name: "data-product-2".to_string(),
+                    version: "2.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    state: State::Waiting, // All nodes are enabled
+                    run_id: None,
+                    link: None,
+                    passback: None,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+                DataProduct {
+                    id: dp3_id,
+                    compute: Compute::Cams,
+                    name: "data-product-3".to_string(),
+                    version: "3.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    state: State::Waiting, // This node is NOT disabled
+                    run_id: None,
+                    link: None,
+                    passback: None,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+            ],
+            dependencies: vec![
+                Dependency {
+                    parent_id: dp1_id,
+                    child_id: dp2_id,
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+                Dependency {
+                    parent_id: dp2_id,
+                    child_id: dp3_id, // dp2 -> dp3
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+                Dependency {
+                    parent_id: dp3_id,
+                    child_id: dp1_id, // dp3 -> dp1 (creates cycle)
+                    extra: None,
+                    modified_by: "test".to_string(),
+                    modified_date: Utc::now(),
+                },
+            ],
+        };
+
+        // Create a new plan param that adds no new dependencies
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: existing_plan.dataset.id,
+                paused: false,
+                extra: None,
+            },
+            data_products: vec![],
+            dependencies: vec![],
+        };
+
+        // This SHOULD be considered cyclical because no nodes are disabled
+        let result = validate_plan_param(&param, &Some(existing_plan));
+        assert!(
+            result.is_err(),
+            "DAG should be cyclical when no nodes are disabled"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(format!("{err}"), "Graph is cyclical");
+    }
+
     // Tests for plan_add function
 
     /// Test plan_add can write a new plan to the database
@@ -1493,5 +1711,175 @@ mod tests {
 
             assert!(result.is_ok());
         }
+    }
+
+    // Tests for disable_drop function
+
+    /// Test disable_drop - Success Case
+    #[sqlx::test]
+    async fn test_disable_drop_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+        let dataset_id = param.dataset.id;
+        let dp_id = param.data_products[0].id;
+
+        // Create initial plan
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Test disable_drop
+        let result = disable_drop(&mut tx, dataset_id, &[dp_id], username).await;
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        let data_product = plan.data_product(dp_id).unwrap();
+        assert_eq!(data_product.state, State::Disabled);
+    }
+
+    /// Test disable_drop - Non-existent Data Product
+    #[sqlx::test]
+    async fn test_disable_drop_nonexistent_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+        let dataset_id = param.dataset.id;
+        let nonexistent_dp_id = Uuid::new_v4();
+
+        // Create initial plan
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Try to disable non-existent data product
+        let result = disable_drop(&mut tx, dataset_id, &[nonexistent_dp_id], username).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product not found for: {nonexistent_dp_id}")
+        );
+    }
+
+    /// Test disable_drop - Already Disabled Data Product
+    #[sqlx::test]
+    async fn test_disable_drop_already_disabled(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+        let dataset_id = param.dataset.id;
+        let dp_id = param.data_products[0].id;
+
+        // Create initial plan
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // First disable
+        let result = disable_drop(&mut tx, dataset_id, &[dp_id], username).await;
+
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        assert_eq!(plan.data_product(dp_id).unwrap().state, State::Disabled);
+
+        // Try to disable again
+        let result = disable_drop(&mut tx, dataset_id, &[dp_id], username).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+        assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
+    }
+
+    /// Test disable_drop - Complex Parent-Child Triggering Scenario
+    #[sqlx::test]
+    async fn test_disable_drop_triggers_child_with_multiple_parents(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dp1_id = Uuid::new_v4(); // Parent 1 - Success
+        let dp2_id = Uuid::new_v4(); // Parent 2 - Waiting (will be disabled)
+        let dp3_id = Uuid::new_v4(); // Child - should trigger to Queued
+
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                paused: false,
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "parent1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp2_id,
+                    compute: Compute::Cams,
+                    name: "parent2".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp3_id,
+                    compute: Compute::Cams,
+                    name: "child".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp3_id,
+                    extra: None,
+                },
+                DependencyParam {
+                    parent_id: dp2_id,
+                    child_id: dp3_id,
+                    extra: None,
+                },
+            ],
+        };
+
+        let dataset_id = param.dataset.id;
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Set dp1 to Success, dp2 stays Waiting, dp3 stays Waiting
+        state_update(
+            &mut tx,
+            &mut plan,
+            &StateParam {
+                id: dp1_id,
+                state: State::Success,
+                ..Default::default()
+            },
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Child should still be waiting because dp2 is not successful
+        assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Waiting);
+
+        // Now disable dp2 (the waiting parent)
+        let result = disable_drop(&mut tx, dataset_id, &[dp2_id], username).await;
+        assert!(result.is_ok());
+        plan = result.unwrap();
+
+        // Check final states
+        assert_eq!(plan.data_product(dp1_id).unwrap().state, State::Success);
+        assert_eq!(plan.data_product(dp2_id).unwrap().state, State::Disabled);
+        // dp3 should now be queued since its only remaining parent (dp1) is successful
+        // and disabled nodes are not considered in the DAG
+        assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Queued);
     }
 }
