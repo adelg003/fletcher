@@ -49,19 +49,36 @@ impl Plan {
         })
     }
 
-    /// Return all Data Product IDs
+    /// Return all Data Product IDs (excludes Disabled)
     pub fn data_product_ids(&self) -> Vec<DataProductId> {
         self.data_products
             .iter()
-            .map(|dp: &DataProduct| dp.id)
+            .filter_map(|dp: &DataProduct| match dp.state {
+                State::Failed
+                | State::Queued
+                | State::Running
+                | State::Success
+                | State::Waiting => Some(dp.id),
+                State::Disabled => None,
+            })
             .collect()
     }
 
-    /// Return all Parent / Child dependencies
+    /// Return all Parent / Child dependencies (excludes Disabled) // Return Option<Edge>
     pub fn edges(&self) -> Vec<Edge> {
         self.dependencies
             .iter()
-            .map(|dep: &Dependency| (dep.parent_id, dep.child_id, 1))
+            .filter_map(|dep: &Dependency| {
+                let parent: &DataProduct = self.data_product(dep.parent_id)?;
+                let child: &DataProduct = self.data_product(dep.child_id)?;
+
+                // Only add edge if both parent and child are not disabled
+                if parent.state != State::Disabled && child.state != State::Disabled {
+                    Some((dep.parent_id, dep.child_id, 1)) // Return Option<Edge>
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 
@@ -79,7 +96,7 @@ impl Plan {
             .find(|dp: &&mut DataProduct| dp.id == id)
     }
 
-    /// Return a graph representation of the plan
+    // Generate Dag representation of the plan (Disabled nodes are not part of the dag.)
     pub fn to_dag(&self) -> Result<DiGraph<DataProductId, u32>> {
         // Pull Data Product details
         let data_product_ids: HashSet<DataProductId> =
@@ -313,6 +330,18 @@ pub struct StateParam {
     pub run_id: Option<Uuid>,
     pub link: Option<String>,
     pub passback: Option<Value>,
+}
+
+impl From<&DataProduct> for StateParam {
+    fn from(data_product: &DataProduct) -> Self {
+        StateParam {
+            id: data_product.id,
+            state: data_product.state,
+            run_id: data_product.run_id,
+            link: data_product.link.clone(),
+            passback: data_product.passback.clone(),
+        }
+    }
 }
 
 impl From<&mut DataProduct> for StateParam {
