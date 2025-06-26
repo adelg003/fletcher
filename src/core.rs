@@ -1835,7 +1835,10 @@ mod tests {
 
         let updated_plan = result.unwrap();
         // Child should be queued since parent is successful, dataset is unpaused, and child is eager
-        assert_eq!(updated_plan.data_product(dp2_id).unwrap().state, State::Queued);
+        assert_eq!(
+            updated_plan.data_product(dp2_id).unwrap().state,
+            State::Queued
+        );
     }
 
     /// Test clear_edit sets downstream children to waiting state
@@ -1927,8 +1930,14 @@ mod tests {
 
         let updated_plan = result.unwrap();
         // Both downstream children should be set to waiting
-        assert_eq!(updated_plan.data_product(dp2_id).unwrap().state, State::Waiting);
-        assert_eq!(updated_plan.data_product(dp3_id).unwrap().state, State::Waiting);
+        assert_eq!(
+            updated_plan.data_product(dp2_id).unwrap().state,
+            State::Waiting
+        );
+        assert_eq!(
+            updated_plan.data_product(dp3_id).unwrap().state,
+            State::Waiting
+        );
     }
 
     /// Test clear_edit returns error for non-existent data product
@@ -1991,7 +2000,6 @@ mod tests {
         assert_eq!(err.status(), StatusCode::FORBIDDEN);
         assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
     }
-
 
     // Tests for disable_drop function
 
