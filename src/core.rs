@@ -2265,7 +2265,9 @@ mod tests {
         assert!(format!("{err}").contains("pause state is already set to: false"));
 
         // First pause the plan
-        let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username).await.unwrap();
+        let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username)
+            .await
+            .unwrap();
         assert!(paused_plan.dataset.paused);
 
         // Try to pause it again
@@ -2354,12 +2356,20 @@ mod tests {
         .unwrap();
 
         // Pause the plan
-        let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username).await.unwrap();
+        let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username)
+            .await
+            .unwrap();
         assert!(paused_plan.dataset.paused);
 
         // Children should remain in waiting state even though parent is successful
-        assert_eq!(paused_plan.data_product(dp2_id).unwrap().state, State::Waiting);
-        assert_eq!(paused_plan.data_product(dp3_id).unwrap().state, State::Waiting);
+        assert_eq!(
+            paused_plan.data_product(dp2_id).unwrap().state,
+            State::Waiting
+        );
+        assert_eq!(
+            paused_plan.data_product(dp3_id).unwrap().state,
+            State::Waiting
+        );
     }
 
     /// Test plan_pause_edit - when unpaused, downstream tasks enter queued state
@@ -2449,12 +2459,20 @@ mod tests {
         assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Waiting);
 
         // Now unpause the plan
-        let unpaused_plan = plan_pause_edit(&mut tx, dataset_id, false, username).await.unwrap();
+        let unpaused_plan = plan_pause_edit(&mut tx, dataset_id, false, username)
+            .await
+            .unwrap();
         assert!(!unpaused_plan.dataset.paused);
 
         // Children should now be queued since parent is successful and plan is unpaused
-        assert_eq!(unpaused_plan.data_product(dp2_id).unwrap().state, State::Queued);
-        assert_eq!(unpaused_plan.data_product(dp3_id).unwrap().state, State::Queued);
+        assert_eq!(
+            unpaused_plan.data_product(dp2_id).unwrap().state,
+            State::Queued
+        );
+        assert_eq!(
+            unpaused_plan.data_product(dp3_id).unwrap().state,
+            State::Queued
+        );
     }
 
     /// Test plan_pause_edit returns error for non-existent plan
