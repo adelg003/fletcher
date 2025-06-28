@@ -1325,4 +1325,57 @@ mod tests {
             .assert_text(format!("Data product is locked: {dp1_id}"))
             .await;
     }
+
+    /// Test Plan Pause Put - Success Case
+    #[sqlx::test]
+    async fn test_plan_pause_put_success(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan (unpaused by default)
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Verify plan is initially unpaused
+        let initial_json = create_response.json().await;
+        let initial_value = initial_json.value();
+        initial_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(false);
+
+        // Test pause endpoint
+        let pause_response: TestResponse = cli
+            .put(format!("/plan/pause/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(pool)
+            .send()
+            .await;
+        pause_response.assert_status_is_ok();
+
+        // Verify plan is now paused
+        let pause_json = pause_response.json().await;
+        let pause_value = pause_json.value();
+        pause_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(true);
+    }
 }
