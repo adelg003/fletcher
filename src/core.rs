@@ -99,7 +99,7 @@ pub async fn plan_add(
     username: &str,
 ) -> poem::Result<Plan> {
     // Pull any prior details
-    let wip_plan = Plan::from_dataset_id(tx, param.dataset.id).await;
+    let wip_plan = Plan::from_db(tx, param.dataset.id).await;
 
     // So what did we get from the DB?
     let current_plan: Option<Plan> = match wip_plan {
@@ -127,7 +127,18 @@ pub async fn plan_add(
 
 /// Read a Plan Dag from the DB
 pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> poem::Result<Plan> {
-    Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)
+    Plan::from_db(tx, id).await.map_err(to_poem_error)
+}
+
+/// Read a Data Product from the DB
+pub async fn data_product_read(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    data_product_id: DataProductId,
+) -> poem::Result<DataProduct> {
+    DataProduct::from_db(tx, dataset_id, data_product_id)
+        .await
+        .map_err(to_poem_error)
 }
 
 /// Update the state of our data product
@@ -304,7 +315,7 @@ pub async fn states_edit(
     }
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
 
     // Apply our updates to the data products
     for state in states {
@@ -332,7 +343,7 @@ pub async fn clear_edit(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
 
     // Clear the data products
     for id in data_product_ids {
@@ -371,7 +382,7 @@ pub async fn disable_drop(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
 
     for id in data_product_ids {
         // Pull the Data Product we want
@@ -2169,5 +2180,57 @@ mod tests {
         // dp3 should now be queued since its only remaining parent (dp1) is successful
         // and disabled nodes are not considered in the DAG
         assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Queued);
+    }
+
+    // Tests for data_product_read function
+
+    /// Test data_product_read can return a data product from the database
+    #[sqlx::test]
+    async fn test_data_product_read_existing_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let added_plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let dataset_id = added_plan.dataset.id;
+        let data_product_id = added_plan.data_products[0].id;
+
+        let result = data_product_read(&mut tx, dataset_id, data_product_id).await;
+        assert!(result.is_ok());
+
+        let read_data_product = result.unwrap();
+        assert_eq!(read_data_product.id, data_product_id);
+        assert_eq!(read_data_product.name, added_plan.data_products[0].name);
+        assert_eq!(
+            read_data_product.compute,
+            added_plan.data_products[0].compute
+        );
+        assert_eq!(
+            read_data_product.version,
+            added_plan.data_products[0].version
+        );
+        assert_eq!(read_data_product.eager, added_plan.data_products[0].eager);
+        assert_eq!(read_data_product.state, added_plan.data_products[0].state);
+    }
+
+    /// Test data_product_read returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_read_nonexistent_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let added_plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let dataset_id = added_plan.dataset.id;
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        let result = data_product_read(&mut tx, dataset_id, nonexistent_data_product_id).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            format!("{err}"),
+            "no rows returned by a query that expected to return at least one row"
+        );
     }
 }
