@@ -1401,6 +1401,17 @@ mod tests {
             .await;
         create_response.assert_status_is_ok();
 
+        // Verify the plan is unpaused
+        let create_json = create_response.json().await;
+        let create_value = create_json.value();
+
+        create_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(false);
+
         // First pause the plan
         let pause_response: TestResponse = cli
             .put(format!("/plan/pause/{dataset_id}"))
