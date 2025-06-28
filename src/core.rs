@@ -17,7 +17,7 @@ fn to_poem_error(err: Error) -> poem::Error {
         Error::Cyclical => UnprocessableEntity(err),
         // Failed to build graph
         Error::Graph(error) => InternalServerError(error),
-        // Already disired pause state
+        // Already desired pause state
         Error::Pause(_, _) => BadRequest(err),
         // Row not found
         Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
