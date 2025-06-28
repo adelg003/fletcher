@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE\n            dataset\n        SET\n            paused = $2,\n            modified_by = $3,\n            modified_date = $4\n        WHERE\n            dataset_id = $1\n        RETURNING\n            dataset_id AS id,\n            paused,\n            extra,\n            modified_by,\n            modified_date",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "paused",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "extra",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "modified_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "modified_date",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "9873a0f7a9be4118c80dc67e62ca1193614fb38cce064b281249089c06c631a3"
+}
