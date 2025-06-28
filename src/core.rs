@@ -2262,7 +2262,10 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-        assert!(format!("{err}").contains("pause state is already set to: false"));
+        assert_eq!(
+            format!("{err}"),
+            format!("Dataset '{dataset_id}' pause state is already set to: false")
+        );
 
         // First pause the plan
         let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username)
@@ -2275,7 +2278,10 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-        assert!(format!("{err}").contains("pause state is already set to: true"));
+        assert_eq!(
+            format!("{err}"),
+            format!("Dataset '{dataset_id}' pause state is already set to: true")
+        );
     }
 
     /// Test plan_pause_edit - when paused, downstream tasks remain in waiting state
@@ -2283,7 +2289,6 @@ mod tests {
     async fn test_plan_pause_edit_paused_downstream_waiting(pool: PgPool) {
         let mut tx = pool.begin().await.unwrap();
         let username = "test_user";
-        let modified_date = Utc::now();
 
         let dp1_id = Uuid::new_v4();
         let dp2_id = Uuid::new_v4();
@@ -2338,22 +2343,8 @@ mod tests {
         };
 
         let dataset_id = param.dataset.id;
-        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
-
-        // Set parent to Success so children would normally be triggered
-        state_update(
-            &mut tx,
-            &mut plan,
-            &StateParam {
-                id: dp1_id,
-                state: State::Success,
-                ..Default::default()
-            },
-            username,
-            modified_date,
-        )
-        .await
-        .unwrap();
+        let plan = plan_add(&mut tx, &param, username).await.unwrap();
+        assert!(!plan.dataset.paused);
 
         // Pause the plan
         let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username)
@@ -2361,15 +2352,23 @@ mod tests {
             .unwrap();
         assert!(paused_plan.dataset.paused);
 
+        // Set parent to Success so children would normally be triggered
+        let plan = states_edit(
+            &mut tx,
+            dataset_id,
+            &[StateParam {
+                id: dp1_id,
+                state: State::Success,
+                ..Default::default()
+            }],
+            username,
+        )
+        .await
+        .unwrap();
+
         // Children should remain in waiting state even though parent is successful
-        assert_eq!(
-            paused_plan.data_product(dp2_id).unwrap().state,
-            State::Waiting
-        );
-        assert_eq!(
-            paused_plan.data_product(dp3_id).unwrap().state,
-            State::Waiting
-        );
+        assert_eq!(plan.data_product(dp2_id).unwrap().state, State::Waiting);
+        assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Waiting);
     }
 
     /// Test plan_pause_edit - when unpaused, downstream tasks enter queued state
@@ -2440,16 +2439,15 @@ mod tests {
             .unwrap();
 
         // Set parent to Success while paused
-        state_update(
+        states_edit(
             &mut tx,
-            &mut plan,
-            &StateParam {
+            dataset_id,
+            &[StateParam {
                 id: dp1_id,
                 state: State::Success,
                 ..Default::default()
-            },
+            }],
             username,
-            modified_date,
         )
         .await
         .unwrap();
