@@ -1378,4 +1378,70 @@ mod tests {
             .get("paused")
             .assert_bool(true);
     }
+    /// Test plan unpause - Success Case: Unpause a previously paused plan
+    #[sqlx::test]
+    async fn test_plan_unpause_put_success(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // First pause the plan
+        let pause_response: TestResponse = cli
+            .put(format!("/plan/pause/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(pool.clone())
+            .send()
+            .await;
+        pause_response.assert_status_is_ok();
+
+        // Verify the plan is paused
+        let pause_json = pause_response.json().await;
+        let pause_value = pause_json.value();
+        pause_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(true);
+
+        // Now unpause the plan
+        let unpause_response: TestResponse = cli
+            .put(format!("/plan/unpause/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(pool)
+            .send()
+            .await;
+        unpause_response.assert_status_is_ok();
+
+        // Verify the plan is unpaused
+        let unpause_json = unpause_response.json().await;
+        let unpause_value = unpause_json.value();
+
+        // Validate the entire plan structure and that paused is false
+        validate_test_plan(&unpause_value, dataset_id, dp1_id, dp2_id);
+
+        // Specifically verify the paused state is false
+        unpause_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(false);
+    }
 }
