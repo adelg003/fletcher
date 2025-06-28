@@ -2197,6 +2197,283 @@ mod tests {
         assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Queued);
     }
 
+    // Tests for plan_pause_edit function
+
+    /// Test plan_pause_edit can set pause state to true
+    #[sqlx::test]
+    async fn test_plan_pause_edit_set_pause_true(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let dataset_id = plan.dataset.id;
+
+        // Initially paused should be false
+        assert!(!plan.dataset.paused);
+
+        // Set pause state to true
+        let result = plan_pause_edit(&mut tx, dataset_id, true, username).await;
+        assert!(result.is_ok());
+
+        let paused_plan = result.unwrap();
+        assert!(paused_plan.dataset.paused);
+        assert_eq!(paused_plan.dataset.modified_by, username);
+    }
+
+    /// Test plan_pause_edit can set pause state to false
+    #[sqlx::test]
+    async fn test_plan_pause_edit_set_pause_false(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let dataset_id = plan.dataset.id;
+        let modified_date = Utc::now();
+
+        // First pause the plan
+        plan.paused(&mut tx, true, username, modified_date)
+            .await
+            .unwrap();
+        assert!(plan.dataset.paused);
+
+        // Now unpause it
+        let result = plan_pause_edit(&mut tx, dataset_id, false, username).await;
+        assert!(result.is_ok());
+
+        let unpaused_plan = result.unwrap();
+        assert!(!unpaused_plan.dataset.paused);
+        assert_eq!(unpaused_plan.dataset.modified_by, username);
+    }
+
+    /// Test plan_pause_edit errors when trying to set pause state to current state
+    #[sqlx::test]
+    async fn test_plan_pause_edit_error_same_state(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let dataset_id = plan.dataset.id;
+
+        // Initially paused is false, try to set it to false again
+        let result = plan_pause_edit(&mut tx, dataset_id, false, username).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(format!("{err}").contains("pause state is already set to: false"));
+
+        // First pause the plan
+        let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username).await.unwrap();
+        assert!(paused_plan.dataset.paused);
+
+        // Try to pause it again
+        let result = plan_pause_edit(&mut tx, dataset_id, true, username).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(format!("{err}").contains("pause state is already set to: true"));
+    }
+
+    /// Test plan_pause_edit - when paused, downstream tasks remain in waiting state
+    #[sqlx::test]
+    async fn test_plan_pause_edit_paused_downstream_waiting(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "parent".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp2_id,
+                    compute: Compute::Cams,
+                    name: "child1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp3_id,
+                    compute: Compute::Cams,
+                    name: "child2".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp2_id,
+                    extra: None,
+                },
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp3_id,
+                    extra: None,
+                },
+            ],
+        };
+
+        let dataset_id = param.dataset.id;
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Set parent to Success so children would normally be triggered
+        state_update(
+            &mut tx,
+            &mut plan,
+            &StateParam {
+                id: dp1_id,
+                state: State::Success,
+                ..Default::default()
+            },
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Pause the plan
+        let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username).await.unwrap();
+        assert!(paused_plan.dataset.paused);
+
+        // Children should remain in waiting state even though parent is successful
+        assert_eq!(paused_plan.data_product(dp2_id).unwrap().state, State::Waiting);
+        assert_eq!(paused_plan.data_product(dp3_id).unwrap().state, State::Waiting);
+    }
+
+    /// Test plan_pause_edit - when unpaused, downstream tasks enter queued state
+    #[sqlx::test]
+    async fn test_plan_pause_edit_unpaused_downstream_queued(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "parent".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp2_id,
+                    compute: Compute::Cams,
+                    name: "child1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp3_id,
+                    compute: Compute::Cams,
+                    name: "child2".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp2_id,
+                    extra: None,
+                },
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp3_id,
+                    extra: None,
+                },
+            ],
+        };
+
+        let dataset_id = param.dataset.id;
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // First pause the plan
+        plan.paused(&mut tx, true, username, modified_date)
+            .await
+            .unwrap();
+
+        // Set parent to Success while paused
+        state_update(
+            &mut tx,
+            &mut plan,
+            &StateParam {
+                id: dp1_id,
+                state: State::Success,
+                ..Default::default()
+            },
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Children should still be waiting while paused
+        assert_eq!(plan.data_product(dp2_id).unwrap().state, State::Waiting);
+        assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Waiting);
+
+        // Now unpause the plan
+        let unpaused_plan = plan_pause_edit(&mut tx, dataset_id, false, username).await.unwrap();
+        assert!(!unpaused_plan.dataset.paused);
+
+        // Children should now be queued since parent is successful and plan is unpaused
+        assert_eq!(unpaused_plan.data_product(dp2_id).unwrap().state, State::Queued);
+        assert_eq!(unpaused_plan.data_product(dp3_id).unwrap().state, State::Queued);
+    }
+
+    /// Test plan_pause_edit returns error for non-existent plan
+    #[sqlx::test]
+    async fn test_plan_pause_edit_nonexistent_plan(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let nonexistent_id = Uuid::new_v4();
+        let username = "test_user";
+
+        let result = plan_pause_edit(&mut tx, nonexistent_id, true, username).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            format!("{err}"),
+            "no rows returned by a query that expected to return at least one row"
+        );
+    }
+
     // Tests for data_product_read function
 
     /// Test data_product_read can return a data product from the database
