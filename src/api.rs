@@ -423,6 +423,83 @@ mod tests {
             .await;
     }
 
+    /// Test Data Product Get - Success Case
+    #[sqlx::test]
+    async fn test_data_product_get_success(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // First create a plan via POST
+        let param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Now test the GET data_product endpoint for dp1
+        let response: TestResponse = cli
+            .get(format!("/data_product/{dataset_id}/{dp1_id}"))
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        // Pull response json
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        // Validate the data product response
+        json_value.object().get("id").assert_string(&dp1_id.to_string());
+        json_value.object().get("compute").assert_string("cams");
+        json_value.object().get("name").assert_string("data-product-1");
+        json_value.object().get("version").assert_string("1.0.0");
+        json_value.object().get("eager").assert_bool(true);
+        json_value.object().get("passthrough")
+            .object()
+            .get("test")
+            .assert_string("passthrough1");
+        json_value.object().get("state").assert_string("queued");
+        json_value.object().get("run_id").assert_null();
+        json_value.object().get("link").assert_null();
+        json_value.object().get("passback").assert_null();
+        json_value.object().get("extra")
+            .object()
+            .get("test")
+            .assert_string("extra1");
+        json_value.object().get("modified_by").assert_string("placeholder_user");
+    }
+
+    /// Test Data Product Get - Not Found Case
+    #[sqlx::test]
+    async fn test_data_product_get_not_found(pool: PgPool) {
+        let non_existent_dataset_id = Uuid::new_v4();
+        let non_existent_data_product_id = Uuid::new_v4();
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let response: TestResponse = cli
+            .get(format!("/data_product/{non_existent_dataset_id}/{non_existent_data_product_id}"))
+            .data(pool)
+            .send()
+            .await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+        response
+            .assert_text("no rows returned by a query that expected to return at least one row")
+            .await;
+    }
+
     /// Test State Put - Success Case
     #[sqlx::test]
     async fn test_state_put_success(pool: PgPool) {
