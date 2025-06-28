@@ -2181,7 +2181,6 @@ mod tests {
         // and disabled nodes are not considered in the DAG
         assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Queued);
     }
-}
 
     // Tests for data_product_read function
 
@@ -2195,15 +2194,21 @@ mod tests {
         let added_plan = plan_add(&mut tx, &param, username).await.unwrap();
         let dataset_id = added_plan.dataset.id;
         let data_product_id = added_plan.data_products[0].id;
-        
+
         let result = data_product_read(&mut tx, dataset_id, data_product_id).await;
         assert!(result.is_ok());
 
         let read_data_product = result.unwrap();
         assert_eq!(read_data_product.id, data_product_id);
         assert_eq!(read_data_product.name, added_plan.data_products[0].name);
-        assert_eq!(read_data_product.compute, added_plan.data_products[0].compute);
-        assert_eq!(read_data_product.version, added_plan.data_products[0].version);
+        assert_eq!(
+            read_data_product.compute,
+            added_plan.data_products[0].compute
+        );
+        assert_eq!(
+            read_data_product.version,
+            added_plan.data_products[0].version
+        );
         assert_eq!(read_data_product.eager, added_plan.data_products[0].eager);
         assert_eq!(read_data_product.state, added_plan.data_products[0].state);
     }
@@ -2228,4 +2233,4 @@ mod tests {
             "no rows returned by a query that expected to return at least one row"
         );
     }
-
+}
