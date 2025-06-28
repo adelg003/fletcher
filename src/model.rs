@@ -560,6 +560,62 @@ mod tests {
         ));
     }
 
+    /// Test DataProduct::from_db - Can we read a data product record from the DB?
+    #[sqlx::test]
+    async fn test_data_product_from_db_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let plan_param = PlanParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Insert test data
+        let inserted_plan = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
+
+        let expected_data_product = &inserted_plan.data_products[0];
+
+        // Test: Can we read a data product record from the DB?
+        let retrieved_data_product = DataProduct::from_db(
+            &mut tx,
+            inserted_plan.dataset.id,
+            expected_data_product.id,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(retrieved_data_product, *expected_data_product);
+        assert_eq!(retrieved_data_product.id, expected_data_product.id);
+        assert_eq!(retrieved_data_product.name, expected_data_product.name);
+        assert_eq!(retrieved_data_product.compute, expected_data_product.compute);
+        assert_eq!(retrieved_data_product.state, expected_data_product.state);
+    }
+
+    /// Test DataProduct::from_db - Do we get rejected if the data product does not exist?
+    #[sqlx::test]
+    async fn test_data_product_from_db_not_found(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Test: Do we get rejected if the data product does not exist?
+        let non_existent_dataset_id = Uuid::new_v4();
+        let non_existent_data_product_id = Uuid::new_v4();
+        let result = DataProduct::from_db(
+            &mut tx,
+            non_existent_dataset_id,
+            non_existent_data_product_id,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
+
     /// Test DataProduct::state_update - Do we see an update to the Data Product in memory?
     #[sqlx::test]
     async fn test_data_product_state_update_memory(pool: PgPool) {
