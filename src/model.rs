@@ -579,18 +579,18 @@ mod tests {
         let expected_data_product = &inserted_plan.data_products[0];
 
         // Test: Can we read a data product record from the DB?
-        let retrieved_data_product = DataProduct::from_db(
-            &mut tx,
-            inserted_plan.dataset.id,
-            expected_data_product.id,
-        )
-        .await
-        .unwrap();
+        let retrieved_data_product =
+            DataProduct::from_db(&mut tx, inserted_plan.dataset.id, expected_data_product.id)
+                .await
+                .unwrap();
 
         assert_eq!(retrieved_data_product, *expected_data_product);
         assert_eq!(retrieved_data_product.id, expected_data_product.id);
         assert_eq!(retrieved_data_product.name, expected_data_product.name);
-        assert_eq!(retrieved_data_product.compute, expected_data_product.compute);
+        assert_eq!(
+            retrieved_data_product.compute,
+            expected_data_product.compute
+        );
         assert_eq!(retrieved_data_product.state, expected_data_product.state);
     }
 

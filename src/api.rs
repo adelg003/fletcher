@@ -460,12 +460,20 @@ mod tests {
         let json_value = test_json.value();
 
         // Validate the data product response
-        json_value.object().get("id").assert_string(&dp1_id.to_string());
+        json_value
+            .object()
+            .get("id")
+            .assert_string(&dp1_id.to_string());
         json_value.object().get("compute").assert_string("cams");
-        json_value.object().get("name").assert_string("data-product-1");
+        json_value
+            .object()
+            .get("name")
+            .assert_string("data-product-1");
         json_value.object().get("version").assert_string("1.0.0");
         json_value.object().get("eager").assert_bool(true);
-        json_value.object().get("passthrough")
+        json_value
+            .object()
+            .get("passthrough")
             .object()
             .get("test")
             .assert_string("passthrough1");
@@ -473,11 +481,16 @@ mod tests {
         json_value.object().get("run_id").assert_null();
         json_value.object().get("link").assert_null();
         json_value.object().get("passback").assert_null();
-        json_value.object().get("extra")
+        json_value
+            .object()
+            .get("extra")
             .object()
             .get("test")
             .assert_string("extra1");
-        json_value.object().get("modified_by").assert_string("placeholder_user");
+        json_value
+            .object()
+            .get("modified_by")
+            .assert_string("placeholder_user");
     }
 
     /// Test Data Product Get - Not Found Case
@@ -489,7 +502,9 @@ mod tests {
         let cli = TestClient::new(ep);
 
         let response: TestResponse = cli
-            .get(format!("/data_product/{non_existent_dataset_id}/{non_existent_data_product_id}"))
+            .get(format!(
+                "/data_product/{non_existent_dataset_id}/{non_existent_data_product_id}"
+            ))
             .data(pool)
             .send()
             .await;
