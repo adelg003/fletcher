@@ -1,8 +1,8 @@
 use crate::{
     dag::Dag,
     db::{
-        data_product_upsert, data_products_by_dataset_select, dataset_select, dataset_upsert,
-        dependencies_by_dataset_select, dependency_upsert, state_update,
+        data_product_select, data_product_upsert, data_products_by_dataset_select, dataset_select,
+        dataset_upsert, dependencies_by_dataset_select, dependency_upsert, state_update,
     },
     error::Result,
 };
@@ -33,10 +33,7 @@ pub struct Plan {
 
 impl Plan {
     /// Pull the Plan for a Dataset
-    pub async fn from_dataset_id(
-        tx: &mut Transaction<'_, Postgres>,
-        id: DatasetId,
-    ) -> Result<Self> {
+    pub async fn from_db(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> Result<Self> {
         // Pull data elements
         let dataset: Dataset = dataset_select(tx, id).await?;
         let data_products: Vec<DataProduct> = data_products_by_dataset_select(tx, id).await?;
@@ -174,6 +171,16 @@ pub struct DataProduct {
 }
 
 impl DataProduct {
+    /// Pull a Data Product
+    pub async fn from_db(
+        tx: &mut Transaction<'_, Postgres>,
+        dataset_id: DatasetId,
+        data_product_id: DataProductId,
+    ) -> Result<Self> {
+        // Pull data product
+        data_product_select(tx, dataset_id, data_product_id).await
+    }
+
     /// Update the State of a Data Product inplace
     pub async fn state_update(
         &mut self,
@@ -500,9 +507,9 @@ mod tests {
 
     // ------------ DB-layer tests (#[sqlx::test]) ------------
 
-    /// Test Plan::from_dataset_id - Can we pull an existing plan if we have its dataset id?
+    /// Test Plan::from_db - Can we pull an existing plan if we have its dataset id?
     #[sqlx::test]
-    async fn test_plan_from_dataset_id_success(pool: PgPool) {
+    async fn test_plan_from_db_success(pool: PgPool) {
         let mut tx = pool.begin().await.unwrap();
 
         // Create test data
@@ -517,7 +524,7 @@ mod tests {
             .unwrap();
 
         // Test: Can we pull an existing plan if we have its dataset id?
-        let retrieved_plan = Plan::from_dataset_id(&mut tx, inserted_plan.dataset.id)
+        let retrieved_plan = Plan::from_db(&mut tx, inserted_plan.dataset.id)
             .await
             .unwrap();
 
@@ -537,14 +544,14 @@ mod tests {
         );
     }
 
-    /// Test Plan::from_dataset_id - Do we get rejected if the dataset does not exist?
+    /// Test Plan::from_db - Do we get rejected if the dataset does not exist?
     #[sqlx::test]
-    async fn test_plan_from_dataset_id_not_found(pool: PgPool) {
+    async fn test_plan_from_db_not_found(pool: PgPool) {
         let mut tx = pool.begin().await.unwrap();
 
         // Test: Do we get rejected if the dataset does not exist?
         let non_existent_id = Uuid::new_v4();
-        let result = Plan::from_dataset_id(&mut tx, non_existent_id).await;
+        let result = Plan::from_db(&mut tx, non_existent_id).await;
 
         assert!(result.is_err());
         assert!(matches!(
@@ -635,9 +642,7 @@ mod tests {
             .unwrap();
 
         // Test: If we update a data product's state, do we see an update in the DB?
-        let retrieved_plan = Plan::from_dataset_id(&mut tx, plan.dataset.id)
-            .await
-            .unwrap();
+        let retrieved_plan = Plan::from_db(&mut tx, plan.dataset.id).await.unwrap();
 
         assert!(retrieved_plan.data_products.contains(&data_product));
     }

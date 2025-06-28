@@ -99,7 +99,7 @@ pub async fn plan_add(
     username: &str,
 ) -> poem::Result<Plan> {
     // Pull any prior details
-    let wip_plan = Plan::from_dataset_id(tx, param.dataset.id).await;
+    let wip_plan = Plan::from_db(tx, param.dataset.id).await;
 
     // So what did we get from the DB?
     let current_plan: Option<Plan> = match wip_plan {
@@ -127,7 +127,18 @@ pub async fn plan_add(
 
 /// Read a Plan Dag from the DB
 pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> poem::Result<Plan> {
-    Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)
+    Plan::from_db(tx, id).await.map_err(to_poem_error)
+}
+
+/// Read a Data Product from the DB
+pub async fn data_product_read(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    data_product_id: DataProductId,
+) -> poem::Result<DataProduct> {
+    DataProduct::from_db(tx, dataset_id, data_product_id)
+        .await
+        .map_err(to_poem_error)
 }
 
 /// Update the state of our data product
@@ -304,7 +315,7 @@ pub async fn states_edit(
     }
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
 
     // Apply our updates to the data products
     for state in states {
@@ -332,7 +343,7 @@ pub async fn clear_edit(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
 
     // Clear the data products
     for id in data_product_ids {
@@ -371,7 +382,7 @@ pub async fn disable_drop(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_dataset_id(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
 
     for id in data_product_ids {
         // Pull the Data Product we want

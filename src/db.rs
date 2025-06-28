@@ -1,8 +1,8 @@
 use crate::{
     error::Result,
     model::{
-        Compute, DataProduct, DataProductParam, Dataset, DatasetId, DatasetParam, Dependency,
-        DependencyParam, State, StateParam,
+        Compute, DataProduct, DataProductId, DataProductParam, Dataset, DatasetId, DatasetParam,
+        Dependency, DependencyParam, State, StateParam,
     },
 };
 use chrono::{DateTime, Utc};
@@ -209,6 +209,42 @@ pub async fn state_update(
         param.passback,
         username,
         modified_date,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(data_product)
+}
+
+/// Retrieve a Data Product
+pub async fn data_product_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    data_product_id: DataProductId,
+) -> Result<DataProduct> {
+    let data_product = query_as!(
+        DataProduct,
+        r#"SELECT
+            data_product_id AS id,
+            compute AS "compute: Compute",
+            name,
+            version,
+            eager,
+            passthrough,
+            state AS "state: State",
+            run_id,
+            link,
+            passback,
+            extra,
+            modified_by,
+            modified_date
+        FROM
+            data_product
+        WHERE
+            dataset_id = $1
+            AND data_product_id = $2"#,
+        dataset_id,
+        data_product_id,
     )
     .fetch_one(&mut **tx)
     .await?;
