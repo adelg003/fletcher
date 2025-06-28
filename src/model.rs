@@ -1185,4 +1185,99 @@ mod tests {
         assert_eq!(state_param.link, data_product.link);
         assert_eq!(state_param.passback, data_product.passback);
     }
+    /// Test Plan::paused - Can we pause a plan?
+    #[sqlx::test]
+    async fn test_plan_paused_pause_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let plan_param = PlanParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Insert test data
+        let mut plan = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
+
+        // Verify initial state (should be false by default)
+        assert_eq!(plan.dataset.paused, false);
+
+        // Test: Can we pause a plan?
+        let result = plan.paused(&mut tx, true, username, modified_date).await;
+        
+        assert!(result.is_ok());
+        assert_eq!(plan.dataset.paused, true);
+    }
+
+    /// Test Plan::paused - Can we unpause a plan?
+    #[sqlx::test]
+    async fn test_plan_paused_unpause_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let plan_param = PlanParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Insert test data
+        let mut plan = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
+
+        // First pause the plan
+        plan.paused(&mut tx, true, username, modified_date)
+            .await
+            .unwrap();
+        assert_eq!(plan.dataset.paused, true);
+
+        // Test: Can we unpause a plan?
+        let result = plan.paused(&mut tx, false, username, modified_date).await;
+        
+        assert!(result.is_ok());
+        assert_eq!(plan.dataset.paused, false);
+    }
+
+    /// Test Plan::paused - Do we get an error when setting pause state to current state?
+    #[sqlx::test]
+    async fn test_plan_paused_current_state_error(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let plan_param = PlanParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Insert test data
+        let mut plan = plan_param
+            .upsert(&mut tx, username, modified_date)
+            .await
+            .unwrap();
+
+        // Verify initial state (should be false by default)
+        assert_eq!(plan.dataset.paused, false);
+
+        // Test: Do we get an error when trying to set pause state to current state?
+        let result = plan.paused(&mut tx, false, username, modified_date).await;
+        
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Pause(dataset_id, false) if dataset_id == plan.dataset.id
+        ));
+
+        // Test the same for paused state
+        plan.paused(&mut tx, true, username, modified_date)
+            .await
+            .unwrap();
+        
+        let result = plan.paused(&mut tx, true, username, modified_date).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Pause(dataset_id, true) if dataset_id == plan.dataset.id
+        ));
+    }
 }
