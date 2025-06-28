@@ -1,10 +1,11 @@
 use crate::{
     dag::Dag,
     db::{
-        data_product_select, data_product_upsert, data_products_by_dataset_select, dataset_select,
-        dataset_upsert, dependencies_by_dataset_select, dependency_upsert, state_update,
+        data_product_select, data_product_upsert, data_products_by_dataset_select,
+        dataset_pause_update, dataset_select, dataset_upsert, dependencies_by_dataset_select,
+        dependency_upsert, state_update,
     },
-    error::Result,
+    error::{Error, Result},
 };
 use chrono::{DateTime, Utc};
 use petgraph::graph::DiGraph;
@@ -104,6 +105,26 @@ impl Plan {
 
         // Build the dag
         DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges)
+    }
+
+    /// Pause / Unpause a Plan
+    pub async fn paused(
+        &mut self,
+        tx: &mut Transaction<'_, Postgres>,
+        paused: bool,
+        username: &str,
+        modified_date: DateTime<Utc>,
+    ) -> Result<()> {
+        // Check is already desired state
+        if self.dataset.paused == paused {
+            return Err(Error::Pause(self.dataset.id, paused));
+        }
+
+        // Set the paused state
+        self.dataset =
+            dataset_pause_update(tx, self.dataset.id, paused, username, modified_date).await?;
+
+        Ok(())
     }
 }
 
@@ -313,7 +334,6 @@ impl PlanParam {
 #[derive(Clone, Object)]
 pub struct DatasetParam {
     pub id: DatasetId,
-    pub paused: bool,
     pub extra: Option<Value>,
 }
 
@@ -406,7 +426,6 @@ mod tests {
         fn default() -> Self {
             Self {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: Some(json!({"test":"dataset"})),
             }
         }
@@ -719,7 +738,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.dataset.id, plan_param.dataset.id);
-        assert_eq!(result.dataset.paused, plan_param.dataset.paused);
+        assert_eq!(result.dataset.paused, false);
         assert_eq!(result.dataset.extra, plan_param.dataset.extra);
         assert_eq!(result.dataset.modified_by, username);
 
@@ -727,7 +746,7 @@ mod tests {
             result.dataset,
             Dataset {
                 id: plan_param.dataset.id,
-                paused: plan_param.dataset.paused,
+                paused: false,
                 extra: plan_param.dataset.extra,
                 modified_by: username.to_string(),
                 modified_date: trim_to_microseconds(modified_date),
@@ -753,7 +772,6 @@ mod tests {
         // Test: Can we update an existing dataset?
         let updated_dataset_param = DatasetParam {
             id: plan_param.dataset.id,
-            paused: true,
             extra: Some(json!({"updated":true})),
         };
 
@@ -772,7 +790,7 @@ mod tests {
             result.dataset,
             Dataset {
                 id: updated_plan_param.dataset.id,
-                paused: true,
+                paused: false,
                 extra: Some(json!({"updated":true})),
                 modified_by: username.to_string(),
                 modified_date: trim_to_microseconds(modified_date),

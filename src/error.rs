@@ -35,6 +35,10 @@ pub enum Error {
     #[error("Data product not found for: {0}")]
     Missing(DataProductId),
 
+    /// Dataset Pause error
+    #[error("Dataset '{0}' pause state is already set to: {1}")]
+    Pause(DataProductId, bool),
+
     /// Errors from SQLx
     #[error("Error from SQLx: {0}")]
     Sqlx(#[from] sqlx::Error),

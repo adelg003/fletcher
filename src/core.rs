@@ -14,15 +14,17 @@ use tracing::warn;
 fn to_poem_error(err: Error) -> poem::Error {
     match err {
         // Graph is cyclical
-        Error::Cyclical => UnprocessableEntity(Error::Cyclical),
+        Error::Cyclical => UnprocessableEntity(err),
         // Failed to build graph
-        Error::Graph(err) => InternalServerError(err),
+        Error::Graph(error) => InternalServerError(error),
+        // Already disired pause state
+        Error::Pause(_, _) => BadRequest(err),
         // Row not found
         Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
         // We hit a db constraint
         Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some() => BadRequest(err),
         // Unknown error
-        err => InternalServerError(err),
+        error => InternalServerError(error),
     }
 }
 
@@ -128,6 +130,32 @@ pub async fn plan_add(
 /// Read a Plan Dag from the DB
 pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> poem::Result<Plan> {
     Plan::from_db(tx, id).await.map_err(to_poem_error)
+}
+
+/// Set the pause state of a plan
+pub async fn plan_pause_edit(
+    tx: &mut Transaction<'_, Postgres>,
+    id: DatasetId,
+    paused: bool,
+    username: &str,
+) -> poem::Result<Plan> {
+    // Pull the current plan from the DB
+    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
+
+    // Timestamp of the transaction
+    let modified_date: DateTime<Utc> = Utc::now();
+
+    // Set the new pause state
+    plan.paused(tx, paused, username, modified_date)
+        .await
+        .map_err(to_poem_error)?;
+
+    // If unpaused, lets run the next batch
+    if !paused {
+        trigger_next_batch(tx, &mut plan, username, modified_date).await?;
+    }
+
+    Ok(plan)
 }
 
 /// Read a Data Product from the DB
@@ -428,7 +456,6 @@ mod tests {
         PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: Some(json!({"test": "data"})),
             },
             data_products: vec![
@@ -492,7 +519,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![
@@ -537,7 +563,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![
@@ -592,7 +617,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![DataProductParam {
@@ -627,7 +651,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![DataProductParam {
@@ -665,7 +688,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![DataProductParam {
@@ -704,7 +726,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![
@@ -820,7 +841,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: existing_plan.dataset.id,
-                paused: false,
                 extra: None,
             },
             data_products: vec![],
@@ -930,7 +950,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: existing_plan.dataset.id,
-                paused: false,
                 extra: None,
             },
             data_products: vec![],
@@ -1038,7 +1057,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: existing_plan.dataset.id,
-                paused: false,
                 extra: None,
             },
             data_products: vec![],
@@ -1431,7 +1449,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![
@@ -1483,7 +1500,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: true,
                 extra: None,
             },
             data_products: vec![
@@ -1517,6 +1533,10 @@ mod tests {
         plan.data_products[0].state = State::Success;
         plan.data_products[1].state = State::Waiting;
 
+        plan.paused(&mut tx, true, username, modified_date)
+            .await
+            .unwrap();
+
         let result = trigger_next_batch(&mut tx, &mut plan, username, modified_date).await;
         assert!(result.is_ok());
         assert_eq!(plan.data_products[1].state, State::Waiting);
@@ -1535,7 +1555,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![
@@ -1601,7 +1620,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![
@@ -1776,7 +1794,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false, // Dataset is unpaused
                 extra: None,
             },
             data_products: vec![
@@ -1865,7 +1882,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![
@@ -2102,7 +2118,6 @@ mod tests {
         let param = PlanParam {
             dataset: DatasetParam {
                 id: Uuid::new_v4(),
-                paused: false,
                 extra: None,
             },
             data_products: vec![

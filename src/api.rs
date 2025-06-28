@@ -1,5 +1,8 @@
 use crate::{
-    core::{clear_edit, data_product_read, disable_drop, plan_add, plan_read, states_edit},
+    core::{
+        clear_edit, data_product_read, disable_drop, plan_add, plan_pause_edit, plan_read,
+        states_edit,
+    },
     model::{DataProduct, DataProductId, DatasetId, Plan, PlanParam, StateParam},
 };
 use poem::{error::InternalServerError, web::Data};
@@ -53,6 +56,44 @@ impl Api {
 
         // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+    }
+
+    /// Pause a plan
+    #[oai(path = "/plan/pause/:dataset_id", method = "put", tag = Tag::Plan)]
+    async fn plan_pause_put(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Pause a Plan
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, "placeholder_user").await?;
+
+        // Commit transaction (read-only operation)
+        tx.commit().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+    }
+
+    /// Unpause a plan
+    #[oai(path = "/plan/unpause/:dataset_id", method = "put", tag = Tag::Plan)]
+    async fn plan_unpause_put(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Pause a Plan
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, "placeholder_user").await?;
+
+        // Commit transaction (read-only operation)
+        tx.commit().await.map_err(InternalServerError)?;
 
         Ok(Json(plan))
     }
@@ -158,7 +199,6 @@ mod tests {
         json!({
             "dataset": {
                 "id": dataset_id.to_string(),
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -323,7 +363,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": dataset_id,
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -694,7 +733,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": "invalid-uuid",
-                "paused": false,
             },
         });
 
@@ -722,7 +760,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": dataset_id,
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [],
@@ -760,7 +797,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": dataset_id,
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -812,7 +848,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": dataset_id,
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -933,7 +968,6 @@ mod tests {
         let create_param = json!({
             "dataset": {
                 "id": dataset_id.to_string(),
-                "paused": true,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -991,6 +1025,15 @@ mod tests {
             .send()
             .await;
         create_response.assert_status_is_ok();
+
+        // Pause the plan
+        let pause_response: TestResponse = cli
+            .put(format!("/plan/pause/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(pool.clone())
+            .send()
+            .await;
+        pause_response.assert_status_is_ok();
 
         // Set dp2 and dp3 to success
         let state_param = json!([
