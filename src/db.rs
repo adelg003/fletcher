@@ -16,6 +16,7 @@ pub async fn dataset_upsert(
     username: &str,
     modified_date: DateTime<Utc>,
 ) -> Result<Dataset> {
+    // Default paused to false for new datasets
     let dataset = query_as!(
         Dataset,
         "INSERT INTO dataset (
@@ -26,16 +27,15 @@ pub async fn dataset_upsert(
             modified_date
         ) VALUES (
             $1,
+            false,
             $2,
             $3,
-            $4,
-            $5
+            $4
         ) ON CONFLICT (dataset_id) DO
         UPDATE SET
-            paused = $2,
-            extra = $3,
-            modified_by = $4,
-            modified_date = $5
+            extra = $2,
+            modified_by = $3,
+            modified_date = $4
         RETURNING
             dataset_id AS id,
             paused,
@@ -43,7 +43,6 @@ pub async fn dataset_upsert(
             modified_by,
             modified_date",
         param.id,
-        param.paused,
         param.extra,
         username,
         modified_date,
@@ -73,6 +72,41 @@ pub async fn dataset_select(
         WHERE
             dataset_id = $1",
         dataset_id,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(dataset)
+}
+
+/// Pause / Un-pause a dataset
+pub async fn dataset_pause_update(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    paused: bool,
+    username: &str,
+    modified_date: DateTime<Utc>,
+) -> Result<Dataset> {
+    let dataset = query_as!(
+        Dataset,
+        "UPDATE
+            dataset
+        SET
+            paused = $2,
+            modified_by = $3,
+            modified_date = $4
+        WHERE
+            dataset_id = $1
+        RETURNING
+            dataset_id AS id,
+            paused,
+            extra,
+            modified_by,
+            modified_date",
+        dataset_id,
+        paused,
+        username,
+        modified_date,
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -380,7 +414,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Inputs
-        let param: DatasetParam = Default::default();
+        let param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -394,7 +428,7 @@ pub mod tests {
             dataset,
             Dataset {
                 id: param.id,
-                paused: param.paused,
+                paused: false,
                 extra: param.extra,
                 modified_by: username.to_string(),
                 modified_date: trim_to_microseconds(modified_date),
@@ -408,7 +442,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Inputs
-        let mut param: DatasetParam = Default::default();
+        let param = DatasetParam::default();
         let username = "test";
         let mut modified_date = Utc::now();
 
@@ -418,7 +452,6 @@ pub mod tests {
             .unwrap();
 
         // Update parameters
-        param.paused = true;
         modified_date = Utc::now();
 
         // Update to new values
@@ -431,7 +464,7 @@ pub mod tests {
             dataset,
             Dataset {
                 id: param.id,
-                paused: param.paused,
+                paused: false,
                 extra: param.extra,
                 modified_by: username.to_string(),
                 modified_date: trim_to_microseconds(modified_date),
@@ -444,7 +477,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Inputs
-        let param: DatasetParam = Default::default();
+        let param = DatasetParam::default();
         let username = "test_user";
         let modified_date = Utc::now();
 
@@ -462,7 +495,7 @@ pub mod tests {
             selected_dataset,
             Dataset {
                 id: param.id,
-                paused: param.paused,
+                paused: false,
                 extra: param.extra,
                 modified_by: username.to_string(),
                 modified_date: trim_to_microseconds(modified_date),
@@ -495,7 +528,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // First create a dataset since data_product has a foreign key constraint
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -504,7 +537,7 @@ pub mod tests {
             .unwrap();
 
         // Now create the data product
-        let data_product_param: DataProductParam = Default::default();
+        let data_product_param = DataProductParam::default();
 
         // Test our function
         let data_product = data_product_upsert(
@@ -545,7 +578,7 @@ pub mod tests {
 
         // Create data product with a fake dataset_id
         let fake_dataset_id = Uuid::new_v4();
-        let data_product_param: DataProductParam = Default::default();
+        let data_product_param = DataProductParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -573,7 +606,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // First create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -582,7 +615,7 @@ pub mod tests {
             .unwrap();
 
         // Create a data product
-        let data_product_param: DataProductParam = Default::default();
+        let data_product_param = DataProductParam::default();
 
         let inserted_data_product = data_product_upsert(
             &mut tx,
@@ -648,7 +681,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // First create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -657,7 +690,7 @@ pub mod tests {
             .unwrap();
 
         // Create initial data product
-        let initial_param: DataProductParam = Default::default();
+        let initial_param = DataProductParam::default();
 
         data_product_upsert(&mut tx, dataset.id, &initial_param, username, modified_date)
             .await
@@ -715,7 +748,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // First create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -724,7 +757,7 @@ pub mod tests {
             .unwrap();
 
         // Create initial data product
-        let data_product_param: DataProductParam = Default::default();
+        let data_product_param = DataProductParam::default();
 
         let initial_data_product = data_product_upsert(
             &mut tx,
@@ -782,7 +815,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create a dataset so dataset exists but no data product
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -816,7 +849,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -825,7 +858,7 @@ pub mod tests {
             .unwrap();
 
         // Create multiple data products for this dataset
-        let data_product_1: DataProductParam = Default::default();
+        let data_product_1 = DataProductParam::default();
         let data_product_2 = DataProductParam {
             compute: Compute::Dbxaas,
             name: "data-product-2".to_string(),
@@ -873,7 +906,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -882,7 +915,7 @@ pub mod tests {
             .unwrap();
 
         // Create two data products to create a dependency between them
-        let parent_param: DataProductParam = Default::default();
+        let parent_param = DataProductParam::default();
         let child_param = DataProductParam {
             compute: Compute::Dbxaas,
             name: "child-data-product".to_string(),
@@ -936,7 +969,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -945,7 +978,7 @@ pub mod tests {
             .unwrap();
 
         // Create two data products
-        let parent_param: DataProductParam = Default::default();
+        let parent_param = DataProductParam::default();
         let child_param = DataProductParam {
             compute: Compute::Dbxaas,
             name: "child-data-product".to_string(),
@@ -1019,7 +1052,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -1028,7 +1061,7 @@ pub mod tests {
             .unwrap();
 
         // Create only a child data product (no parent)
-        let child_param: DataProductParam = Default::default();
+        let child_param = DataProductParam::default();
 
         let child_dp =
             data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
@@ -1066,7 +1099,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -1075,7 +1108,7 @@ pub mod tests {
             .unwrap();
 
         // Create only a parent data product (no child)
-        let parent_param: DataProductParam = Default::default();
+        let parent_param = DataProductParam::default();
 
         let parent_dp =
             data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
@@ -1113,7 +1146,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -1122,7 +1155,7 @@ pub mod tests {
             .unwrap();
 
         // Create a data product
-        let data_product_param: DataProductParam = Default::default();
+        let data_product_param = DataProductParam::default();
 
         let data_product = data_product_upsert(
             &mut tx,
@@ -1165,7 +1198,7 @@ pub mod tests {
         let mut tx = pool.begin().await.unwrap();
 
         // Create a dataset
-        let dataset_param: DatasetParam = Default::default();
+        let dataset_param = DatasetParam::default();
         let username = "test";
         let modified_date = Utc::now();
 
@@ -1243,5 +1276,135 @@ pub mod tests {
         assert_eq!(retrieved_dependencies.len(), 2);
         assert!(retrieved_dependencies.contains(&dep1));
         assert!(retrieved_dependencies.contains(&dep2));
+    }
+
+    /// Test dataset_pause_update setting pause to true
+    #[sqlx::test]
+    async fn test_dataset_pause_update_to_true(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Verify dataset starts as not paused
+        assert_eq!(dataset.paused, false);
+
+        // Now pause the dataset
+        let pause_username = "pause_user";
+        let pause_modified_date = Utc::now();
+
+        let paused_dataset = dataset_pause_update(
+            &mut tx,
+            dataset.id,
+            true,
+            pause_username,
+            pause_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify the dataset is now paused
+        assert_eq!(
+            paused_dataset,
+            Dataset {
+                id: dataset.id,
+                paused: true,
+                extra: dataset.extra,
+                modified_by: pause_username.to_string(),
+                modified_date: trim_to_microseconds(pause_modified_date),
+            }
+        );
+    }
+
+    /// Test dataset_pause_update setting pause to false
+    #[sqlx::test]
+    async fn test_dataset_pause_update_to_false(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
+            .await
+            .unwrap();
+
+        // First pause the dataset
+        let pause_username = "pause_user";
+        let pause_modified_date = Utc::now();
+
+        let paused_dataset = dataset_pause_update(
+            &mut tx,
+            dataset.id,
+            true,
+            pause_username,
+            pause_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify it's paused
+        assert_eq!(paused_dataset.paused, true);
+
+        // Now unpause the dataset
+        let unpause_username = "unpause_user";
+        let unpause_modified_date = Utc::now();
+
+        let unpaused_dataset = dataset_pause_update(
+            &mut tx,
+            dataset.id,
+            false,
+            unpause_username,
+            unpause_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify the dataset is now unpaused
+        assert_eq!(
+            unpaused_dataset,
+            Dataset {
+                id: dataset.id,
+                paused: false,
+                extra: dataset.extra,
+                modified_by: unpause_username.to_string(),
+                modified_date: trim_to_microseconds(unpause_modified_date),
+            }
+        );
+    }
+
+    /// Test dataset_pause_update with nonexistent dataset returns error
+    #[sqlx::test]
+    async fn test_dataset_pause_update_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate a random UUID that doesn't exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        // Test that dataset_pause_update returns an error for non-existent dataset
+        let result = dataset_pause_update(
+            &mut tx,
+            nonexistent_dataset_id,
+            true,
+            username,
+            modified_date,
+        )
+        .await;
+
+        // Assert that we got the error we wanted
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
     }
 }

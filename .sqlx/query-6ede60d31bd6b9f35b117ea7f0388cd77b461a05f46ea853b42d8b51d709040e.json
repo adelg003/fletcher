@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO dataset (\n            dataset_id,\n            paused,\n            extra,\n            modified_by,\n            modified_date\n        ) VALUES (\n            $1,\n            $2,\n            $3,\n            $4,\n            $5\n        ) ON CONFLICT (dataset_id) DO\n        UPDATE SET\n            paused = $2,\n            extra = $3,\n            modified_by = $4,\n            modified_date = $5\n        RETURNING\n            dataset_id AS id,\n            paused,\n            extra,\n            modified_by,\n            modified_date",
+  "query": "INSERT INTO dataset (\n            dataset_id,\n            paused,\n            extra,\n            modified_by,\n            modified_date\n        ) VALUES (\n            $1,\n            false,\n            $2,\n            $3,\n            $4\n        ) ON CONFLICT (dataset_id) DO\n        UPDATE SET\n            extra = $2,\n            modified_by = $3,\n            modified_date = $4\n        RETURNING\n            dataset_id AS id,\n            paused,\n            extra,\n            modified_by,\n            modified_date",
   "describe": {
     "columns": [
       {
@@ -32,7 +32,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Bool",
         "Jsonb",
         "Text",
         "Timestamptz"
@@ -46,5 +45,5 @@
       false
     ]
   },
-  "hash": "d9b0be7a437d0513b31c42b673b50d0acb34f1cb7ef30398a11dc182a364a15d"
+  "hash": "6ede60d31bd6b9f35b117ea7f0388cd77b461a05f46ea853b42d8b51d709040e"
 }

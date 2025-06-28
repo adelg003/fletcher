@@ -1,5 +1,8 @@
 use crate::{
-    core::{clear_edit, data_product_read, disable_drop, plan_add, plan_read, states_edit},
+    core::{
+        clear_edit, data_product_read, disable_drop, plan_add, plan_pause_edit, plan_read,
+        states_edit,
+    },
     model::{DataProduct, DataProductId, DatasetId, Plan, PlanParam, StateParam},
 };
 use poem::{error::InternalServerError, web::Data};
@@ -53,6 +56,44 @@ impl Api {
 
         // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+    }
+
+    /// Pause a plan
+    #[oai(path = "/plan/pause/:dataset_id", method = "put", tag = Tag::Plan)]
+    async fn plan_pause_put(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Pause a Plan
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, "placeholder_user").await?;
+
+        // Commit transaction
+        tx.commit().await.map_err(InternalServerError)?;
+
+        Ok(Json(plan))
+    }
+
+    /// Unpause a plan
+    #[oai(path = "/plan/unpause/:dataset_id", method = "put", tag = Tag::Plan)]
+    async fn plan_unpause_put(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+    ) -> poem::Result<Json<Plan>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Unpause a Plan
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, "placeholder_user").await?;
+
+        // Commit transaction
+        tx.commit().await.map_err(InternalServerError)?;
 
         Ok(Json(plan))
     }
@@ -158,7 +199,6 @@ mod tests {
         json!({
             "dataset": {
                 "id": dataset_id.to_string(),
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -323,7 +363,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": dataset_id,
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -694,7 +733,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": "invalid-uuid",
-                "paused": false,
             },
         });
 
@@ -722,7 +760,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": dataset_id,
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [],
@@ -760,7 +797,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": dataset_id,
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -812,7 +848,6 @@ mod tests {
         let param = json!({
             "dataset": {
                 "id": dataset_id,
-                "paused": false,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -933,7 +968,6 @@ mod tests {
         let create_param = json!({
             "dataset": {
                 "id": dataset_id.to_string(),
-                "paused": true,
                 "extra": {"test":"dataset"},
             },
             "data_products": [
@@ -991,6 +1025,15 @@ mod tests {
             .send()
             .await;
         create_response.assert_status_is_ok();
+
+        // Pause the plan
+        let pause_response: TestResponse = cli
+            .put(format!("/plan/pause/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(pool.clone())
+            .send()
+            .await;
+        pause_response.assert_status_is_ok();
 
         // Set dp2 and dp3 to success
         let state_param = json!([
@@ -1281,5 +1324,135 @@ mod tests {
         second_response
             .assert_text(format!("Data product is locked: {dp1_id}"))
             .await;
+    }
+
+    /// Test Plan Pause Put - Success Case
+    #[sqlx::test]
+    async fn test_plan_pause_put_success(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan (unpaused by default)
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Verify plan is initially unpaused
+        let initial_json = create_response.json().await;
+        let initial_value = initial_json.value();
+        initial_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(false);
+
+        // Test pause endpoint
+        let pause_response: TestResponse = cli
+            .put(format!("/plan/pause/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(pool)
+            .send()
+            .await;
+        pause_response.assert_status_is_ok();
+
+        // Verify plan is now paused
+        let pause_json = pause_response.json().await;
+        let pause_value = pause_json.value();
+        pause_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(true);
+    }
+    /// Test plan unpause - Success Case: Unpause a previously paused plan
+    #[sqlx::test]
+    async fn test_plan_unpause_put_success(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Verify the plan is unpaused
+        let create_json = create_response.json().await;
+        let create_value = create_json.value();
+
+        create_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(false);
+
+        // First pause the plan
+        let pause_response: TestResponse = cli
+            .put(format!("/plan/pause/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(pool.clone())
+            .send()
+            .await;
+        pause_response.assert_status_is_ok();
+
+        // Verify the plan is paused
+        let pause_json = pause_response.json().await;
+        let pause_value = pause_json.value();
+        pause_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(true);
+
+        // Now unpause the plan
+        let unpause_response: TestResponse = cli
+            .put(format!("/plan/unpause/{dataset_id}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(pool)
+            .send()
+            .await;
+        unpause_response.assert_status_is_ok();
+
+        // Verify the plan is unpaused
+        let unpause_json = unpause_response.json().await;
+        let unpause_value = unpause_json.value();
+
+        // Validate the entire plan structure and that paused is false
+        validate_test_plan(&unpause_value, dataset_id, dp1_id, dp2_id);
+
+        // Specifically verify the paused state is false
+        unpause_value
+            .object()
+            .get("dataset")
+            .object()
+            .get("paused")
+            .assert_bool(false);
     }
 }
