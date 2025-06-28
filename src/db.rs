@@ -52,6 +52,80 @@ pub async fn dataset_upsert(
     .await?;
 
     Ok(dataset)
+
+    /// Test data_product_select can retrieve an existing data product
+    #[sqlx::test]
+    async fn test_data_product_select_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let dataset_param: DatasetParam = Default::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param: DataProductParam = Default::default();
+
+        let inserted_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test data_product_select
+        let selected_data_product = data_product_select(&mut tx, dataset.id, data_product_param.id)
+            .await
+            .unwrap();
+
+        // Verify we got the same data product back
+        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test data_product_select returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_select_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate random UUIDs that do not exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        // Test that data_product_select returns an error for non-existent data product
+        let result = data_product_select(&mut tx, nonexistent_dataset_id, nonexistent_data_product_id).await;
+
+        // Assert that we got the error we expected
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
 }
 
 /// Pull a Dataset
@@ -78,6 +152,80 @@ pub async fn dataset_select(
     .await?;
 
     Ok(dataset)
+
+    /// Test data_product_select can retrieve an existing data product
+    #[sqlx::test]
+    async fn test_data_product_select_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let dataset_param: DatasetParam = Default::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param: DataProductParam = Default::default();
+
+        let inserted_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test data_product_select
+        let selected_data_product = data_product_select(&mut tx, dataset.id, data_product_param.id)
+            .await
+            .unwrap();
+
+        // Verify we got the same data product back
+        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test data_product_select returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_select_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate random UUIDs that do not exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        // Test that data_product_select returns an error for non-existent data product
+        let result = data_product_select(&mut tx, nonexistent_dataset_id, nonexistent_data_product_id).await;
+
+        // Assert that we got the error we expected
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
 }
 
 /// Insert or Update a Data Product
@@ -163,6 +311,80 @@ pub async fn data_product_upsert(
     .await?;
 
     Ok(data_product)
+
+    /// Test data_product_select can retrieve an existing data product
+    #[sqlx::test]
+    async fn test_data_product_select_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let dataset_param: DatasetParam = Default::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param: DataProductParam = Default::default();
+
+        let inserted_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test data_product_select
+        let selected_data_product = data_product_select(&mut tx, dataset.id, data_product_param.id)
+            .await
+            .unwrap();
+
+        // Verify we got the same data product back
+        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test data_product_select returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_select_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate random UUIDs that do not exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        // Test that data_product_select returns an error for non-existent data product
+        let result = data_product_select(&mut tx, nonexistent_dataset_id, nonexistent_data_product_id).await;
+
+        // Assert that we got the error we expected
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
 }
 
 /// Update the State of a Data Product
@@ -214,6 +436,80 @@ pub async fn state_update(
     .await?;
 
     Ok(data_product)
+
+    /// Test data_product_select can retrieve an existing data product
+    #[sqlx::test]
+    async fn test_data_product_select_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let dataset_param: DatasetParam = Default::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param: DataProductParam = Default::default();
+
+        let inserted_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test data_product_select
+        let selected_data_product = data_product_select(&mut tx, dataset.id, data_product_param.id)
+            .await
+            .unwrap();
+
+        // Verify we got the same data product back
+        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test data_product_select returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_select_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate random UUIDs that do not exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        // Test that data_product_select returns an error for non-existent data product
+        let result = data_product_select(&mut tx, nonexistent_dataset_id, nonexistent_data_product_id).await;
+
+        // Assert that we got the error we expected
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
 }
 
 /// Retrieve a Data Product
@@ -250,6 +546,80 @@ pub async fn data_product_select(
     .await?;
 
     Ok(data_product)
+
+    /// Test data_product_select can retrieve an existing data product
+    #[sqlx::test]
+    async fn test_data_product_select_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let dataset_param: DatasetParam = Default::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param: DataProductParam = Default::default();
+
+        let inserted_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test data_product_select
+        let selected_data_product = data_product_select(&mut tx, dataset.id, data_product_param.id)
+            .await
+            .unwrap();
+
+        // Verify we got the same data product back
+        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test data_product_select returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_select_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate random UUIDs that do not exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        // Test that data_product_select returns an error for non-existent data product
+        let result = data_product_select(&mut tx, nonexistent_dataset_id, nonexistent_data_product_id).await;
+
+        // Assert that we got the error we expected
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
 }
 
 /// Retrieve all Data Products for a Dataset
@@ -283,6 +653,80 @@ pub async fn data_products_by_dataset_select(
     .await?;
 
     Ok(data_products)
+
+    /// Test data_product_select can retrieve an existing data product
+    #[sqlx::test]
+    async fn test_data_product_select_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let dataset_param: DatasetParam = Default::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param: DataProductParam = Default::default();
+
+        let inserted_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test data_product_select
+        let selected_data_product = data_product_select(&mut tx, dataset.id, data_product_param.id)
+            .await
+            .unwrap();
+
+        // Verify we got the same data product back
+        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test data_product_select returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_select_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate random UUIDs that do not exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        // Test that data_product_select returns an error for non-existent data product
+        let result = data_product_select(&mut tx, nonexistent_dataset_id, nonexistent_data_product_id).await;
+
+        // Assert that we got the error we expected
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
 }
 
 /// Upsert a new Dependency between Data Products
@@ -331,6 +775,80 @@ pub async fn dependency_upsert(
     .await?;
 
     Ok(dependency)
+
+    /// Test data_product_select can retrieve an existing data product
+    #[sqlx::test]
+    async fn test_data_product_select_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let dataset_param: DatasetParam = Default::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param: DataProductParam = Default::default();
+
+        let inserted_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test data_product_select
+        let selected_data_product = data_product_select(&mut tx, dataset.id, data_product_param.id)
+            .await
+            .unwrap();
+
+        // Verify we got the same data product back
+        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test data_product_select returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_select_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate random UUIDs that do not exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        // Test that data_product_select returns an error for non-existent data product
+        let result = data_product_select(&mut tx, nonexistent_dataset_id, nonexistent_data_product_id).await;
+
+        // Assert that we got the error we expected
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
 }
 
 /// Retrieve all Dependencies for a Dataset
@@ -356,6 +874,80 @@ pub async fn dependencies_by_dataset_select(
     .await?;
 
     Ok(dependencies)
+
+    /// Test data_product_select can retrieve an existing data product
+    #[sqlx::test]
+    async fn test_data_product_select_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let dataset_param: DatasetParam = Default::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param: DataProductParam = Default::default();
+
+        let inserted_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test data_product_select
+        let selected_data_product = data_product_select(&mut tx, dataset.id, data_product_param.id)
+            .await
+            .unwrap();
+
+        // Verify we got the same data product back
+        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test data_product_select returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_select_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate random UUIDs that do not exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        // Test that data_product_select returns an error for non-existent data product
+        let result = data_product_select(&mut tx, nonexistent_dataset_id, nonexistent_data_product_id).await;
+
+        // Assert that we got the error we expected
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -1168,5 +1760,79 @@ pub mod tests {
         assert_eq!(retrieved_dependencies.len(), 2);
         assert!(retrieved_dependencies.contains(&dep1));
         assert!(retrieved_dependencies.contains(&dep2));
+    }
+
+    /// Test data_product_select can retrieve an existing data product
+    #[sqlx::test]
+    async fn test_data_product_select_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let dataset_param: DatasetParam = Default::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param: DataProductParam = Default::default();
+
+        let inserted_data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test data_product_select
+        let selected_data_product = data_product_select(&mut tx, dataset.id, data_product_param.id)
+            .await
+            .unwrap();
+
+        // Verify we got the same data product back
+        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product,
+            DataProduct {
+                id: data_product_param.id,
+                compute: data_product_param.compute,
+                name: data_product_param.name,
+                version: data_product_param.version,
+                eager: data_product_param.eager,
+                passthrough: data_product_param.passthrough,
+                state: State::Waiting,
+                run_id: None,
+                link: None,
+                passback: None,
+                extra: data_product_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test data_product_select returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_select_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate random UUIDs that do not exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        // Test that data_product_select returns an error for non-existent data product
+        let result = data_product_select(&mut tx, nonexistent_dataset_id, nonexistent_data_product_id).await;
+
+        // Assert that we got the error we expected
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
     }
 }
