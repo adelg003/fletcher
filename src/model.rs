@@ -1206,7 +1206,7 @@ mod tests {
 
         // Test: Can we pause a plan?
         let result = plan.paused(&mut tx, true, username, modified_date).await;
-        
+
         assert!(result.is_ok());
         assert_eq!(plan.dataset.paused, true);
     }
@@ -1235,7 +1235,7 @@ mod tests {
 
         // Test: Can we unpause a plan?
         let result = plan.paused(&mut tx, false, username, modified_date).await;
-        
+
         assert!(result.is_ok());
         assert_eq!(plan.dataset.paused, false);
     }
@@ -1261,7 +1261,7 @@ mod tests {
 
         // Test: Do we get an error when trying to set pause state to current state?
         let result = plan.paused(&mut tx, false, username, modified_date).await;
-        
+
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -1272,7 +1272,7 @@ mod tests {
         plan.paused(&mut tx, true, username, modified_date)
             .await
             .unwrap();
-        
+
         let result = plan.paused(&mut tx, true, username, modified_date).await;
         assert!(result.is_err());
         assert!(matches!(
