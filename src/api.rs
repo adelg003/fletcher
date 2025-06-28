@@ -68,11 +68,11 @@ impl Api {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
-        // Update data product states and return the updated plan
+        // Read the data product from the DB
         let data_product: DataProduct =
             data_product_read(&mut tx, dataset_id, data_product_id).await?;
 
-        // Commit Transaction
+        // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
 
         Ok(Json(data_product))
