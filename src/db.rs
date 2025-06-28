@@ -16,7 +16,7 @@ pub async fn dataset_upsert(
     username: &str,
     modified_date: DateTime<Utc>,
 ) -> Result<Dataset> {
-    // Default to pause to false for new dataseets
+    // Default paused to false for new datasets
     let dataset = query_as!(
         Dataset,
         "INSERT INTO dataset (

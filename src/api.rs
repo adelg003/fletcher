@@ -73,7 +73,7 @@ impl Api {
         // Pause a Plan
         let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, "placeholder_user").await?;
 
-        // Commit transaction (read-only operation)
+        // Commit transaction
         tx.commit().await.map_err(InternalServerError)?;
 
         Ok(Json(plan))
@@ -89,10 +89,10 @@ impl Api {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
-        // Pause a Plan
+        // Unpause a Plan
         let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, "placeholder_user").await?;
 
-        // Commit transaction (read-only operation)
+        // Commit transaction
         tx.commit().await.map_err(InternalServerError)?;
 
         Ok(Json(plan))
