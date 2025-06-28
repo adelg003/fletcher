@@ -1276,5 +1276,135 @@ pub mod tests {
         assert_eq!(retrieved_dependencies.len(), 2);
         assert!(retrieved_dependencies.contains(&dep1));
         assert!(retrieved_dependencies.contains(&dep2));
+
+    /// Test dataset_pause_update setting pause to true
+    #[sqlx::test]
+    async fn test_dataset_pause_update_to_true(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Verify dataset starts as not paused
+        assert_eq!(dataset.paused, false);
+
+        // Now pause the dataset
+        let pause_username = "pause_user";
+        let pause_modified_date = Utc::now();
+
+        let paused_dataset = dataset_pause_update(
+            &mut tx,
+            dataset.id,
+            true,
+            pause_username,
+            pause_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify the dataset is now paused
+        assert_eq!(
+            paused_dataset,
+            Dataset {
+                id: dataset.id,
+                paused: true,
+                extra: dataset.extra,
+                modified_by: pause_username.to_string(),
+                modified_date: trim_to_microseconds(pause_modified_date),
+            }
+        );
+    }
+
+    /// Test dataset_pause_update setting pause to false
+    #[sqlx::test]
+    async fn test_dataset_pause_update_to_false(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
+            .await
+            .unwrap();
+
+        // First pause the dataset
+        let pause_username = "pause_user";
+        let pause_modified_date = Utc::now();
+
+        let paused_dataset = dataset_pause_update(
+            &mut tx,
+            dataset.id,
+            true,
+            pause_username,
+            pause_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify it's paused
+        assert_eq!(paused_dataset.paused, true);
+
+        // Now unpause the dataset
+        let unpause_username = "unpause_user";
+        let unpause_modified_date = Utc::now();
+
+        let unpaused_dataset = dataset_pause_update(
+            &mut tx,
+            dataset.id,
+            false,
+            unpause_username,
+            unpause_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify the dataset is now unpaused
+        assert_eq!(
+            unpaused_dataset,
+            Dataset {
+                id: dataset.id,
+                paused: false,
+                extra: dataset.extra,
+                modified_by: unpause_username.to_string(),
+                modified_date: trim_to_microseconds(unpause_modified_date),
+            }
+        );
+    }
+
+    /// Test dataset_pause_update with nonexistent dataset returns error
+    #[sqlx::test]
+    async fn test_dataset_pause_update_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate a random UUID that doesn't exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        // Test that dataset_pause_update returns an error for non-existent dataset
+        let result = dataset_pause_update(
+            &mut tx,
+            nonexistent_dataset_id,
+            true,
+            username,
+            modified_date,
+        )
+        .await;
+
+        // Assert that we got the error we wanted
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
     }
 }
