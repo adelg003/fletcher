@@ -2182,3 +2182,50 @@ mod tests {
         assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Queued);
     }
 }
+
+    // Tests for data_product_read function
+
+    /// Test data_product_read can return a data product from the database
+    #[sqlx::test]
+    async fn test_data_product_read_existing_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let added_plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let dataset_id = added_plan.dataset.id;
+        let data_product_id = added_plan.data_products[0].id;
+        
+        let result = data_product_read(&mut tx, dataset_id, data_product_id).await;
+        assert!(result.is_ok());
+
+        let read_data_product = result.unwrap();
+        assert_eq!(read_data_product.id, data_product_id);
+        assert_eq!(read_data_product.name, added_plan.data_products[0].name);
+        assert_eq!(read_data_product.compute, added_plan.data_products[0].compute);
+        assert_eq!(read_data_product.version, added_plan.data_products[0].version);
+        assert_eq!(read_data_product.eager, added_plan.data_products[0].eager);
+        assert_eq!(read_data_product.state, added_plan.data_products[0].state);
+    }
+
+    /// Test data_product_read returns error for non-existent data product
+    #[sqlx::test]
+    async fn test_data_product_read_nonexistent_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let added_plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let dataset_id = added_plan.dataset.id;
+        let nonexistent_data_product_id = Uuid::new_v4();
+
+        let result = data_product_read(&mut tx, dataset_id, nonexistent_data_product_id).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            format!("{err}"),
+            "no rows returned by a query that expected to return at least one row"
+        );
+    }
+
