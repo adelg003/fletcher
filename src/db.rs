@@ -2,7 +2,7 @@ use crate::{
     error::Result,
     model::{
         Compute, DataProduct, DataProductId, DataProductParam, Dataset, DatasetId, DatasetParam,
-        Dependency, DependencyParam, State, StateParam,
+        Dependency, DependencyParam, Search, State, StateParam,
     },
 };
 use chrono::{DateTime, Utc};
@@ -390,6 +390,82 @@ pub async fn dependencies_by_dataset_select(
     .await?;
 
     Ok(dependencies)
+}
+
+/// Search all plans
+pub async fn search_plans_select(
+    tx: &mut Transaction<'_, Postgres>,
+    search_by: &str,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<Search>> {
+    // Format seach_by so it supports SQL wildcars while allowing for save SQL preperation.
+    let search_by: String = format!("%{search_by}%");
+
+    // Pull all datasets that meet our query
+    let rows = query_as!(
+        Search,
+        "SELECT
+            ds.dataset_id,
+            GREATEST(
+                ds.modified_date,
+                MAX(dp.modified_date),
+                MAX(dep.modified_date)
+            ) AS \"modified_date\"
+        FROM
+            dataset ds
+        INNER JOIN
+            data_product dp
+        ON
+            ds.dataset_id = dp.dataset_id
+        INNER JOIN
+            dependency dep
+        ON
+            dp.dataset_id = dep.dataset_id
+            AND (
+                dp.data_product_id = dep.parent_id
+                OR dp.data_product_id = dep.child_id
+            )
+        WHERE
+            ds.dataset_id::text ILIKE $1
+            OR ds.extra::text ILIKE $1
+            OR ds.modified_by ILIKE $1
+            OR ds.modified_date::text ILIKE $1
+            OR dp.data_product_id::text ILIKE $1
+            OR dp.compute::text ILIKE $1
+            OR dp.name ILIKE $1
+            OR dp.version ILIKE $1
+            OR dp.passthrough::text ILIKE $1
+            OR dp.state::text ILIKE $1
+            OR dp.run_id::text ILIKE $1
+            OR dp.link ILIKE $1
+            OR dp.passback::text ILIKE $1
+            OR dp.extra::text ILIKE $1
+            OR dp.modified_by ILIKE $1
+            OR dp.modified_date::text ILIKE $1
+            OR dep.extra::text ILIKE $1
+            OR dep.modified_by ILIKE $1
+            OR dep.modified_date::text ILIKE $1
+        GROUP BY
+            ds.dataset_id
+        ORDER BY
+            GREATEST(
+                MAX(ds.modified_date),
+                MAX(dp.modified_date),
+                MAX(dep.modified_date)
+            ) DESC
+        LIMIT
+            $2
+        OFFSET
+            $3",
+        search_by,
+        i64::from(limit),
+        i64::from(offset),
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    Ok(rows)
 }
 
 #[cfg(test)]

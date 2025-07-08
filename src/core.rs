@@ -1,7 +1,10 @@
 use crate::{
     dag::Dag,
+    db::search_plans_select,
     error::Error,
-    model::{DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, State, StateParam},
+    model::{
+        DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, Search, State, StateParam,
+    },
 };
 use chrono::{DateTime, Utc};
 use petgraph::graph::DiGraph;
@@ -9,6 +12,9 @@ use poem::error::{BadRequest, Forbidden, InternalServerError, NotFound, Unproces
 use sqlx::{Postgres, Transaction};
 use std::collections::HashSet;
 use tracing::warn;
+
+/// How much do we want to paginate by
+const PAGE_SIZE: u32 = 50;
 
 /// Map Crate Error to Poem Error
 fn to_poem_error(err: Error) -> poem::Error {
@@ -432,6 +438,21 @@ pub async fn disable_drop(
     trigger_next_batch(tx, &mut plan, username, modified_date).await?;
 
     Ok(plan)
+}
+
+/// Search for a Plan
+pub async fn plan_search_read(
+    tx: &mut Transaction<'_, Postgres>,
+    search_by: &str,
+    page: &u32,
+) -> poem::Result<Vec<Search>> {
+    // Compute offset
+    let offset: u32 = page * PAGE_SIZE;
+
+    // Pull the Systems
+    search_plans_select(tx, search_by, PAGE_SIZE, offset)
+        .await
+        .map_err(to_poem_error)
 }
 
 #[cfg(test)]

@@ -1,12 +1,16 @@
 use crate::{
     core::{
         clear_edit, data_product_read, disable_drop, plan_add, plan_pause_edit, plan_read,
-        states_edit,
+        plan_search_read, states_edit,
     },
-    model::{DataProduct, DataProductId, DatasetId, Plan, PlanParam, StateParam},
+    model::{DataProduct, DataProductId, DatasetId, Plan, PlanParam, Search, StateParam},
 };
 use poem::{error::InternalServerError, web::Data};
-use poem_openapi::{OpenApi, Tags, param::Path, payload::Json};
+use poem_openapi::{
+    OpenApi, Tags,
+    param::{Path, Query},
+    payload::Json,
+};
 use sqlx::PgPool;
 
 /// Tags to show in Swagger Page
@@ -58,6 +62,26 @@ impl Api {
         tx.rollback().await.map_err(InternalServerError)?;
 
         Ok(Json(plan))
+    }
+
+    /// Search for a plan
+    #[oai(path = "/plan/search", method = "get", tag = Tag::Plan)]
+    async fn plan_search_get(
+        &self,
+        Data(pool): Data<&PgPool>,
+        Query(search_by): Query<String>,
+        Query(page): Query<u32>,
+    ) -> poem::Result<Json<Vec<Search>>> {
+        // Start Transaction
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+
+        // Unpause a Plan
+        let rows: Vec<Search> = plan_search_read(&mut tx, &search_by, &page).await?;
+
+        // Commit transaction
+        tx.rollback().await.map_err(InternalServerError)?;
+
+        Ok(Json(rows))
     }
 
     /// Pause a plan
