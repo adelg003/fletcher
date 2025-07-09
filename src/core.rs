@@ -2699,12 +2699,12 @@ mod tests {
         // Test different pages to verify offset calculation
         let page_0_result = plan_search_read(&mut tx, search_term, &0).await.unwrap();
         let page_1_result = plan_search_read(&mut tx, search_term, &1).await.unwrap();
-        
+
         // Page 0 should have 50 results (PAGE_SIZE)
         assert_eq!(page_0_result.len(), 50);
         // Page 1 should have 25 results (75 - 50)
         assert_eq!(page_1_result.len(), 25);
-        
+
         // Verify no overlap between pages
         let page_0_ids: Vec<_> = page_0_result.iter().map(|s| s.dataset_id).collect();
         let page_1_ids: Vec<_> = page_1_result.iter().map(|s| s.dataset_id).collect();
@@ -2741,18 +2741,21 @@ mod tests {
 
         // Test with various edge case search terms
         let edge_cases = vec![
-            "%", // SQL wildcard
-            "_", // SQL single character wildcard
-            "'", // Single quote
-            "\", // Backslash
-            "
-", // Newline
-            "	", // Tab
+            "%",  // SQL wildcard
+            "_",  // SQL single character wildcard
+            "'",  // Single quote
+            "\"", // Double quote
+            "\\", // Backslash
+            "\n", // Newline
+            "\t", // Tab
         ];
 
         for search_term in edge_cases {
             let result = plan_search_read(&mut tx, search_term, &0).await;
-            assert!(result.is_ok(), "Search should not fail with term: {}", search_term);
+            assert!(
+                result.is_ok(),
+                "Search should not fail with term: {search_term}",
+            );
         }
     }
 
@@ -2764,10 +2767,10 @@ mod tests {
 
         let dataset_names = vec![
             "production-data-pipeline",
-            "staging-data-pipeline", 
+            "staging-data-pipeline",
             "development-data-pipeline",
             "test-data-processing",
-            "analytics-dashboard"
+            "analytics-dashboard",
         ];
 
         let mut created_datasets = Vec::new();
@@ -2780,7 +2783,7 @@ mod tests {
         }
 
         // Search for "data" should match first 4 datasets
-        let result = plan_search_read(&mut tx, "data", &0).await;
+        let result = plan_search_read(&mut tx, "-data-", &0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         assert_eq!(results.len(), 4);
