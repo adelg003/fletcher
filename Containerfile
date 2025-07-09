@@ -3,6 +3,10 @@
 #################
 FROM rust:alpine as builder
 
+# Update system packages
+RUN apk update --no-cache && \
+apk upgrade --quiet
+
 # Setup dependencies
 RUN apk add --no-cache \
   musl-dev
@@ -31,6 +35,10 @@ RUN if [ "$BUILD_MODE" = "release" ]; then \
 ###################
 
 FROM alpine:3
+
+# Update system packages
+RUN apk update --no-cache && \
+apk upgrade --quiet
 
 # Setup dependencies
 RUN apk add --no-cache \
