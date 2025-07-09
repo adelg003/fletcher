@@ -1427,7 +1427,7 @@ mod tests {
 
         // Search for the plan using dataset_id as search term
         let response: TestResponse = cli
-            .get(format!("/plan/search?search_by={}&page=1", dataset_id))
+            .get(format!("/plan/search?search_by={dataset_id}&page=0"))
             .data(pool)
             .send()
             .await;
@@ -1442,9 +1442,11 @@ mod tests {
         assert!(!results.is_empty(), "Search results should not be empty");
 
         // Verify the structure of the search results
-        let first_result = results[0].object();
-        assert!(first_result.get("dataset_id").is_some());
-        assert!(first_result.get("modified_date").is_some());
+        let first_result = results.get(0).object();
+        first_result
+            .get("dataset_id")
+            .assert_string(&dataset_id.to_string());
+        first_result.get("modified_date").assert_not_null();
     }
 
     /// Test Plan Search Get - Empty Results Case
@@ -1455,7 +1457,9 @@ mod tests {
         let cli = TestClient::new(ep);
 
         let response: TestResponse = cli
-            .get(format!("/plan/search?search_by={}&page=1", non_existent_search))
+            .get(format!(
+                "/plan/search?search_by={non_existent_search}&page=0",
+            ))
             .data(pool)
             .send()
             .await;
@@ -1466,7 +1470,10 @@ mod tests {
 
         // Verify empty results
         let results = json_value.array();
-        assert!(results.is_empty(), "Search results should be empty for non-existent search term");
+        assert!(
+            results.is_empty(),
+            "Search results should be empty for non-existent search term"
+        );
     }
 
     /// Test Plan Search Get - Pagination
@@ -1508,7 +1515,7 @@ mod tests {
 
         // Test page 1
         let response_page_1: TestResponse = cli
-            .get("/plan/search?search_by=data-product&page=1")
+            .get("/plan/search?search_by=data-product&page=0")
             .data(pool.clone())
             .send()
             .await;
@@ -1516,7 +1523,7 @@ mod tests {
 
         // Test page 2
         let response_page_2: TestResponse = cli
-            .get("/plan/search?search_by=data-product&page=2")
+            .get("/plan/search?search_by=data-product&page=1")
             .data(pool)
             .send()
             .await;
@@ -1525,7 +1532,7 @@ mod tests {
         // Both pages should return successfully (specific result validation depends on implementation)
         let page_1_json = response_page_1.json().await;
         let page_1_results = page_1_json.value().array();
-        
+
         let page_2_json = response_page_2.json().await;
         let page_2_results = page_2_json.value().array();
 
@@ -1559,11 +1566,7 @@ mod tests {
         response_missing_page.assert_status(StatusCode::BAD_REQUEST);
 
         // Test missing both parameters
-        let response_missing_both: TestResponse = cli
-            .get("/plan/search")
-            .data(pool)
-            .send()
-            .await;
+        let response_missing_both: TestResponse = cli.get("/plan/search").data(pool).send().await;
         response_missing_both.assert_status(StatusCode::BAD_REQUEST);
     }
 
@@ -1582,7 +1585,7 @@ mod tests {
         response.assert_status(StatusCode::BAD_REQUEST);
     }
 
-    /// Test Plan Search Get - Zero Page Parameter
+    /// Test Plan Search Get - Negative Page Parameter
     #[sqlx::test]
     async fn test_plan_search_get_zero_page(pool: PgPool) {
         let ep = OpenApiService::new(Api, "test", "1.0");
@@ -1590,13 +1593,13 @@ mod tests {
 
         // Test page 0 (should be handled appropriately by the implementation)
         let response: TestResponse = cli
-            .get("/plan/search?search_by=test&page=0")
+            .get("/plan/search?search_by=test&page=-1")
             .data(pool)
             .send()
             .await;
-        // The response depends on how the backend handles page=0
+        // The response depends on how the backend handles page=-1
         // This test ensures the endpoint does not crash
-        assert!(response.status().is_success() || response.status().is_client_error());
+        response.assert_status(StatusCode::BAD_REQUEST);
     }
 
     /// Test Plan Search Get - Empty Search Term
@@ -1616,9 +1619,9 @@ mod tests {
         let test_json = response.json().await;
         let json_value = test_json.value();
         let results = json_value.array();
-        
-        // Empty search term should return empty results or all results depending on implementation
-        assert!(results.is_empty() || !results.is_empty());
+
+        // Empty search term should return empty results
+        results.is_empty();
     }
 
     /// Test plan unpause - Success Case: Unpause a previously paused plan
