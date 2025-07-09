@@ -391,6 +391,13 @@ pub struct DependencyParam {
     pub extra: Option<Value>,
 }
 
+/// Search return
+#[derive(Object)]
+pub struct Search {
+    pub dataset_id: DatasetId,
+    pub modified_date: Option<DateTime<Utc>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

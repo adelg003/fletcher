@@ -3,9 +3,10 @@
 #################
 FROM rust:alpine as builder
 
-# Setup dependencies
-RUN apk add --no-cache \
-  musl-dev
+# Update system packages and install setup dependencies
+RUN apk update --no-cache && \
+    apk add --no-cache \
+        musl-dev
 
 # Copy files to build Rust Application
 WORKDIR /opt/fletcher
@@ -32,10 +33,13 @@ RUN if [ "$BUILD_MODE" = "release" ]; then \
 
 FROM alpine:3
 
-# Setup dependencies
-RUN apk add --no-cache \
-  alpine-conf \
-  curl
+# Update system packages and install setup dependencies
+RUN apk update --no-cache && \
+    apk upgrade --quiet && \
+    apk add --no-cache \
+        alpine-conf \
+        curl && \
+    rm -rf /var/cache/apk/*
 
 # Setup Fletcher user
 RUN setup-user fletcher
@@ -47,8 +51,8 @@ ARG BUILD_MODE=release
 
 # Copy over complied runtime binary
 COPY --from=builder \
-  /opt/fletcher/target/${BUILD_MODE}/fletcher \
-  /usr/local/bin/fletcher
+    /opt/fletcher/target/${BUILD_MODE}/fletcher \
+    /usr/local/bin/fletcher
 
 # Setup Healthcheck
 HEALTHCHECK CMD curl --fail http://localhost:3000/spec
