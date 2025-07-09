@@ -28,12 +28,11 @@ target/
 # Ignore generated / working data
 gitignore/
 
+# Output from build.rs process
+tmp/
+
 # Node
 node_modules/
-
-# Code and CSS from build.rs process
-assets/css/
-assets/scripts/
 
 # Podman Build
 podman-build-secret*

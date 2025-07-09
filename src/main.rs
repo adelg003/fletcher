@@ -4,11 +4,24 @@ mod dag;
 mod db;
 mod error;
 mod model;
+mod ui;
 
-use api::Api;
-use poem::{EndpointExt, Route, Server, listener::TcpListener, middleware::Tracing};
+use crate::{
+    api::Api,
+    ui::{not_found_404, route},
+};
+use poem::{
+    EndpointExt, Route, Server, endpoint::EmbeddedFilesEndpoint, listener::TcpListener,
+    middleware::Tracing,
+};
 use poem_openapi::OpenApiService;
+use rust_embed::Embed;
 use sqlx::PgPool;
+
+/// Static files hosted via webserver
+#[derive(Embed)]
+#[folder = "tmp/assets"]
+struct Assets;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -31,8 +44,11 @@ async fn main() -> color_eyre::Result<()> {
     let app = Route::new()
         // Developer friendly locations
         .nest("/api", api_service)
+        .nest("/assets", EmbeddedFilesEndpoint::<Assets>::new())
         .at("/spec", spec)
         .nest("/swagger", swagger)
+        // User UI
+        .catch_error(not_found_404)
         // Global context to be shared
         .data(pool)
         // Utilites being added to our services
