@@ -51,6 +51,597 @@ pub async fn dataset_upsert(
     .await?;
 
     Ok(dataset)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 /// Pull a Dataset
@@ -77,6 +668,597 @@ pub async fn dataset_select(
     .await?;
 
     Ok(dataset)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 /// Pause / Un-pause a dataset
@@ -112,6 +1294,597 @@ pub async fn dataset_pause_update(
     .await?;
 
     Ok(dataset)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 /// Insert or Update a Data Product
@@ -197,6 +1970,597 @@ pub async fn data_product_upsert(
     .await?;
 
     Ok(data_product)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 /// Update the State of a Data Product
@@ -248,6 +2612,597 @@ pub async fn state_update(
     .await?;
 
     Ok(data_product)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 /// Retrieve a Data Product
@@ -284,6 +3239,597 @@ pub async fn data_product_select(
     .await?;
 
     Ok(data_product)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 /// Retrieve all Data Products for a Dataset
@@ -317,6 +3863,597 @@ pub async fn data_products_by_dataset_select(
     .await?;
 
     Ok(data_products)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 /// Upsert a new Dependency between Data Products
@@ -365,6 +4502,597 @@ pub async fn dependency_upsert(
     .await?;
 
     Ok(dependency)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 /// Retrieve all Dependencies for a Dataset
@@ -390,6 +5118,597 @@ pub async fn dependencies_by_dataset_select(
     .await?;
 
     Ok(dependencies)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 /// Search all plans
@@ -466,6 +5785,597 @@ pub async fn search_plans_select(
     .await?;
 
     Ok(rows)
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(results[0].modified_date, Some(trim_to_microseconds(modified_date)));
+    }
+
+    /// Test search_plans_select with case insensitive matching
+    #[sqlx::test]
+    async fn test_search_plans_select_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "TestUser";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "CamelCaseProduct".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "dependency-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test case insensitive search by name (lowercase)
+        let results = search_plans_select(&mut tx, "camelcase", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test case insensitive search by username (lowercase)
+        let results = search_plans_select(&mut tx, "testuser", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select with pagination
+    #[sqlx::test]
+    async fn test_search_plans_select_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create multiple datasets with search-friendly names
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        let mut datasets = Vec::new();
+        for i in 0..5 {
+            let dataset_param = DatasetParam {
+                extra: Some(json!({"name": format!("searchable-dataset-{}", i)})),
+                ..Default::default()
+            };
+            let modified_date = base_time + chrono::Duration::milliseconds(i * 100);
+
+            let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+                .await
+                .unwrap();
+
+            // Create data products and dependencies for each dataset
+            let data_product_param = DataProductParam {
+                name: format!("searchable-product-{}", i),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("searchable-product-{}-child", i),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+                .await
+                .unwrap();
+
+            datasets.push(dataset);
+        }
+
+        // Test first page (limit 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, datasets[4].id);
+        assert_eq!(results[1].dataset_id, datasets[3].id);
+
+        // Test second page (limit 2, offset 2)
+        let results = search_plans_select(&mut tx, "searchable", 2, 2)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].dataset_id, datasets[2].id);
+        assert_eq!(results[1].dataset_id, datasets[1].id);
+
+        // Test third page (limit 2, offset 4)
+        let results = search_plans_select(&mut tx, "searchable", 2, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, datasets[0].id);
+    }
+
+    /// Test search_plans_select with no results
+    #[sqlx::test]
+    async fn test_search_plans_select_no_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data that won't match search
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "normal-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "normal-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Search for something that doesn't exist
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    /// Test search_plans_select across different columns
+    #[sqlx::test]
+    async fn test_search_plans_select_different_columns(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "unique-dataset-description"})),
+            ..Default::default()
+        };
+        let username = "unique_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let data_product_param = DataProductParam {
+            name: "unique-product-name".to_string(),
+            version: "unique-version".to_string(),
+            extra: Some(json!({"type": "unique-product-type"})),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let data_product_param_2 = DataProductParam {
+            name: "child-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            extra: Some(json!({"relationship": "unique-dependency-type"})),
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search by dataset extra field
+        let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dataset modified_by
+        let results = search_plans_select(&mut tx, "unique_user", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product name
+        let results = search_plans_select(&mut tx, "unique-product-name", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product version
+        let results = search_plans_select(&mut tx, "unique-version", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by data product extra field
+        let results = search_plans_select(&mut tx, "unique-product-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+
+        // Test search by dependency extra field
+        let results = search_plans_select(&mut tx, "unique-dependency-type", 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, dataset.id);
+    }
+
+    /// Test search_plans_select ordering by most recent modification date
+    #[sqlx::test]
+    async fn test_search_plans_select_ordering(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let base_time = Utc::now();
+
+        // Create first dataset (oldest)
+        let dataset_param_1 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-1"})),
+            ..Default::default()
+        };
+        let modified_date_1 = base_time - chrono::Duration::hours(2);
+
+        let dataset_1 = dataset_upsert(&mut tx, &dataset_param_1, username, modified_date_1)
+            .await
+            .unwrap();
+
+        // Create second dataset (middle)
+        let dataset_param_2 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-2"})),
+            ..Default::default()
+        };
+        let modified_date_2 = base_time - chrono::Duration::hours(1);
+
+        let dataset_2 = dataset_upsert(&mut tx, &dataset_param_2, username, modified_date_2)
+            .await
+            .unwrap();
+
+        // Create third dataset (newest)
+        let dataset_param_3 = DatasetParam {
+            extra: Some(json!({"name": "ordered-dataset-3"})),
+            ..Default::default()
+        };
+        let modified_date_3 = base_time;
+
+        let dataset_3 = dataset_upsert(&mut tx, &dataset_param_3, username, modified_date_3)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for each dataset
+        for (i, (dataset, modified_date)) in [
+            (dataset_1, modified_date_1),
+            (dataset_2, modified_date_2),
+            (dataset_3, modified_date_3),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let data_product_param = DataProductParam {
+                name: format!("ordered-product-{}", i + 1),
+                ..Default::default()
+            };
+
+            let data_product = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let data_product_param_2 = DataProductParam {
+                name: format!("ordered-product-{}-child", i + 1),
+                ..Default::default()
+            };
+
+            let data_product_2 = data_product_upsert(
+                &mut tx,
+                dataset.id,
+                &data_product_param_2,
+                username,
+                *modified_date,
+            )
+            .await
+            .unwrap();
+
+            let dependency_param = DependencyParam {
+                parent_id: data_product.id,
+                child_id: data_product_2.id,
+                ..Default::default()
+            };
+
+            dependency_upsert(&mut tx, dataset.id, &dependency_param, username, *modified_date)
+                .await
+                .unwrap();
+        }
+
+        // Test ordering - should return newest first
+        let results = search_plans_select(&mut tx, "ordered", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Results should be ordered by modified_date DESC (newest first)
+        assert_eq!(results[0].dataset_id, dataset_3.id);
+        assert_eq!(results[1].dataset_id, dataset_2.id);
+        assert_eq!(results[2].dataset_id, dataset_1.id);
+
+        // Verify the timestamps are in descending order
+        assert!(results[0].modified_date >= results[1].modified_date);
+        assert!(results[1].modified_date >= results[2].modified_date);
+    }
+
+    /// Test search_plans_select with complex scenario - multiple datasets, some matching, some not
+    #[sqlx::test]
+    async fn test_search_plans_select_complex_scenario(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        // Create dataset that will match search
+        let matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "matching-project"})),
+            ..Default::default()
+        };
+
+        let matching_dataset = dataset_upsert(&mut tx, &matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create dataset that won't match search
+        let non_matching_dataset_param = DatasetParam {
+            extra: Some(json!({"project": "different-project"})),
+            ..Default::default()
+        };
+
+        let _non_matching_dataset = dataset_upsert(&mut tx, &non_matching_dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data products and dependencies for matching dataset
+        let matching_dp_param = DataProductParam {
+            name: "matching-product".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dp_param_2 = DataProductParam {
+            name: "matching-product-child".to_string(),
+            ..Default::default()
+        };
+
+        let matching_dp_2 = data_product_upsert(
+            &mut tx,
+            matching_dataset.id,
+            &matching_dp_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let matching_dep_param = DependencyParam {
+            parent_id: matching_dp.id,
+            child_id: matching_dp_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, matching_dataset.id, &matching_dep_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Test search - should only return matching dataset
+        let results = search_plans_select(&mut tx, "matching", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, matching_dataset.id);
+
+        // Test search that matches nothing
+        let results = search_plans_select(&mut tx, "nonexistent", 10, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
 }
 
 #[cfg(test)]
@@ -968,6 +6878,577 @@ pub mod tests {
         // Test data_products_by_dataset_select
         let retrieved_data_products = data_products_by_dataset_select(&mut tx, dataset.id)
             .await
+            .unwrap();
+
+        // Verify we got both data products
+        assert_eq!(retrieved_data_products.len(), 2);
+        assert!(retrieved_data_products.contains(&inserted_dp1));
+        assert!(retrieved_data_products.contains(&inserted_dp2));
+    }
+
+    /// Test dependency_upsert can add a new dependency
+    #[sqlx::test]
+    async fn test_dependency_upsert_insert(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create a dataset
+        let dataset_param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create two data products to create a dependency between them
+        let parent_param = DataProductParam::default();
+        let child_param = DataProductParam {
+            compute: Compute::Dbxaas,
+            name: "child-data-product".to_string(),
+            eager: false,
+            ..Default::default()
+        };
+
+        let parent_dp =
+            data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
+                .await
+                .unwrap();
+        let child_dp =
+            data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
+                .await
+                .unwrap();
+
+        // Create a dependency
+        let dependency_param = DependencyParam {
+            parent_id: parent_dp.id,
+            child_id: child_dp.id,
+            ..Default::default()
+        };
+
+        // Test dependency_upsert
+        let dependency = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify the dependency was created correctly
+        assert_eq!(
+            dependency,
+            Dependency {
+                parent_id: dependency_param.parent_id,
+                child_id: dependency_param.child_id,
+                extra: dependency_param.extra,
+                modified_by: username.to_string(),
+                modified_date: trim_to_microseconds(modified_date),
+            }
+        );
+    }
+
+    /// Test dependency_upsert can update an existing dependency
+    #[sqlx::test]
+    async fn test_dependency_upsert_update(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create a dataset
+        let dataset_param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create two data products
+        let parent_param = DataProductParam::default();
+        let child_param = DataProductParam {
+            compute: Compute::Dbxaas,
+            name: "child-data-product".to_string(),
+            eager: false,
+            ..Default::default()
+        };
+
+        let parent_dp =
+            data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
+                .await
+                .unwrap();
+        let child_dp =
+            data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
+                .await
+                .unwrap();
+
+        // Create initial dependency
+        let initial_dependency_param = DependencyParam {
+            parent_id: parent_dp.id,
+            child_id: child_dp.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &initial_dependency_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Update the dependency
+        let updated_dependency_param = DependencyParam {
+            parent_id: parent_dp.id,
+            child_id: child_dp.id,
+            ..Default::default()
+        };
+
+        let updated_modified_date = Utc::now();
+        let updated_username = "updater";
+
+        // Test dependency update
+        let updated_dependency = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &updated_dependency_param,
+            updated_username,
+            updated_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify the dependency was updated correctly
+        assert_eq!(
+            updated_dependency,
+            Dependency {
+                parent_id: updated_dependency_param.parent_id,
+                child_id: updated_dependency_param.child_id,
+                extra: updated_dependency_param.extra,
+                modified_by: updated_username.to_string(),
+                modified_date: trim_to_microseconds(updated_modified_date),
+            }
+        );
+    }
+
+    /// Test dependency_upsert rejects dependency with non-existent parent
+    #[sqlx::test]
+    async fn test_dependency_upsert_nonexistent_parent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create a dataset
+        let dataset_param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create only a child data product (no parent)
+        let child_param = DataProductParam::default();
+
+        let child_dp =
+            data_product_upsert(&mut tx, dataset.id, &child_param, username, modified_date)
+                .await
+                .unwrap();
+
+        // Try to create dependency with non-existent parent
+        let dependency_param = DependencyParam {
+            parent_id: Uuid::new_v4(), // Fake parent id
+            child_id: child_dp.id,
+            ..Default::default()
+        };
+
+        // Test dependency_upsert - should fail with foreign key constraint
+        let result = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency_param,
+            username,
+            modified_date,
+        )
+        .await;
+
+        // Should get a database error due to foreign key constraint
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some(),
+        ));
+    }
+
+    /// Test dependency_upsert rejects dependency with non-existent child
+    #[sqlx::test]
+    async fn test_dependency_upsert_nonexistent_child(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create a dataset
+        let dataset_param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create only a parent data product (no child)
+        let parent_param = DataProductParam::default();
+
+        let parent_dp =
+            data_product_upsert(&mut tx, dataset.id, &parent_param, username, modified_date)
+                .await
+                .unwrap();
+
+        // Try to create dependency with non-existent child
+        let dependency_param = DependencyParam {
+            parent_id: parent_dp.id,
+            child_id: Uuid::new_v4(), // Fake child id
+            ..Default::default()
+        };
+
+        // Test dependency_upsert - should fail with foreign key constraint
+        let result = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency_param,
+            username,
+            modified_date,
+        )
+        .await;
+
+        // Should get a database error due to foreign key constraint
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some(),
+        ));
+    }
+
+    /// Test dependency_upsert rejects self-referencing dependency
+    #[sqlx::test]
+    async fn test_dependency_upsert_self_reference(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create a dataset
+        let dataset_param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create a data product
+        let data_product_param = DataProductParam::default();
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Try to create a self-referencing dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product.id, // Same as parent - should be rejected
+            ..Default::default()
+        };
+
+        // Test dependency_upsert - should fail with check constraint
+        let result = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency_param,
+            username,
+            modified_date,
+        )
+        .await;
+
+        // Should get a database error due to check constraint
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some(),
+        ));
+    }
+
+    /// Test dependencies_by_dataset_select returns all dependencies for a dataset
+    #[sqlx::test]
+    async fn test_dependencies_by_dataset_select(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create a dataset
+        let dataset_param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create three data products to create multiple dependencies
+        let dp1_param = DataProductParam {
+            name: "data-product-1".to_string(),
+            ..Default::default()
+        };
+
+        let dp2_param = DataProductParam {
+            compute: Compute::Dbxaas,
+            name: "data-product-2".to_string(),
+            eager: false,
+            ..Default::default()
+        };
+
+        let dp3_param = DataProductParam {
+            name: "data-product-3".to_string(),
+            ..Default::default()
+        };
+
+        let dp1 = data_product_upsert(&mut tx, dataset.id, &dp1_param, username, modified_date)
+            .await
+            .unwrap();
+        let dp2 = data_product_upsert(&mut tx, dataset.id, &dp2_param, username, modified_date)
+            .await
+            .unwrap();
+        let dp3 = data_product_upsert(&mut tx, dataset.id, &dp3_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create multiple dependencies: dp1 -> dp2, dp2 -> dp3
+        let dependency1_param = DependencyParam {
+            parent_id: dp1.id,
+            child_id: dp2.id,
+            ..Default::default()
+        };
+
+        let dependency2_param = DependencyParam {
+            parent_id: dp2.id,
+            child_id: dp3.id,
+            ..Default::default()
+        };
+
+        let dep1 = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency1_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        let dep2 = dependency_upsert(
+            &mut tx,
+            dataset.id,
+            &dependency2_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Test dependencies_by_dataset_select
+        let retrieved_dependencies = dependencies_by_dataset_select(&mut tx, dataset.id)
+            .await
+            .unwrap();
+
+        // Verify we got both dependencies
+        assert_eq!(retrieved_dependencies.len(), 2);
+        assert!(retrieved_dependencies.contains(&dep1));
+        assert!(retrieved_dependencies.contains(&dep2));
+    }
+
+    /// Test dataset_pause_update setting pause to true
+    #[sqlx::test]
+    async fn test_dataset_pause_update_to_true(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Verify dataset starts as not paused
+        assert_eq!(dataset.paused, false);
+
+        // Now pause the dataset
+        let pause_username = "pause_user";
+        let pause_modified_date = Utc::now();
+
+        let paused_dataset = dataset_pause_update(
+            &mut tx,
+            dataset.id,
+            true,
+            pause_username,
+            pause_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify the dataset is now paused
+        assert_eq!(
+            paused_dataset,
+            Dataset {
+                id: dataset.id,
+                paused: true,
+                extra: dataset.extra,
+                modified_by: pause_username.to_string(),
+                modified_date: trim_to_microseconds(pause_modified_date),
+            }
+        );
+    }
+
+    /// Test dataset_pause_update setting pause to false
+    #[sqlx::test]
+    async fn test_dataset_pause_update_to_false(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // First create a dataset
+        let param = DatasetParam::default();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &param, username, modified_date)
+            .await
+            .unwrap();
+
+        // First pause the dataset
+        let pause_username = "pause_user";
+        let pause_modified_date = Utc::now();
+
+        let paused_dataset = dataset_pause_update(
+            &mut tx,
+            dataset.id,
+            true,
+            pause_username,
+            pause_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify it's paused
+        assert_eq!(paused_dataset.paused, true);
+
+        // Now unpause the dataset
+        let unpause_username = "unpause_user";
+        let unpause_modified_date = Utc::now();
+
+        let unpaused_dataset = dataset_pause_update(
+            &mut tx,
+            dataset.id,
+            false,
+            unpause_username,
+            unpause_modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Verify the dataset is now unpaused
+        assert_eq!(
+            unpaused_dataset,
+            Dataset {
+                id: dataset.id,
+                paused: false,
+                extra: dataset.extra,
+                modified_by: unpause_username.to_string(),
+                modified_date: trim_to_microseconds(unpause_modified_date),
+            }
+        );
+    }
+
+    /// Test dataset_pause_update with nonexistent dataset returns error
+    #[sqlx::test]
+    async fn test_dataset_pause_update_nonexistent(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Generate a random UUID that doesn't exist in the database
+        let nonexistent_dataset_id = Uuid::new_v4();
+        let username = "test";
+        let modified_date = Utc::now();
+
+        // Test that dataset_pause_update returns an error for non-existent dataset
+        let result = dataset_pause_update(
+            &mut tx,
+            nonexistent_dataset_id,
+            true,
+            username,
+            modified_date,
+        )
+        .await;
+
+        // Assert that we got the error we wanted
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Sqlx(sqlx::Error::RowNotFound),
+        ));
+    }
+
+    /// Test search_plans_select with basic search functionality
+    #[sqlx::test]
+    async fn test_search_plans_select_basic(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create test data
+        let dataset_param = DatasetParam::default();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
+            .await
+            .unwrap();
+
+        // Create data product
+        let data_product_param = DataProductParam {
+            name: "test-product".to_string(),
+            ..Default::default()
+        };
+
+        let data_product = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create another data product for dependency
+        let data_product_param_2 = DataProductParam {
+            name: "test-product-2".to_string(),
+            ..Default::default()
+        };
+
+        let data_product_2 = data_product_upsert(
+            &mut tx,
+            dataset.id,
+            &data_product_param_2,
+            username,
+            modified_date,
+        )
+        .await
+        .unwrap();
+
+        // Create dependency
+        let dependency_param = DependencyParam {
+            parent_id: data_product.id,
+            child_id: data_product_2.id,
+            ..Default::default()
+        };
+
+        dependency_upsert(&mut tx, dataset.id, &dependency_param, username, modified_date)
+            .awai
             .unwrap();
 
         // Verify we got both data products
