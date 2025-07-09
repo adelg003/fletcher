@@ -75,10 +75,10 @@ impl Api {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
-        // Unpause a Plan
-        let rows: Vec<Search> = plan_search_read(&mut tx, &search_by, &page).await?;
+        // Search for plans
+        let rows: Vec<Search> = plan_search_read(&mut tx, &search_by, page).await?;
 
-        // Commit transaction
+        // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
 
         Ok(Json(rows))
@@ -1587,11 +1587,11 @@ mod tests {
 
     /// Test Plan Search Get - Negative Page Parameter
     #[sqlx::test]
-    async fn test_plan_search_get_zero_page(pool: PgPool) {
+    async fn test_plan_search_get_negative_page(pool: PgPool) {
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
-        // Test page 0 (should be handled appropriately by the implementation)
+        // Test page -1 (should be handled appropriately by the implementation)
         let response: TestResponse = cli
             .get("/plan/search?search_by=test&page=-1")
             .data(pool)
@@ -1621,7 +1621,7 @@ mod tests {
         let results = json_value.array();
 
         // Empty search term should return empty results
-        results.is_empty();
+        results.assert_is_empty();
     }
 
     /// Test plan unpause - Success Case: Unpause a previously paused plan

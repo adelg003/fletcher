@@ -444,7 +444,7 @@ pub async fn disable_drop(
 pub async fn plan_search_read(
     tx: &mut Transaction<'_, Postgres>,
     search_by: &str,
-    page: &u32,
+    page: u32,
 ) -> poem::Result<Vec<Search>> {
     // Compute offset
     let offset: u32 = page * PAGE_SIZE;
@@ -2537,7 +2537,7 @@ mod tests {
         // Search for datasets containing "test-dataset"
         let search_term = "test-dataset";
         let page = 0;
-        let result = plan_search_read(&mut tx, search_term, &page).await;
+        let result = plan_search_read(&mut tx, search_term, page).await;
         assert!(result.is_ok());
 
         let search_results = result.unwrap();
@@ -2563,7 +2563,7 @@ mod tests {
         // Search for something that doesn't exist
         let search_term = "nonexistent-dataset-xyz";
         let page = 0;
-        let result = plan_search_read(&mut tx, search_term, &page).await;
+        let result = plan_search_read(&mut tx, search_term, page).await;
         assert!(result.is_ok());
 
         let search_results = result.unwrap();
@@ -2587,19 +2587,19 @@ mod tests {
         let search_term = "paginated-dataset";
 
         // Test first page (page 0)
-        let result = plan_search_read(&mut tx, search_term, &0).await;
+        let result = plan_search_read(&mut tx, search_term, 0).await;
         assert!(result.is_ok());
         let page_0_results = result.unwrap();
         assert_eq!(page_0_results.len(), 50); // PAGE_SIZE is 50
 
         // Test second page (page 1)
-        let result = plan_search_read(&mut tx, search_term, &1).await;
+        let result = plan_search_read(&mut tx, search_term, 1).await;
         assert!(result.is_ok());
         let page_1_results = result.unwrap();
         assert_eq!(page_1_results.len(), 10); // Remaining 10 results
 
         // Test third page (page 2) - should be empty
-        let result = plan_search_read(&mut tx, search_term, &2).await;
+        let result = plan_search_read(&mut tx, search_term, 2).await;
         assert!(result.is_ok());
         let page_2_results = result.unwrap();
         assert!(page_2_results.is_empty());
@@ -2622,14 +2622,14 @@ mod tests {
         plan_add(&mut tx, &param, username).await.unwrap();
 
         // Search with lowercase
-        let result = plan_search_read(&mut tx, "mixedcase", &0).await;
+        let result = plan_search_read(&mut tx, "mixedcase", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         assert!(!results.is_empty());
         assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
 
         // Search with uppercase
-        let result = plan_search_read(&mut tx, "MIXEDCASE", &0).await;
+        let result = plan_search_read(&mut tx, "MIXEDCASE", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         assert!(!results.is_empty());
@@ -2648,14 +2648,14 @@ mod tests {
         plan_add(&mut tx, &param, username).await.unwrap();
 
         // Search for the dataset with special characters
-        let result = plan_search_read(&mut tx, "special_chars", &0).await;
+        let result = plan_search_read(&mut tx, "special_chars", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         assert!(!results.is_empty());
         assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
 
         // Test with empty search string
-        let result = plan_search_read(&mut tx, "", &0).await;
+        let result = plan_search_read(&mut tx, "", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         // Should return results (likely all datasets)
@@ -2674,7 +2674,7 @@ mod tests {
 
         // Search with very long term
         let long_search_term = "a".repeat(1000);
-        let result = plan_search_read(&mut tx, &long_search_term, &0).await;
+        let result = plan_search_read(&mut tx, &long_search_term, 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         assert!(results.is_empty());
@@ -2697,8 +2697,8 @@ mod tests {
         let search_term = "offset-test";
 
         // Test different pages to verify offset calculation
-        let page_0_result = plan_search_read(&mut tx, search_term, &0).await.unwrap();
-        let page_1_result = plan_search_read(&mut tx, search_term, &1).await.unwrap();
+        let page_0_result = plan_search_read(&mut tx, search_term, 0).await.unwrap();
+        let page_1_result = plan_search_read(&mut tx, search_term, 1).await.unwrap();
 
         // Page 0 should have 50 results (PAGE_SIZE)
         assert_eq!(page_0_result.len(), 50);
@@ -2723,7 +2723,7 @@ mod tests {
 
         // Search with a very high page number
         let high_page = 999;
-        let result = plan_search_read(&mut tx, "test", &high_page).await;
+        let result = plan_search_read(&mut tx, "test", high_page).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         assert!(results.is_empty());
@@ -2751,7 +2751,7 @@ mod tests {
         ];
 
         for search_term in edge_cases {
-            let result = plan_search_read(&mut tx, search_term, &0).await;
+            let result = plan_search_read(&mut tx, search_term, 0).await;
             assert!(
                 result.is_ok(),
                 "Search should not fail with term: {search_term}",
@@ -2783,19 +2783,19 @@ mod tests {
         }
 
         // Search for "data" should match first 4 datasets
-        let result = plan_search_read(&mut tx, "-data-", &0).await;
+        let result = plan_search_read(&mut tx, "-data-", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         assert_eq!(results.len(), 4);
 
         // Search for "pipeline" should match first 3 datasets
-        let result = plan_search_read(&mut tx, "pipeline", &0).await;
+        let result = plan_search_read(&mut tx, "pipeline", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         assert_eq!(results.len(), 3);
 
         // Search for "analytics" should match only 1 dataset
-        let result = plan_search_read(&mut tx, "analytics", &0).await;
+        let result = plan_search_read(&mut tx, "analytics", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         assert_eq!(results.len(), 1);
