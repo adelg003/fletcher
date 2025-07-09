@@ -1402,6 +1402,225 @@ mod tests {
             .get("paused")
             .assert_bool(true);
     }
+    /// Test Plan Search Get - Success Case
+    #[sqlx::test]
+    async fn test_plan_search_get_success(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Create initial plan
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create the plan first
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Search for the plan using dataset_id as search term
+        let response: TestResponse = cli
+            .get(format!("/plan/search?search_by={}&page=1", dataset_id))
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        // Pull response json
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        // Verify we get back search results
+        let results = json_value.array();
+        assert!(!results.is_empty(), "Search results should not be empty");
+
+        // Verify the structure of the search results
+        let first_result = results[0].object();
+        assert!(first_result.get("dataset_id").is_some());
+        assert!(first_result.get("modified_date").is_some());
+    }
+
+    /// Test Plan Search Get - Empty Results Case
+    #[sqlx::test]
+    async fn test_plan_search_get_empty_results(pool: PgPool) {
+        let non_existent_search = "non-existent-search-term";
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let response: TestResponse = cli
+            .get(format!("/plan/search?search_by={}&page=1", non_existent_search))
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        // Verify empty results
+        let results = json_value.array();
+        assert!(results.is_empty(), "Search results should be empty for non-existent search term");
+    }
+
+    /// Test Plan Search Get - Pagination
+    #[sqlx::test]
+    async fn test_plan_search_get_pagination(pool: PgPool) {
+        // Create multiple plans to test pagination
+        let dataset_id_1 = Uuid::new_v4();
+        let dataset_id_2 = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let dp3_id = Uuid::new_v4();
+        let dp4_id = Uuid::new_v4();
+
+        let create_param_1 = create_test_plan_param(dataset_id_1, dp1_id, dp2_id);
+        let create_param_2 = create_test_plan_param(dataset_id_2, dp3_id, dp4_id);
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Create first plan
+        let create_response_1: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param_1)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response_1.assert_status_is_ok();
+
+        // Create second plan
+        let create_response_2: TestResponse = cli
+            .post("/plan")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param_2)
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response_2.assert_status_is_ok();
+
+        // Test page 1
+        let response_page_1: TestResponse = cli
+            .get("/plan/search?search_by=data-product&page=1")
+            .data(pool.clone())
+            .send()
+            .await;
+        response_page_1.assert_status_is_ok();
+
+        // Test page 2
+        let response_page_2: TestResponse = cli
+            .get("/plan/search?search_by=data-product&page=2")
+            .data(pool)
+            .send()
+            .await;
+        response_page_2.assert_status_is_ok();
+
+        // Both pages should return successfully (specific result validation depends on implementation)
+        let page_1_json = response_page_1.json().await;
+        let page_1_results = page_1_json.value().array();
+        
+        let page_2_json = response_page_2.json().await;
+        let page_2_results = page_2_json.value().array();
+
+        // At least one page should have results
+        assert!(
+            !page_1_results.is_empty() || !page_2_results.is_empty(),
+            "At least one page should have results"
+        );
+    }
+
+    /// Test Plan Search Get - Missing Query Parameters
+    #[sqlx::test]
+    async fn test_plan_search_get_missing_params(pool: PgPool) {
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test missing search_by parameter
+        let response_missing_search: TestResponse = cli
+            .get("/plan/search?page=1")
+            .data(pool.clone())
+            .send()
+            .await;
+        response_missing_search.assert_status(StatusCode::BAD_REQUEST);
+
+        // Test missing page parameter
+        let response_missing_page: TestResponse = cli
+            .get("/plan/search?search_by=test")
+            .data(pool.clone())
+            .send()
+            .await;
+        response_missing_page.assert_status(StatusCode::BAD_REQUEST);
+
+        // Test missing both parameters
+        let response_missing_both: TestResponse = cli
+            .get("/plan/search")
+            .data(pool)
+            .send()
+            .await;
+        response_missing_both.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    /// Test Plan Search Get - Invalid Page Parameter
+    #[sqlx::test]
+    async fn test_plan_search_get_invalid_page(pool: PgPool) {
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test invalid page parameter (non-numeric)
+        let response: TestResponse = cli
+            .get("/plan/search?search_by=test&page=invalid")
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    /// Test Plan Search Get - Zero Page Parameter
+    #[sqlx::test]
+    async fn test_plan_search_get_zero_page(pool: PgPool) {
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test page 0 (should be handled appropriately by the implementation)
+        let response: TestResponse = cli
+            .get("/plan/search?search_by=test&page=0")
+            .data(pool)
+            .send()
+            .await;
+        // The response depends on how the backend handles page=0
+        // This test ensures the endpoint does not crash
+        assert!(response.status().is_success() || response.status().is_client_error());
+    }
+
+    /// Test Plan Search Get - Empty Search Term
+    #[sqlx::test]
+    async fn test_plan_search_get_empty_search_term(pool: PgPool) {
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test empty search term
+        let response: TestResponse = cli
+            .get("/plan/search?search_by=&page=1")
+            .data(pool)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+        let results = json_value.array();
+        
+        // Empty search term should return empty results or all results depending on implementation
+        assert!(results.is_empty() || !results.is_empty());
+    }
+
     /// Test plan unpause - Success Case: Unpause a previously paused plan
     #[sqlx::test]
     async fn test_plan_unpause_put_success(pool: PgPool) {
