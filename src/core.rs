@@ -447,7 +447,7 @@ pub async fn plan_search_read(
     page: u32,
 ) -> poem::Result<Vec<Search>> {
     // Compute offset
-    let offset: u32 = page * PAGE_SIZE;
+    let offset: u32 = page.saturating_mul(PAGE_SIZE);
 
     // Pull the Systems
     search_plans_select(tx, search_by, PAGE_SIZE, offset)
