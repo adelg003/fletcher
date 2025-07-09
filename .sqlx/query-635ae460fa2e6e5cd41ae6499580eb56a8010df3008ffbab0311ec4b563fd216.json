@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            ds.dataset_id,\n            GREATEST(\n                ds.modified_date,\n                COALESCE(MAX(dp.modified_date), ds.modified_date),\n                COALESCE(MAX(dep.modified_date), ds.modified_date)\n            ) AS \"modified_date\"\n        FROM\n            dataset ds\n        LEFT JOIN\n            data_product dp\n        ON\n            ds.dataset_id = dp.dataset_id\n        LEFT JOIN\n            dependency dep\n        ON\n            dp.dataset_id = dep.dataset_id\n            AND (\n                dp.data_product_id = dep.parent_id\n                OR dp.data_product_id = dep.child_id\n            )\n        WHERE\n            ds.dataset_id::text ILIKE $1\n            OR ds.extra::text ILIKE $1\n            OR ds.modified_by ILIKE $1\n            OR ds.modified_date::text ILIKE $1\n            OR dp.data_product_id::text ILIKE $1\n            OR dp.compute::text ILIKE $1\n            OR dp.name ILIKE $1\n            OR dp.version ILIKE $1\n            OR dp.passthrough::text ILIKE $1\n            OR dp.state::text ILIKE $1\n            OR dp.run_id::text ILIKE $1\n            OR dp.link ILIKE $1\n            OR dp.passback::text ILIKE $1\n            OR dp.extra::text ILIKE $1\n            OR dp.modified_by ILIKE $1\n            OR dp.modified_date::text ILIKE $1\n            OR dep.extra::text ILIKE $1\n            OR dep.modified_by ILIKE $1\n            OR dep.modified_date::text ILIKE $1\n        GROUP BY\n            ds.dataset_id\n        ORDER BY\n            GREATEST(\n                MAX(ds.modified_date),\n                MAX(dp.modified_date),\n                MAX(dep.modified_date)\n            ) DESC\n        LIMIT\n            $2\n        OFFSET\n            $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "dataset_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "modified_date",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "635ae460fa2e6e5cd41ae6499580eb56a8010df3008ffbab0311ec4b563fd216"
+}

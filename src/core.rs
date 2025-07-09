@@ -444,10 +444,10 @@ pub async fn disable_drop(
 pub async fn plan_search_read(
     tx: &mut Transaction<'_, Postgres>,
     search_by: &str,
-    page: &u32,
+    page: u32,
 ) -> poem::Result<Vec<Search>> {
     // Compute offset
-    let offset: u32 = page * PAGE_SIZE;
+    let offset: u32 = page.saturating_mul(PAGE_SIZE);
 
     // Pull the Systems
     search_plans_select(tx, search_by, PAGE_SIZE, offset)
@@ -2509,6 +2509,297 @@ mod tests {
             format!("{err}"),
             "no rows returned by a query that expected to return at least one row"
         );
+    }
+
+    // Tests for plan_search_read function
+
+    /// Test plan_search_read can return search results
+    #[sqlx::test]
+    async fn test_plan_search_read_returns_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        // Create test plans with different dataset names
+        let mut param1 = create_test_plan_param();
+        param1.dataset.extra = Some(json!({"name": "test-dataset-alpha"}));
+        let mut param2 = create_test_plan_param();
+        param2.dataset.id = Uuid::new_v4();
+        param2.dataset.extra = Some(json!({"name": "test-dataset-beta"}));
+        let mut param3 = create_test_plan_param();
+        param3.dataset.id = Uuid::new_v4();
+        param3.dataset.extra = Some(json!({"name": "another-dataset"}));
+
+        // Add plans to database
+        plan_add(&mut tx, &param1, username).await.unwrap();
+        plan_add(&mut tx, &param2, username).await.unwrap();
+        plan_add(&mut tx, &param3, username).await.unwrap();
+
+        // Search for datasets containing "test-dataset"
+        let search_term = "test-dataset";
+        let page = 0;
+        let result = plan_search_read(&mut tx, search_term, page).await;
+        assert!(result.is_ok());
+
+        let search_results = result.unwrap();
+        // Should return at least 2 results (test-dataset-alpha and test-dataset-beta)
+        assert!(search_results.len() >= 2);
+
+        // Verify that the datasets we created are in the results
+        let result_ids: Vec<_> = search_results.iter().map(|s| s.dataset_id).collect();
+        assert!(result_ids.contains(&param1.dataset.id));
+        assert!(result_ids.contains(&param2.dataset.id));
+    }
+
+    /// Test plan_search_read with empty search results
+    #[sqlx::test]
+    async fn test_plan_search_read_empty_results(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        // Create a test plan
+        let param = create_test_plan_param();
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Search for something that doesn't exist
+        let search_term = "nonexistent-dataset-xyz";
+        let page = 0;
+        let result = plan_search_read(&mut tx, search_term, page).await;
+        assert!(result.is_ok());
+
+        let search_results = result.unwrap();
+        assert!(search_results.is_empty());
+    }
+
+    /// Test plan_search_read pagination logic
+    #[sqlx::test]
+    async fn test_plan_search_read_pagination(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        // Create multiple test plans with similar names to ensure pagination
+        for i in 0..60 {
+            let mut param = create_test_plan_param();
+            param.dataset.id = Uuid::new_v4();
+            param.dataset.extra = Some(json!({"name": format!("paginated-dataset-{:03}", i)}));
+            plan_add(&mut tx, &param, username).await.unwrap();
+        }
+
+        let search_term = "paginated-dataset";
+
+        // Test first page (page 0)
+        let result = plan_search_read(&mut tx, search_term, 0).await;
+        assert!(result.is_ok());
+        let page_0_results = result.unwrap();
+        assert_eq!(page_0_results.len(), 50); // PAGE_SIZE is 50
+
+        // Test second page (page 1)
+        let result = plan_search_read(&mut tx, search_term, 1).await;
+        assert!(result.is_ok());
+        let page_1_results = result.unwrap();
+        assert_eq!(page_1_results.len(), 10); // Remaining 10 results
+
+        // Test third page (page 2) - should be empty
+        let result = plan_search_read(&mut tx, search_term, 2).await;
+        assert!(result.is_ok());
+        let page_2_results = result.unwrap();
+        assert!(page_2_results.is_empty());
+
+        // Verify results are different between pages
+        let page_0_ids: Vec<_> = page_0_results.iter().map(|s| s.dataset_id).collect();
+        let page_1_ids: Vec<_> = page_1_results.iter().map(|s| s.dataset_id).collect();
+        assert!(page_0_ids.iter().all(|id| !page_1_ids.contains(id)));
+    }
+
+    /// Test plan_search_read with case insensitive search
+    #[sqlx::test]
+    async fn test_plan_search_read_case_insensitive(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        // Create test plan with mixed case name
+        let mut param = create_test_plan_param();
+        param.dataset.extra = Some(json!({"name": "MixedCase-Dataset"}));
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Search with lowercase
+        let result = plan_search_read(&mut tx, "mixedcase", 0).await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        assert!(!results.is_empty());
+        assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
+
+        // Search with uppercase
+        let result = plan_search_read(&mut tx, "MIXEDCASE", 0).await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        assert!(!results.is_empty());
+        assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
+    }
+
+    /// Test plan_search_read with special characters
+    #[sqlx::test]
+    async fn test_plan_search_read_special_characters(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        // Create test plan with special characters
+        let mut param = create_test_plan_param();
+        param.dataset.extra = Some(json!({"name": "dataset-with-special_chars@123"}));
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Search for the dataset with special characters
+        let result = plan_search_read(&mut tx, "special_chars", 0).await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        assert!(!results.is_empty());
+        assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
+
+        // Test with empty search string
+        let result = plan_search_read(&mut tx, "", 0).await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        // Should return results (likely all datasets)
+        assert!(!results.is_empty());
+    }
+
+    /// Test plan_search_read with very long search term
+    #[sqlx::test]
+    async fn test_plan_search_read_long_search_term(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        // Create test plan
+        let param = create_test_plan_param();
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Search with very long term
+        let long_search_term = "a".repeat(1000);
+        let result = plan_search_read(&mut tx, &long_search_term, 0).await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        assert!(results.is_empty());
+    }
+
+    /// Test plan_search_read offset calculation
+    #[sqlx::test]
+    async fn test_plan_search_read_offset_calculation(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        // Create enough test plans to test offset calculation
+        for i in 0..75 {
+            let mut param = create_test_plan_param();
+            param.dataset.id = Uuid::new_v4();
+            param.dataset.extra = Some(json!({"name": format!("offset-test-{:03}", i)}));
+            plan_add(&mut tx, &param, username).await.unwrap();
+        }
+
+        let search_term = "offset-test";
+
+        // Test different pages to verify offset calculation
+        let page_0_result = plan_search_read(&mut tx, search_term, 0).await.unwrap();
+        let page_1_result = plan_search_read(&mut tx, search_term, 1).await.unwrap();
+
+        // Page 0 should have 50 results (PAGE_SIZE)
+        assert_eq!(page_0_result.len(), 50);
+        // Page 1 should have 25 results (75 - 50)
+        assert_eq!(page_1_result.len(), 25);
+
+        // Verify no overlap between pages
+        let page_0_ids: Vec<_> = page_0_result.iter().map(|s| s.dataset_id).collect();
+        let page_1_ids: Vec<_> = page_1_result.iter().map(|s| s.dataset_id).collect();
+        assert!(page_0_ids.iter().all(|id| !page_1_ids.contains(id)));
+    }
+
+    /// Test plan_search_read with high page number
+    #[sqlx::test]
+    async fn test_plan_search_read_high_page_number(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        // Create a single test plan
+        let param = create_test_plan_param();
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Search with a very high page number
+        let high_page = 999;
+        let result = plan_search_read(&mut tx, "test", high_page).await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        assert!(results.is_empty());
+    }
+
+    /// Test plan_search_read function does not error on database constraints
+    #[sqlx::test]
+    async fn test_plan_search_read_function_reliability(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        // Create test plan
+        let param = create_test_plan_param();
+        plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Test with various edge case search terms
+        let edge_cases = vec![
+            "%",  // SQL wildcard
+            "_",  // SQL single character wildcard
+            "'",  // Single quote
+            "\"", // Double quote
+            "\\", // Backslash
+            "\n", // Newline
+            "\t", // Tab
+        ];
+
+        for search_term in edge_cases {
+            let result = plan_search_read(&mut tx, search_term, 0).await;
+            assert!(
+                result.is_ok(),
+                "Search should not fail with term: {search_term}",
+            );
+        }
+    }
+
+    /// Test plan_search_read with multiple matching datasets
+    #[sqlx::test]
+    async fn test_plan_search_read_multiple_matches(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let username = "test_user";
+
+        let dataset_names = vec![
+            "production-data-pipeline",
+            "staging-data-pipeline",
+            "development-data-pipeline",
+            "test-data-processing",
+            "analytics-dashboard",
+        ];
+
+        let mut created_datasets = Vec::new();
+        for name in dataset_names {
+            let mut param = create_test_plan_param();
+            param.dataset.id = Uuid::new_v4();
+            param.dataset.extra = Some(json!({"name": name}));
+            plan_add(&mut tx, &param, username).await.unwrap();
+            created_datasets.push(param.dataset.id);
+        }
+
+        // Search for "data" should match first 4 datasets
+        let result = plan_search_read(&mut tx, "-data-", 0).await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        assert_eq!(results.len(), 4);
+
+        // Search for "pipeline" should match first 3 datasets
+        let result = plan_search_read(&mut tx, "pipeline", 0).await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        assert_eq!(results.len(), 3);
+
+        // Search for "analytics" should match only 1 dataset
+        let result = plan_search_read(&mut tx, "analytics", 0).await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dataset_id, created_datasets[4]);
     }
 
     // Tests for data_product_read function
