@@ -409,16 +409,16 @@ pub async fn search_plans_select(
             ds.dataset_id,
             GREATEST(
                 ds.modified_date,
-                MAX(dp.modified_date),
-                MAX(dep.modified_date)
+                COALESCE(MAX(dp.modified_date), ds.modified_date),
+                COALESCE(MAX(dep.modified_date), ds.modified_date)
             ) AS \"modified_date\"
         FROM
             dataset ds
-        INNER JOIN
+        LEFT JOIN
             data_product dp
         ON
             ds.dataset_id = dp.dataset_id
-        INNER JOIN
+        LEFT JOIN
             dependency dep
         ON
             dp.dataset_id = dep.dataset_id

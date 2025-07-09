@@ -8,7 +8,7 @@ mod ui;
 
 use crate::{
     api::Api,
-    ui::{not_found_404, route},
+    ui::{not_found_404, user_service},
 };
 use poem::{
     EndpointExt, Route, Server, endpoint::EmbeddedFilesEndpoint, listener::TcpListener,
@@ -20,7 +20,7 @@ use sqlx::PgPool;
 
 /// Static files hosted via webserver
 #[derive(Embed)]
-#[folder = "tmp/assets"]
+#[folder = "assets"]
 struct Assets;
 
 #[tokio::main]
@@ -48,6 +48,7 @@ async fn main() -> color_eyre::Result<()> {
         .at("/spec", spec)
         .nest("/swagger", swagger)
         // User UI
+        .nest("/", user_service())
         .catch_error(not_found_404)
         // Global context to be shared
         .data(pool)

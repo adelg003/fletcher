@@ -13,6 +13,7 @@ petgraph = "0.8.2"
 poem = { version = "3.1.11", features = ["embed"] }
 poem-openapi = { version = "5.1.15", features = ["chrono", "swagger-ui", "uuid"] }
 rust-embed = "8.7.2"
+serde = "1.0.219"
 serde_json = "1.0.140"
 sqlx = { version = "0.8.6", features = ["chrono", "postgres", "runtime-tokio", "tls-rustls", "uuid"] }
 thiserror = "2.0.12"

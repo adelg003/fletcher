@@ -1,6 +1,10 @@
 use crate::ui::layout::base_layout;
 use maud::{Markup, html};
-use poem::error::NotFoundError;
+use poem::{
+    Response,
+    error::NotFoundError,
+    http::{HeaderValue, StatusCode},
+};
 
 const ASCII_404: &str = r"
    __ __  ____  __ __              ____                      _   __      __     ______                      __
@@ -13,7 +17,7 @@ const ASCII_404: &str = r"
 
 const ASCII_COW_SAY: &str = r#"
  ___________________________________________________________
-/ What are you-                                             \
+/ What are you...                                           \
 \ There's no Mars bars down here, what are you looking for? /
  \    ------------------------------------------------------
   \   |                       .       .
@@ -33,13 +37,21 @@ const ASCII_COW_SAY: &str = r#"
 "#;
 
 /// 404 page
-pub async fn not_found_404(_: NotFoundError) -> Markup {
-    base_layout(
+pub async fn not_found_404(_: NotFoundError) -> Response {
+    let body: Markup = base_layout(
         "(╯°□°)╯︵ ɹoɹɹƎ",
         &None,
         html! {
             pre { (ASCII_404) }
             pre { (ASCII_COW_SAY) }
         },
-    )
+    );
+
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header(
+            "Content-Type",
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        )
+        .body(body.into_string())
 }

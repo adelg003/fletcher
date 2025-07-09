@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "htmx.org": "^2.0.6"
+  }
+}

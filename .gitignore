@@ -29,7 +29,7 @@ target/
 gitignore/
 
 # Output from build.rs process
-tmp/
+assets/
 
 # Node
 node_modules/

@@ -10,6 +10,8 @@ pub fn head() -> Markup {
             meta name="keywords" content="Conductor, Data Product, Dataset, Fletcher, OaaS, Search";
             meta name="viewport" content="width=device-width, initial-scale=1.0";
             link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico";
+            // HTMX
+            script defer src="/assets/htmx/htmx.min.js" {}
         }
     }
 }
