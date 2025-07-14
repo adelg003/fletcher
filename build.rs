@@ -36,4 +36,12 @@ fn main() {
         "assets/htmx/htmx.min.js",
     )
     .unwrap();
+
+    // Populate Assets directory with Viz-JS
+    fs::create_dir_all("assets/viz-js").unwrap();
+    fs::copy(
+        "node_modules/@viz-js/viz/lib/viz-standalone.js",
+        "assets/viz-js/viz-standalone.js",
+    )
+    .unwrap();
 }

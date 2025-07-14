@@ -1,5 +1,6 @@
 {
   "devDependencies": {
+    "@viz-js/viz": "^3.14.0",
     "htmx.org": "^2.0.6"
   }
 }

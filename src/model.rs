@@ -147,6 +147,17 @@ pub enum Compute {
     Dbxaas,
 }
 
+impl fmt::Display for Compute {
+    /// How to format the Compute for HTML rendering
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text: &str = match self {
+            Compute::Cams => "C-AMS",
+            Compute::Dbxaas => "DBXaaS",
+        };
+        write!(formatter, "{text}")
+    }
+}
+
 /// States a Data Product can be in
 #[derive(Clone, Copy, Debug, Enum, PartialEq, Type)]
 #[oai(rename_all = "lowercase")]
@@ -161,15 +172,16 @@ pub enum State {
 }
 
 impl fmt::Display for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            State::Disabled => write!(f, "disabled"),
-            State::Failed => write!(f, "failed"),
-            State::Queued => write!(f, "queued"),
-            State::Running => write!(f, "running"),
-            State::Success => write!(f, "success"),
-            State::Waiting => write!(f, "waiting"),
-        }
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text: &str = match self {
+            State::Disabled => "disabled",
+            State::Failed => "failed",
+            State::Queued => "queued",
+            State::Running => "running",
+            State::Success => "success",
+            State::Waiting => "waiting",
+        };
+        write!(formatter, "{text}")
     }
 }
 
