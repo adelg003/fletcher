@@ -62,3 +62,26 @@ async fn main() -> color_eyre::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test that required asset files are embedded correctly
+    #[test]
+    fn test_required_assets_exist() {
+        // Check that htmx.min.js exists in the embedded assets
+        let htmx_file = Assets::get("htmx/htmx.min.js");
+        assert!(
+            htmx_file.is_some(),
+            "htmx/htmx.min.js should be present in embedded assets",
+        );
+
+        // Check that viz-standalone.js exists in the embedded assets
+        let viz_file = Assets::get("viz-js/viz-standalone.js");
+        assert!(
+            viz_file.is_some(),
+            "viz-js/viz-standalone.js should be present in embedded assets",
+        );
+    }
+}

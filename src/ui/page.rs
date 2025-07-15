@@ -188,3 +188,961 @@ pub async fn plan_page(
         },
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Dataset, DataProduct, Compute, DatasetParam, PlanParam, State, DataProductParam, DependencyParam};
+    use crate::ui::user_service;
+    use chrono::Utc;
+    use poem::{
+        EndpointExt,
+        test::{TestClient, TestResponse},
+    };
+    use pretty_assertions::assert_eq;
+    use scraper::{Html, Selector};
+    use serde_json::json;
+    use sqlx::{PgPool, Postgres, Transaction};
+    use uuid::Uuid;
+
+    /// Helper function to create a test plan with specified data products
+    fn create_test_plan_with_data_products(data_products: Vec<DataProduct>) -> Plan {
+        let now = Utc::now();
+        let dataset_id = Uuid::new_v4();
+
+        Plan {
+            dataset: Dataset {
+                id: dataset_id,
+                paused: false,
+                extra: Some(json!({"test":"dataset"})),
+                modified_by: "test_user".to_string(),
+                modified_date: now,
+            },
+            data_products,
+            dependencies: vec![],
+        }
+    }
+
+    /// Helper function to create a test data product with specified state
+    fn create_test_data_product(id: DataProductId, name: &str, version: &str, state: State) -> DataProduct {
+        let now = Utc::now();
+
+        DataProduct {
+            id,
+            compute: Compute::Cams,
+            name: name.to_string(),
+            version: version.to_string(),
+            eager: false,
+            passthrough: Some(json!({"test":"passthrough"})),
+            state,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("http://test.com".to_string()),
+            passback: Some(json!({"test":"passback"})),
+            extra: Some(json!({"test":"extra"})),
+            modified_by: "test_user".to_string(),
+            modified_date: now,
+        }
+    }
+
+    /// Test format_node with Disabled state
+    #[test]
+    fn test_format_node_disabled_state() {
+        let id = Uuid::new_v4();
+        let data_product = create_test_data_product(id, "test-product", "1.0.0", State::Disabled);
+        let plan = create_test_plan_with_data_products(vec![data_product]);
+
+        let result = format_node(id, &plan);
+
+        assert_eq!(
+            result,
+            "label=\"test-product:1.0.0\", shape=\"box\", color=\"grey\", style=\"filed\""
+        );
+    }
+
+    /// Test format_node with Failed state
+    #[test]
+    fn test_format_node_failed_state() {
+        let id = Uuid::new_v4();
+        let data_product = create_test_data_product(id, "failed-product", "2.1.0", State::Failed);
+        let plan = create_test_plan_with_data_products(vec![data_product]);
+
+        let result = format_node(id, &plan);
+
+        assert_eq!(
+            result,
+            "label=\"failed-product:2.1.0\", shape=\"box\", color=\"red\", style=\"bold\""
+        );
+    }
+
+    /// Test format_node with Queued state
+    #[test]
+    fn test_format_node_queued_state() {
+        let id = Uuid::new_v4();
+        let data_product = create_test_data_product(id, "queued-product", "3.0.0", State::Queued);
+        let plan = create_test_plan_with_data_products(vec![data_product]);
+
+        let result = format_node(id, &plan);
+
+        assert_eq!(
+            result,
+            "label=\"queued-product:3.0.0\", shape=\"box\", color=\"grey\", style=\"bold\""
+        );
+    }
+
+    /// Test format_node with Running state
+    #[test]
+    fn test_format_node_running_state() {
+        let id = Uuid::new_v4();
+        let data_product = create_test_data_product(id, "running-product", "1.5.0", State::Running);
+        let plan = create_test_plan_with_data_products(vec![data_product]);
+
+        let result = format_node(id, &plan);
+
+        assert_eq!(
+            result,
+            "label=\"running-product:1.5.0\", shape=\"box\", color=\"lightgreen\", style=\"bold\""
+        );
+    }
+
+    /// Test format_node with Success state
+    #[test]
+    fn test_format_node_success_state() {
+        let id = Uuid::new_v4();
+        let data_product = create_test_data_product(id, "success-product", "4.2.1", State::Success);
+        let plan = create_test_plan_with_data_products(vec![data_product]);
+
+        let result = format_node(id, &plan);
+
+        assert_eq!(
+            result,
+            "label=\"success-product:4.2.1\", shape=\"box\", color=\"green\", style=\"bold\""
+        );
+    }
+
+    /// Test format_node with Waiting state
+    #[test]
+    fn test_format_node_waiting_state() {
+        let id = Uuid::new_v4();
+        let data_product = create_test_data_product(id, "waiting-product", "0.9.0", State::Waiting);
+        let plan = create_test_plan_with_data_products(vec![data_product]);
+
+        let result = format_node(id, &plan);
+
+        assert_eq!(
+            result,
+            "label=\"waiting-product:0.9.0\", shape=\"box\", color=\"lightgrey\", style=\"bold\""
+        );
+    }
+
+    /// Test format_node when data product ID is not found in plan
+    #[test]
+    fn test_format_node_data_product_not_found() {
+        let existing_id = Uuid::new_v4();
+        let non_existent_id = Uuid::new_v4();
+        
+        let data_product = create_test_data_product(existing_id, "existing-product", "1.0.0", State::Success);
+        let plan = create_test_plan_with_data_products(vec![data_product]);
+
+        let result = format_node(non_existent_id, &plan);
+
+        assert_eq!(result, String::new());
+    }
+
+    /// Test format_node with special characters in name and version
+    #[test]
+    fn test_format_node_special_characters() {
+        let id = Uuid::new_v4();
+        let data_product = create_test_data_product(id, "test-product_with.special-chars", "1.0.0-beta.1", State::Success);
+        let plan = create_test_plan_with_data_products(vec![data_product]);
+
+        let result = format_node(id, &plan);
+
+        assert_eq!(
+            result,
+            "label=\"test-product_with.special-chars:1.0.0-beta.1\", shape=\"box\", color=\"green\", style=\"bold\""
+        );
+    }
+
+    /// Test format_node with empty plan (no data products)
+    #[test]
+    fn test_format_node_empty_plan() {
+        let id = Uuid::new_v4();
+        let plan = create_test_plan_with_data_products(vec![]);
+
+        let result = format_node(id, &plan);
+
+        assert_eq!(result, String::new());
+    }
+
+    /// Test format_node output format structure
+    #[test]
+    fn test_format_node_output_format() {
+        let id = Uuid::new_v4();
+        let data_product = create_test_data_product(id, "format-test", "1.0", State::Running);
+        let plan = create_test_plan_with_data_products(vec![data_product]);
+
+        let result = format_node(id, &plan);
+
+        // Verify the output follows GraphViz DOT notation format
+        assert!(result.starts_with("label=\""));
+        assert!(result.contains("shape=\"box\""));
+        assert!(result.contains("color=\""));
+        assert!(result.contains("style=\""));
+        assert!(result.ends_with("\""));
+        
+        // Verify all components are present
+        assert!(result.contains("format-test:1.0"));
+        assert!(result.contains("lightgreen"));
+        assert!(result.contains("bold"));
+    }
+
+    // =============== Render Dot Tests ===============
+
+    /// Test render_dot with simple DOT notation
+    #[test]
+    fn test_render_dot_simple() {
+        let dot_string = "digraph G { A -> B; }";
+        let result = render_dot(dot_string);
+        let html_string = result.into_string();
+
+        // Parse HTML and verify structure
+        let document = Html::parse_fragment(&html_string);
+
+        // Should contain div with id="graph"
+        let div_selector = Selector::parse("div#graph").unwrap();
+        let div = document.select(&div_selector).next();
+        assert!(div.is_some(), "Should have div with id='graph'");
+
+        // Should contain script tag for viz-js library
+        let script_selector = Selector::parse("script[src]").unwrap();
+        let script_tag = document.select(&script_selector).next();
+        assert!(script_tag.is_some(), "Should have script tag with src attribute");
+        assert_eq!(
+            script_tag.unwrap().attr("src"),
+            Some("/assets/viz-js/viz-standalone.js"),
+            "Script src should point to viz-standalone.js"
+        );
+
+        // Should contain inline script with DOT string
+        assert!(html_string.contains("Viz.instance().then"), "Should contain Viz.instance() call");
+        assert!(html_string.contains("renderSVGElement"), "Should contain renderSVGElement call");
+        assert!(html_string.contains("document.getElementById(\"graph\")"), "Should target graph element");
+        assert!(html_string.contains("appendChild(svg)"), "Should append SVG to graph element");
+        assert!(html_string.contains(dot_string), "Should contain the DOT string");
+    }
+
+    /// Test render_dot with complex DOT notation
+    #[test]
+    fn test_render_dot_complex() {
+        let dot_string = r#"digraph test {
+            node [shape=box];
+            A [label="Node A", color="red"];
+            B [label="Node B", color="blue"];
+            A -> B;
+        }"#;
+        let result = render_dot(dot_string);
+        let html_string = result.into_string();
+
+        // Should contain the complex DOT string
+        assert!(html_string.contains("digraph test"), "Should contain digraph declaration");
+        assert!(html_string.contains("node [shape=box]"), "Should contain node attributes");
+        assert!(html_string.contains("Node A"), "Should contain Node A label");
+        assert!(html_string.contains("Node B"), "Should contain Node B label");
+        assert!(html_string.contains("color=\"red\""), "Should contain red color");
+        assert!(html_string.contains("color=\"blue\""), "Should contain blue color");
+    }
+
+    /// Test render_dot with empty DOT string
+    #[test]
+    fn test_render_dot_empty() {
+        let dot_string = "";
+        let result = render_dot(dot_string);
+        let html_string = result.into_string();
+
+        // Parse HTML and verify structure still exists
+        let document = Html::parse_fragment(&html_string);
+
+        // Should still have the div and script structure
+        let div_selector = Selector::parse("div#graph").unwrap();
+        let div = document.select(&div_selector).next();
+        assert!(div.is_some(), "Should have div with id='graph' even with empty DOT");
+
+        // Should still have script tags
+        let script_selector = Selector::parse("script").unwrap();
+        let scripts: Vec<_> = document.select(&script_selector).collect();
+        assert_eq!(scripts.len(), 2, "Should have 2 script tags (library + inline)");
+
+        // Should contain empty DOT string in JavaScript
+        assert!(html_string.contains("renderSVGElement(`  `)"), "Should handle empty DOT string");
+    }
+
+    /// Test render_dot with special characters that need escaping
+    #[test]
+    fn test_render_dot_special_characters() {
+        let dot_string = r#"digraph test { A [label="Quote\"Test"]; }"#;
+        let result = render_dot(dot_string);
+        let html_string = result.into_string();
+
+        // Should contain the DOT string with special characters
+        assert!(html_string.contains("Quote\\\"Test"), "Should contain escaped quotes");
+        assert!(html_string.contains("digraph test"), "Should contain basic structure");
+    }
+
+    /// Test render_dot HTML structure validation
+    #[test]
+    fn test_render_dot_html_structure() {
+        let dot_string = "digraph { A -> B; }";
+        let result = render_dot(dot_string);
+        let html_string = result.into_string();
+
+        // Parse HTML and validate complete structure
+        let document = Html::parse_fragment(&html_string);
+
+        // Should have exactly one div with id="graph"
+        let div_selector = Selector::parse("div#graph").unwrap();
+        let divs: Vec<_> = document.select(&div_selector).collect();
+        assert_eq!(divs.len(), 1, "Should have exactly one div with id='graph'");
+        
+        // Div should be empty (content will be added by JavaScript)
+        let graph_div = &divs[0];
+        assert_eq!(graph_div.inner_html().trim(), "", "Graph div should be empty initially");
+
+        // Should have exactly 2 script tags
+        let script_selector = Selector::parse("script").unwrap();
+        let scripts: Vec<_> = document.select(&script_selector).collect();
+        assert_eq!(scripts.len(), 2, "Should have exactly 2 script tags");
+
+        // First script should load the library
+        let lib_script = &scripts[0];
+        assert_eq!(
+            lib_script.attr("src"),
+            Some("/assets/viz-js/viz-standalone.js"),
+            "First script should load viz-js library"
+        );
+        assert!(lib_script.inner_html().is_empty(), "Library script should have no inline content");
+
+        // Second script should contain the JavaScript code
+        let inline_script = &scripts[1];
+        assert!(inline_script.attr("src").is_none(), "Second script should not have src attribute");
+        assert!(!inline_script.inner_html().is_empty(), "Inline script should have content");
+        assert!(inline_script.inner_html().contains("Viz.instance()"), "Should contain Viz.instance() call");
+    }
+
+    /// Test render_dot JavaScript code generation
+    #[test]
+    fn test_render_dot_javascript_content() {
+        let dot_string = "digraph test { node1 -> node2; }";
+        let result = render_dot(dot_string);
+        let html_string = result.into_string();
+
+        // Verify JavaScript code structure
+        assert!(html_string.contains("Viz.instance().then(function(viz) {"), "Should start Viz promise");
+        assert!(html_string.contains("var svg = viz.renderSVGElement(`"), "Should declare svg variable");
+        assert!(html_string.contains("document.getElementById(\"graph\").appendChild(svg);"), "Should append to graph");
+        assert!(html_string.contains("});"), "Should close promise handler");
+
+        // Verify DOT string is properly embedded
+        assert!(html_string.contains("digraph test { node1 -> node2; }"), "Should embed DOT string");
+    }
+
+    /// Test render_dot with whitespace in DOT string
+    #[test]
+    fn test_render_dot_whitespace() {
+        let dot_string = "  digraph   test   {   A   ->   B   }  ";
+        let result = render_dot(dot_string);
+        let html_string = result.into_string();
+
+        // Should preserve whitespace in DOT string
+        assert!(html_string.contains(dot_string), "Should preserve whitespace in DOT string");
+        assert!(html_string.contains("Viz.instance()"), "Should still generate valid JavaScript");
+    }
+
+    /// Test render_dot output format consistency
+    #[test]
+    fn test_render_dot_output_format() {
+        let dot_string = "digraph { A; }";
+        let result = render_dot(dot_string);
+        let html_string = result.into_string();
+
+        // Verify overall HTML structure pattern
+        assert!(html_string.starts_with("<div"), "Should start with div element");
+        assert!(html_string.ends_with("</script>"), "Should end with script closing tag");
+        assert!(html_string.contains("id=\"graph\""), "Should contain graph id");
+        assert!(html_string.contains("/assets/viz-js/viz-standalone.js"), "Should reference viz library");
+        
+        // Should not contain any obvious HTML encoding issues
+        assert!(!html_string.contains("&lt;"), "Should not double-encode HTML");
+        assert!(!html_string.contains("&gt;"), "Should not double-encode HTML");
+    }
+
+    // =============== Index Page Tests ===============
+
+    /// Helper function to setup test datasets for index page testing
+    async fn setup_test_datasets_for_index(
+        tx: &mut Transaction<'_, Postgres>,
+        count: usize,
+    ) -> Vec<DatasetId> {
+        let mut dataset_ids = Vec::new();
+
+        for _i in 0..count {
+            let dataset_id = Uuid::new_v4();
+
+            let plan_param = PlanParam {
+                dataset: DatasetParam {
+                    id: dataset_id,
+                    extra: None,
+                },
+                data_products: vec![],
+                dependencies: vec![],
+            };
+
+            plan_param.upsert(tx, "testuser", Utc::now()).await.unwrap();
+
+            dataset_ids.push(dataset_id);
+        }
+
+        dataset_ids
+    }
+
+    /// Test index_page endpoint with detailed HTML structure validation
+    #[sqlx::test]
+    async fn test_index_page_html_structure_detailed(pool: PgPool) {
+        // Setup test data
+        let mut tx = pool.begin().await.unwrap();
+        setup_test_datasets_for_index(&mut tx, 3).await;
+        tx.commit().await.unwrap();
+
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to index page endpoint
+        let response: TestResponse = cli
+            .get("/")
+            .send()
+            .await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Parse HTML and verify structure
+        let document = Html::parse_fragment(&html_content);
+
+        // Should contain the search fieldset
+        let fieldset_selector = Selector::parse("fieldset").unwrap();
+        let fieldset = document.select(&fieldset_selector).next();
+        assert!(fieldset.is_some(), "Should have fieldset element");
+
+        // Should contain the legend
+        let legend_selector = Selector::parse("legend").unwrap();
+        let legend = document.select(&legend_selector).next();
+        assert!(legend.is_some(), "Should have legend element");
+        assert_eq!(legend.unwrap().inner_html(), "Search by:");
+
+        // Should contain the search input with correct attributes
+        let input_selector = Selector::parse("input#search_by_input").unwrap();
+        let input = document.select(&input_selector).next();
+        assert!(input.is_some(), "Should have search input element");
+        
+        let input_element = input.unwrap();
+        assert_eq!(input_element.attr("name"), Some("search_by"));
+        assert_eq!(input_element.attr("class"), Some("input"));
+        assert_eq!(input_element.attr("type"), Some("search"));
+        assert_eq!(input_element.attr("placeholder"), Some("Begin typing to search Plans..."));
+        assert_eq!(input_element.attr("hx-get"), Some("/component/plan_search?page=0"));
+        assert_eq!(input_element.attr("hx-trigger"), Some("input changed delay:500ms, keyup[key=='Enter']"));
+        assert_eq!(input_element.attr("hx-target"), Some("#search_results"));
+        assert_eq!(input_element.attr("hx-swap"), Some("innerHTML"));
+
+        // Should contain the results table
+        let table_selector = Selector::parse("table").unwrap();
+        let table = document.select(&table_selector).next();
+        assert!(table.is_some(), "Should have results table");
+
+        // Should contain table headers
+        let th_selector = Selector::parse("th").unwrap();
+        let headers: Vec<_> = document.select(&th_selector).collect();
+        assert_eq!(headers.len(), 2, "Should have 2 table headers");
+        assert_eq!(headers[0].inner_html(), "Dataset ID");
+        assert_eq!(headers[1].inner_html(), "Modified Date");
+
+        // Should contain search results tbody
+        let tbody_selector = Selector::parse("tbody#search_results").unwrap();
+        let tbody = document.select(&tbody_selector).next();
+        assert!(tbody.is_some(), "Should have search_results tbody");
+
+        // Should contain some table rows from the pre-rendered search component
+        let tr_selector = Selector::parse("tbody#search_results tr").unwrap();
+        let rows: Vec<_> = document.select(&tr_selector).collect();
+        assert_eq!(rows.len(), 3, "Should have 3 rows from test datasets");
+    }
+
+    /// Test index_page endpoint using TestClient
+    #[sqlx::test]
+    async fn test_index_page_endpoint(pool: PgPool) {
+        // Setup test data
+        let mut tx = pool.begin().await.unwrap();
+        setup_test_datasets_for_index(&mut tx, 2).await;
+        tx.commit().await.unwrap();
+
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to index page endpoint
+        let response: TestResponse = cli
+            .get("/")
+            .send()
+            .await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Verify we get HTML response (should not be empty)
+        assert!(!html_content.is_empty(), "Response should contain HTML content");
+
+        // Parse HTML and verify basic structure
+        let document = Html::parse_fragment(&html_content);
+
+        // Should contain the title "Fletcher: Search"
+        let title_selector = Selector::parse("title").unwrap();
+        let title = document.select(&title_selector).next();
+        assert!(title.is_some(), "Should have title element");
+        assert_eq!(title.unwrap().inner_html(), "Fletcher");
+
+        // Should contain the search input
+        let input_selector = Selector::parse("input#search_by_input").unwrap();
+        let input = document.select(&input_selector).next();
+        assert!(input.is_some(), "Should have search input element in full page");
+
+        // Should contain the results table
+        let table_selector = Selector::parse("table").unwrap();
+        let table = document.select(&table_selector).next();
+        assert!(table.is_some(), "Should have results table in full page");
+
+        // Should have navigation with only Search link (no dataset_id)
+        let nav_selector = Selector::parse("nav ul li").unwrap();
+        let nav_items: Vec<_> = document.select(&nav_selector).collect();
+        assert_eq!(nav_items.len(), 1, "Should have only 1 nav item (Search only, no Plan link)");
+        
+        let search_link = nav_items[0].select(&Selector::parse("a").unwrap()).next();
+        assert!(search_link.is_some());
+        assert_eq!(search_link.unwrap().inner_html(), "Search");
+    }
+
+    /// Test index_page with empty database
+    #[sqlx::test]
+    async fn test_index_page_empty_database(pool: PgPool) {
+        // Don't create any test data - test with empty database
+        
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to index page endpoint
+        let response: TestResponse = cli
+            .get("/")
+            .send()
+            .await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Parse HTML and verify structure still works with no data
+        let document = Html::parse_fragment(&html_content);
+
+        // Should still contain the search form
+        let input_selector = Selector::parse("input#search_by_input").unwrap();
+        let input = document.select(&input_selector).next();
+        assert!(input.is_some(), "Should have search input even with empty database");
+
+        // Should still contain the table structure
+        let tbody_selector = Selector::parse("tbody#search_results").unwrap();
+        let tbody = document.select(&tbody_selector).next();
+        assert!(tbody.is_some(), "Should have search_results tbody even with empty database");
+
+        // Should have no data rows
+        let tr_selector = Selector::parse("tbody#search_results tr").unwrap();
+        let rows: Vec<_> = document.select(&tr_selector).collect();
+        assert_eq!(rows.len(), 0, "Should have 0 rows with empty database");
+    }
+
+    /// Test index_page HTML structure matches expected layout
+    #[sqlx::test]
+    async fn test_index_page_html_content_validation(pool: PgPool) {
+        // Setup minimal test data
+        let mut tx = pool.begin().await.unwrap();
+        setup_test_datasets_for_index(&mut tx, 1).await;
+        tx.commit().await.unwrap();
+
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to index page endpoint
+        let response: TestResponse = cli
+            .get("/")
+            .send()
+            .await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Verify specific HTML structure
+        assert!(html_content.contains("Fletcher: Search"), "Should contain page title");
+        assert!(html_content.contains("Search by:"), "Should contain fieldset legend");
+        assert!(html_content.contains("Begin typing to search Plans..."), "Should contain input placeholder");
+        assert!(html_content.contains("hx-get=\"/component/plan_search?page=0\""), "Should contain HTMX get attribute");
+        assert!(html_content.contains("hx-target=\"#search_results\""), "Should contain HTMX target attribute");
+        assert!(html_content.contains("Dataset ID"), "Should contain Dataset ID header");
+        assert!(html_content.contains("Modified Date"), "Should contain Modified Date header");
+        assert!(html_content.contains("id=\"search_results\""), "Should contain search_results tbody id");
+    }
+
+    // =============== Plan Page Tests ===============
+
+    /// Helper function to create a test plan with data products in the database
+    async fn setup_test_plan_with_data_products(
+        tx: &mut Transaction<'_, Postgres>,
+        dataset_id: DatasetId,
+        data_product_count: usize,
+    ) -> Plan {
+        let mut data_products = Vec::new();
+        let mut dependencies = Vec::new();
+
+        // Create data products with different states
+        for i in 0..data_product_count {
+            let data_product_id = Uuid::new_v4();
+
+            data_products.push(DataProductParam {
+                id: data_product_id,
+                compute: if i % 2 == 0 { Compute::Cams } else { Compute::Dbxaas },
+                name: format!("test-product-{i}"),
+                version: format!("1.{i}.0"),
+                eager: i % 2 == 0,
+                passthrough: Some(json!({"test": format!("passthrough-{i}")})),
+                extra: Some(json!({"test": format!("extra-{i}")})),
+            });
+
+            // Create dependencies between consecutive data products
+            if i > 0 {
+                dependencies.push(DependencyParam {
+                    parent_id: data_products[i - 1].id,
+                    child_id: data_product_id,
+                    extra: Some(json!({"dependency": i})),
+                });
+            }
+        }
+
+        let plan_param = PlanParam {
+            dataset: DatasetParam {
+                id: dataset_id,
+                extra: Some(json!({"test": "plan"})),
+            },
+            data_products,
+            dependencies,
+        };
+
+        plan_param.upsert(tx, "testuser", Utc::now()).await.unwrap()
+    }
+
+    /// Test plan_page endpoint with valid dataset_id
+    #[sqlx::test]
+    async fn test_plan_page_success(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        
+        // Setup test data
+        let dataset_id = Uuid::new_v4();
+        setup_test_plan_with_data_products(&mut tx, dataset_id, 3).await;
+        tx.commit().await.unwrap();
+
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to plan page endpoint
+        let response: TestResponse = cli
+            .get(format!("/plan/{dataset_id}"))
+            .send()
+            .await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Verify we get HTML response (should not be empty)
+        assert!(!html_content.is_empty(), "Response should contain HTML content");
+
+        // Parse HTML and verify basic structure
+        let document = Html::parse_fragment(&html_content);
+
+        // Should contain the title "Fletcher: Plan"
+        let title_selector = Selector::parse("title").unwrap();
+        let title = document.select(&title_selector).next();
+        assert!(title.is_some(), "Should have title element");
+        assert_eq!(title.unwrap().inner_html(), "Fletcher");
+
+        // Should contain plan heading
+        let h2_selector = Selector::parse("h2").unwrap();
+        let h2 = document.select(&h2_selector).next();
+        assert!(h2.is_some(), "Should have h2 element");
+        assert_eq!(h2.unwrap().inner_html(), "Plan's Current State:");
+
+        // Should have navigation with both Search and Plan links
+        let nav_selector = Selector::parse("nav ul li").unwrap();
+        let nav_items: Vec<_> = document.select(&nav_selector).collect();
+        assert_eq!(nav_items.len(), 2, "Should have 2 nav items (Search and Plan)");
+        
+        // First nav item should be Search
+        let search_link = nav_items[0].select(&Selector::parse("a").unwrap()).next();
+        assert!(search_link.is_some());
+        assert_eq!(search_link.unwrap().inner_html(), "Search");
+        
+        // Second nav item should be Plan
+        let plan_link = nav_items[1].select(&Selector::parse("a").unwrap()).next();
+        assert!(plan_link.is_some());
+        assert_eq!(plan_link.unwrap().inner_html(), "Plan");
+        assert_eq!(
+            plan_link.unwrap().attr("href"),
+            Some(format!("/plan/{dataset_id}").as_str())
+        );
+
+        // Should contain data products table
+        let table_selector = Selector::parse("table").unwrap();
+        let table = document.select(&table_selector).next();
+        assert!(table.is_some(), "Should have data products table");
+
+        // Should have correct table headers
+        let th_selector = Selector::parse("th").unwrap();
+        let headers: Vec<_> = document.select(&th_selector).collect();
+        assert_eq!(headers.len(), 9, "Should have 9 table headers");
+        assert_eq!(headers[0].inner_html(), "Data Product ID");
+        assert_eq!(headers[1].inner_html(), "Compute");
+        assert_eq!(headers[2].inner_html(), "Name");
+        assert_eq!(headers[3].inner_html(), "Version");
+        assert_eq!(headers[4].inner_html(), "Eager");
+        assert_eq!(headers[5].inner_html(), "State");
+        assert_eq!(headers[6].inner_html(), "Run ID");
+        assert_eq!(headers[7].inner_html(), "Link");
+        assert_eq!(headers[8].inner_html(), "Last Update");
+
+        // Should have data product rows
+        let tr_selector = Selector::parse("tbody tr").unwrap();
+        let rows: Vec<_> = document.select(&tr_selector).collect();
+        assert_eq!(rows.len(), 3, "Should have 3 data product rows");
+
+        // Verify first row structure
+        let first_row = &rows[0];
+        let td_selector = Selector::parse("td").unwrap();
+        let cells: Vec<_> = first_row.select(&td_selector).collect();
+        assert_eq!(cells.len(), 9, "Each row should have 9 cells");
+        
+        // Check that cells contain expected content types
+        assert!(!cells[0].inner_html().is_empty(), "Data Product ID cell should not be empty");
+        assert!(cells[2].inner_html().contains("test-product"), "Name cell should contain test-product");
+        assert!(cells[3].inner_html().contains("1."), "Version cell should contain version number");
+    }
+
+    /// Test plan_page endpoint with invalid UUID
+    #[sqlx::test]
+    async fn test_plan_page_invalid_uuid(pool: PgPool) {
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request with invalid UUID
+        let response: TestResponse = cli
+            .get("/plan/invalid-uuid")
+            .send()
+            .await;
+
+        // Should return 404 Not Found
+        response.assert_status(poem::http::StatusCode::NOT_FOUND);
+    }
+
+    /// Test plan_page endpoint with non-existent dataset_id
+    #[sqlx::test]
+    async fn test_plan_page_not_found(pool: PgPool) {
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request with valid UUID but non-existent dataset
+        let non_existent_id = Uuid::new_v4();
+        let response: TestResponse = cli
+            .get(format!("/plan/{non_existent_id}"))
+            .send()
+            .await;
+
+        // Should return 404 Not Found
+        response.assert_status(poem::http::StatusCode::NOT_FOUND);
+    }
+
+    /// Test plan_page HTML structure with detailed validation
+    #[sqlx::test]
+    async fn test_plan_page_html_structure_detailed(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        
+        // Setup test data with specific values for validation
+        let dataset_id = Uuid::new_v4();
+        setup_test_plan_with_data_products(&mut tx, dataset_id, 2).await;
+        tx.commit().await.unwrap();
+
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to plan page endpoint
+        let response: TestResponse = cli
+            .get(format!("/plan/{dataset_id}"))
+            .send()
+            .await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Parse HTML and verify detailed structure
+        let document = Html::parse_fragment(&html_content);
+
+        // Should contain div with id="graph" for GraphViz visualization
+        let graph_div_selector = Selector::parse("div#graph").unwrap();
+        let graph_div = document.select(&graph_div_selector).next();
+        assert!(graph_div.is_some(), "Should have div with id='graph' for visualization");
+
+        // Should contain script tags for viz-js
+        let script_selector = Selector::parse("script").unwrap();
+        let scripts: Vec<_> = document.select(&script_selector).collect();
+        assert!(scripts.len() >= 2, "Should have at least 2 script tags for visualization");
+
+        // Should have viz-js library script
+        let viz_script = scripts.iter().find(|script| {
+            script.attr("src").is_some_and(|src| src.contains("viz-standalone.js"))
+        });
+        assert!(viz_script.is_some(), "Should have viz-js library script");
+
+        // Should contain table with tbody for data products
+        let tbody_selector = Selector::parse("table tbody").unwrap();
+        let tbody = document.select(&tbody_selector).next();
+        assert!(tbody.is_some(), "Should have tbody in data products table");
+
+        // Verify data product rows have correct structure
+        let tr_selector = Selector::parse("tbody tr").unwrap();
+        let rows: Vec<_> = document.select(&tr_selector).collect();
+        
+        for (i, row) in rows.iter().enumerate() {
+            // Each row should have id attribute
+            assert!(row.attr("id").is_some(), "Each row should have id attribute");
+            assert!(row.attr("id").unwrap().starts_with("row_"), "Row id should start with 'row_'");
+            
+            // Each row should have 9 cells
+            let td_selector = Selector::parse("td").unwrap();
+            let cells: Vec<_> = row.select(&td_selector).collect();
+            assert_eq!(cells.len(), 9, "Row {} should have 9 cells", i);
+        }
+    }
+
+    /// Test plan_page with plan containing no data products
+    #[sqlx::test]
+    async fn test_plan_page_empty_plan(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        
+        // Setup test data with no data products
+        let dataset_id = Uuid::new_v4();
+        setup_test_plan_with_data_products(&mut tx, dataset_id, 0).await;
+        tx.commit().await.unwrap();
+
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to plan page endpoint
+        let response: TestResponse = cli
+            .get(format!("/plan/{dataset_id}"))
+            .send()
+            .await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Parse HTML and verify structure handles empty plan
+        let document = Html::parse_fragment(&html_content);
+
+        // Should still have the plan heading
+        let h2_selector = Selector::parse("h2").unwrap();
+        let h2 = document.select(&h2_selector).next();
+        assert!(h2.is_some(), "Should have h2 element even with empty plan");
+        assert_eq!(h2.unwrap().inner_html(), "Plan's Current State:");
+
+        // Should still have the table structure
+        let table_selector = Selector::parse("table").unwrap();
+        let table = document.select(&table_selector).next();
+        assert!(table.is_some(), "Should have table even with empty plan");
+
+        // Should have no data product rows
+        let tr_selector = Selector::parse("tbody tr").unwrap();
+        let rows: Vec<_> = document.select(&tr_selector).collect();
+        assert_eq!(rows.len(), 0, "Should have 0 data product rows for empty plan");
+
+        // Should still have visualization div
+        let graph_div_selector = Selector::parse("div#graph").unwrap();
+        let graph_div = document.select(&graph_div_selector).next();
+        assert!(graph_div.is_some(), "Should have visualization div even with empty plan");
+    }
+
+    /// Test plan_page content validation for specific elements
+    #[sqlx::test]
+    async fn test_plan_page_content_validation(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        
+        // Setup test data
+        let dataset_id = Uuid::new_v4();
+        setup_test_plan_with_data_products(&mut tx, dataset_id, 1).await;
+        tx.commit().await.unwrap();
+
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to plan page endpoint
+        let response: TestResponse = cli
+            .get(format!("/plan/{dataset_id}"))
+            .send()
+            .await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Verify specific content elements
+        assert!(html_content.contains("Fletcher: Plan"), "Should contain page title");
+        assert!(html_content.contains("Plan's Current State:"), "Should contain plan heading");
+        assert!(html_content.contains("Data Product ID"), "Should contain table headers");
+        assert!(html_content.contains("test-product-0"), "Should contain test data product name");
+        assert!(html_content.contains("1.0.0"), "Should contain test data product version");
+        assert!(html_content.contains("Viz.instance()"), "Should contain visualization JavaScript");
+        assert!(html_content.contains("viz-standalone.js"), "Should reference viz-js library");
+        assert!(html_content.contains("id=\"graph\""), "Should contain graph div id");
+    }
+}
