@@ -38,10 +38,24 @@ fn main() {
     .unwrap();
 
     // Populate Assets directory with Viz-JS
-    fs::create_dir_all("assets/viz-js").unwrap();
+    fs::create_dir_all("assets/viz").unwrap();
     fs::copy(
         "node_modules/@viz-js/viz/lib/viz-standalone.js",
-        "assets/viz-js/viz-standalone.js",
+        "assets/viz/viz-standalone.js",
+    )
+    .unwrap();
+
+    // Populate Assets directory with Prism.js
+    fs::create_dir_all("assets/prism").unwrap();
+    fs::copy("node_modules/prismjs/prism.js", "assets/prism/prism.js").unwrap();
+    fs::copy(
+        "node_modules/prismjs/components/prism-json.js",
+        "assets/prism/prism-json.js",
+    )
+    .unwrap();
+    fs::copy(
+        "node_modules/prism-themes/themes/prism-holi-theme.css",
+        "assets/prism/prism.css",
     )
     .unwrap();
 }

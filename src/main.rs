@@ -78,10 +78,31 @@ mod tests {
         );
 
         // Check that viz-standalone.js exists in the embedded assets
-        let viz_file = Assets::get("viz-js/viz-standalone.js");
+        let viz_file = Assets::get("viz/viz-standalone.js");
         assert!(
             viz_file.is_some(),
-            "viz-js/viz-standalone.js should be present in embedded assets",
+            "viz/viz-standalone.js should be present in embedded assets",
+        );
+
+        // Check that prism.js exists in the embedded assets
+        let prism_js_file = Assets::get("prism/prism.js");
+        assert!(
+            prism_js_file.is_some(),
+            "prism/prism.js should be present in embedded assets",
+        );
+
+        // Check that prism-json.js exists in the embedded assets
+        let prism_json_file = Assets::get("prism/prism-json.js");
+        assert!(
+            prism_json_file.is_some(),
+            "prism/prism-json.js should be present in embedded assets",
+        );
+
+        // Check that prism.css exists in the embedded assets
+        let prism_css_file = Assets::get("prism/prism.css");
+        assert!(
+            prism_css_file.is_some(),
+            "prism/prism.css should be present in embedded assets",
         );
     }
 }

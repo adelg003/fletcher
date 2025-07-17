@@ -12,6 +12,10 @@ pub fn head() -> Markup {
             link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico";
             // HTMX
             script defer src="/assets/htmx/htmx.min.js" {}
+            // Prism.js
+            link rel="stylesheet" type="text/css" href="/assets/prism/prism.css";
+            script defer src="/assets/prism/prism.js" {}
+            script defer src="/assets/prism/prism-json.js" {}
         }
     }
 }
@@ -67,6 +71,54 @@ pub mod tests {
 
         assert!(script.attr("defer").is_some());
         assert_eq!(script.attr("src"), Some("/assets/htmx/htmx.min.js"));
+    }
+
+    /// Test that Prism.js CSS is present in the head
+    #[test]
+    fn test_prism_css_present() {
+        let head = Html::parse_fragment(&head().into_string());
+
+        let link_selector = Selector::parse("link[rel=\"stylesheet\"]").unwrap();
+        let prism_css_link = head
+            .select(&link_selector)
+            .find(|link| link.attr("href") == Some("/assets/prism/prism.css"));
+
+        assert!(prism_css_link.is_some(), "Prism.js CSS should be present in head");
+        let link = prism_css_link.unwrap();
+        assert_eq!(link.attr("type"), Some("text/css"));
+        assert_eq!(link.attr("href"), Some("/assets/prism/prism.css"));
+    }
+
+    /// Test that Prism.js core script is present in the head
+    #[test]
+    fn test_prism_js_present() {
+        let head = Html::parse_fragment(&head().into_string());
+
+        let script_selector = Selector::parse("script[src]").unwrap();
+        let prism_js_script = head
+            .select(&script_selector)
+            .find(|script| script.attr("src") == Some("/assets/prism/prism.js"));
+
+        assert!(prism_js_script.is_some(), "Prism.js core script should be present in head");
+        let script = prism_js_script.unwrap();
+        assert!(script.attr("defer").is_some(), "Prism.js script should have defer attribute");
+        assert_eq!(script.attr("src"), Some("/assets/prism/prism.js"));
+    }
+
+    /// Test that Prism.js JSON plugin script is present in the head
+    #[test]
+    fn test_prism_json_present() {
+        let head = Html::parse_fragment(&head().into_string());
+
+        let script_selector = Selector::parse("script[src]").unwrap();
+        let prism_json_script = head
+            .select(&script_selector)
+            .find(|script| script.attr("src") == Some("/assets/prism/prism-json.js"));
+
+        assert!(prism_json_script.is_some(), "Prism.js JSON plugin should be present in head");
+        let script = prism_json_script.unwrap();
+        assert!(script.attr("defer").is_some(), "Prism.js JSON script should have defer attribute");
+        assert_eq!(script.attr("src"), Some("/assets/prism/prism-json.js"));
     }
 
     /// Test navbar with dataset_id - should have second li element pointing to plan
