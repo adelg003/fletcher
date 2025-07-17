@@ -133,7 +133,10 @@ mod tests {
 
         // Call the component function within the same transaction
         let result = plan_search_component(&mut tx, "", 0).await;
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "Plan search component should execute successfully"
+        );
 
         let markup = result.unwrap();
 
@@ -170,7 +173,10 @@ mod tests {
 
         // Call the component function within the same transaction
         let result = plan_search_component(&mut tx, "", 0).await;
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "Plan search component should execute successfully with 50 plans"
+        );
 
         let markup = result.unwrap();
 
@@ -246,7 +252,10 @@ mod tests {
 
         // The hx-get should point to page 1
         let hx_get = pagination_element.attr("hx-get");
-        assert!(hx_get.is_some());
+        assert!(
+            hx_get.is_some(),
+            "Pagination element should have hx-get attribute"
+        );
         assert!(
             hx_get.unwrap().contains("page=1"),
             "Pagination should link to page 1"
@@ -269,7 +278,10 @@ mod tests {
         setup_test_datasets(&mut tx, 5).await;
 
         let result = plan_search_component(&mut tx, "", 0).await;
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "Plan search component should execute successfully for table row structure test"
+        );
 
         let markup = result.unwrap();
 
@@ -282,25 +294,34 @@ mod tests {
         let tr_elements: Vec<_> = document.select(&tr_selector).collect();
 
         // Should have exactly 5 rows
-        assert_eq!(tr_elements.len(), 5);
+        assert_eq!(tr_elements.len(), 5, "Should have exactly 5 table rows");
 
         // Check first row structure
         let first_row = &tr_elements[0];
 
         // Should have id attribute with row_ prefix
         let row_id = first_row.attr("id");
-        assert!(row_id.is_some());
-        assert!(row_id.unwrap().starts_with("row_"));
+        assert!(row_id.is_some(), "First row should have id attribute");
+        assert!(
+            row_id.unwrap().starts_with("row_"),
+            "Row id should start with 'row_' prefix"
+        );
 
         // Should have href attribute pointing to plan page
         let href = first_row.attr("href");
-        assert!(href.is_some());
-        assert!(href.unwrap().starts_with("/plan/"));
+        assert!(href.is_some(), "First row should have href attribute");
+        assert!(
+            href.unwrap().starts_with("/plan/"),
+            "Row href should point to plan page"
+        );
 
         // Should have onclick attribute
         let onclick = first_row.attr("onclick");
-        assert!(onclick.is_some());
-        assert!(onclick.unwrap().contains("window.location='/plan/"));
+        assert!(onclick.is_some(), "First row should have onclick attribute");
+        assert!(
+            onclick.unwrap().contains("window.location='/plan/"),
+            "Row onclick should contain window.location navigation"
+        );
 
         // Should have exactly 2 td elements (dataset_id and modified_date)
         let td_selector = Selector::parse("td").unwrap();

@@ -140,11 +140,14 @@ mod tests {
             .collect();
 
         let result = DiGraph::build_dag(nodes, edges);
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "DAG building should succeed with valid nodes and edges"
+        );
 
         let dag = result.unwrap();
-        assert_eq!(dag.node_count(), 4);
-        assert_eq!(dag.edge_count(), 3);
+        assert_eq!(dag.node_count(), 4, "DAG should contain 4 nodes");
+        assert_eq!(dag.edge_count(), 3, "DAG should contain 3 edges");
     }
 
     /// Test rejection of self-loop edges
@@ -160,8 +163,14 @@ mod tests {
         .collect();
 
         let result = DiGraph::build_dag(nodes, edges);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::Cyclical));
+        assert!(
+            result.is_err(),
+            "DAG building should fail when self-loop is present"
+        );
+        assert!(
+            matches!(result.unwrap_err(), Error::Cyclical),
+            "Self-loop should produce Cyclical error"
+        );
     }
 
     /// Test rejection of cyclical graphs
@@ -179,8 +188,14 @@ mod tests {
         .collect();
 
         let result = DiGraph::build_dag(nodes, edges);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::Cyclical));
+        assert!(
+            result.is_err(),
+            "DAG building should fail when cycle is present"
+        );
+        assert!(
+            matches!(result.unwrap_err(), Error::Cyclical),
+            "Cycle should produce Cyclical error"
+        );
     }
 
     /// Test handling of invalid edge references
@@ -196,7 +211,10 @@ mod tests {
         .collect();
 
         let result = DiGraph::build_dag(nodes, edges);
-        assert!(result.is_err());
+        assert!(
+            result.is_err(),
+            "DAG building should fail when edge references non-existent node"
+        );
     }
 
     /// Test finding index of existing node
@@ -210,11 +228,15 @@ mod tests {
 
         let index = dag.find_node_index(2);
 
-        assert!(index.is_some());
+        assert!(index.is_some(), "Should find index for existing node");
 
         // Verify the index actually points to the correct node
         let found_index = index.unwrap();
-        assert_eq!(dag.node_weight(found_index), Some(&2));
+        assert_eq!(
+            dag.node_weight(found_index),
+            Some(&2),
+            "Found index should point to node with weight 2"
+        );
     }
 
     /// Test finding index of non-existing node
@@ -226,7 +248,10 @@ mod tests {
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let index = dag.find_node_index(5); // Node 5 doesn't exist
-        assert!(index.is_none());
+        assert!(
+            index.is_none(),
+            "Should not find index for non-existing node"
+        );
     }
 
     /// Test downstream nodes from simple tree structure
@@ -248,7 +273,10 @@ mod tests {
 
         let downstream = dag.downstream_nodes(1);
         let expected: HashSet<u32> = [2, 3, 4, 5].iter().copied().collect();
-        assert_eq!(downstream, expected);
+        assert_eq!(
+            downstream, expected,
+            "Downstream nodes should match expected set"
+        );
     }
 
     /// Test downstream nodes from complex DAG structure
@@ -272,12 +300,18 @@ mod tests {
 
         let downstream = dag.downstream_nodes(1);
         let expected: HashSet<u32> = [2, 3, 4, 5, 6].iter().copied().collect();
-        assert_eq!(downstream, expected);
+        assert_eq!(
+            downstream, expected,
+            "Downstream nodes from root should include all descendants"
+        );
 
         // Test from intermediate node
         let downstream_from_3 = dag.downstream_nodes(3);
         let expected_from_3: HashSet<u32> = [4, 5, 6].iter().copied().collect();
-        assert_eq!(downstream_from_3, expected_from_3);
+        assert_eq!(
+            downstream_from_3, expected_from_3,
+            "Downstream nodes from intermediate node should include its descendants"
+        );
     }
 
     /// Test downstream nodes from leaf node
@@ -290,7 +324,10 @@ mod tests {
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let downstream = dag.downstream_nodes(3); // Leaf node
-        assert!(downstream.is_empty());
+        assert!(
+            downstream.is_empty(),
+            "Node without children should have empty downstream set"
+        );
     }
 
     /// Test downstream nodes for non-existing node
@@ -302,7 +339,10 @@ mod tests {
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let downstream = dag.downstream_nodes(5); // Non-existing node
-        assert!(downstream.is_empty());
+        assert!(
+            downstream.is_empty(),
+            "Node without descendants should have empty downstream set"
+        );
     }
 
     /// Test parent nodes with multiple parents
@@ -323,7 +363,7 @@ mod tests {
 
         let parents = dag.parent_nodes(3);
         let expected: HashSet<u32> = [1, 2].iter().copied().collect();
-        assert_eq!(parents, expected);
+        assert_eq!(parents, expected, "Parent nodes should match expected set");
     }
 
     /// Test parent nodes with single parent
@@ -337,7 +377,7 @@ mod tests {
 
         let parents = dag.parent_nodes(2);
         let expected: HashSet<u32> = [1].iter().copied().collect();
-        assert_eq!(parents, expected);
+        assert_eq!(parents, expected, "Node should have expected single parent");
     }
 
     /// Test parent nodes for root node
@@ -350,7 +390,7 @@ mod tests {
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let parents = dag.parent_nodes(1); // Root node has no parents
-        assert!(parents.is_empty());
+        assert!(parents.is_empty(), "Root node should have empty parent set");
     }
 
     /// Test parent nodes for non-existing node
@@ -362,7 +402,10 @@ mod tests {
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
 
         let parents = dag.parent_nodes(5); // Non-existing node
-        assert!(parents.is_empty());
+        assert!(
+            parents.is_empty(),
+            "Node without parents should have empty parent set"
+        );
     }
 
     /// Test validation of acyclic graph
@@ -373,6 +416,9 @@ mod tests {
             [(1, 2, "edge1"), (2, 3, "edge2")].iter().copied().collect();
 
         let dag = DiGraph::build_dag(nodes, edges).unwrap();
-        assert!(dag.validate_acyclic().is_ok());
+        assert!(
+            dag.validate_acyclic().is_ok(),
+            "Valid DAG should pass acyclic validation"
+        );
     }
 }

@@ -274,8 +274,8 @@ mod tests {
         let result = format_node(id, &plan);
 
         assert_eq!(
-            result,
-            "label=\"test-product:1.0.0\", shape=\"box\", color=\"grey\", style=\"filed\""
+            result, "label=\"test-product:1.0.0\", shape=\"box\", color=\"grey\", style=\"filed\"",
+            "Formatted node should match expected disabled state"
         );
     }
 
@@ -289,8 +289,8 @@ mod tests {
         let result = format_node(id, &plan);
 
         assert_eq!(
-            result,
-            "label=\"failed-product:2.1.0\", shape=\"box\", color=\"red\", style=\"bold\""
+            result, "label=\"failed-product:2.1.0\", shape=\"box\", color=\"red\", style=\"bold\"",
+            "Formatted node should match expected failed state"
         );
     }
 
@@ -304,8 +304,8 @@ mod tests {
         let result = format_node(id, &plan);
 
         assert_eq!(
-            result,
-            "label=\"queued-product:3.0.0\", shape=\"box\", color=\"grey\", style=\"bold\""
+            result, "label=\"queued-product:3.0.0\", shape=\"box\", color=\"grey\", style=\"bold\"",
+            "Formatted node should match expected queued state"
         );
     }
 
@@ -320,7 +320,8 @@ mod tests {
 
         assert_eq!(
             result,
-            "label=\"running-product:1.5.0\", shape=\"box\", color=\"lightgreen\", style=\"bold\""
+            "label=\"running-product:1.5.0\", shape=\"box\", color=\"lightgreen\", style=\"bold\"",
+            "Formatted node should match expected running state"
         );
     }
 
@@ -335,7 +336,8 @@ mod tests {
 
         assert_eq!(
             result,
-            "label=\"success-product:4.2.1\", shape=\"box\", color=\"green\", style=\"bold\""
+            "label=\"success-product:4.2.1\", shape=\"box\", color=\"green\", style=\"bold\"",
+            "Formatted node should match expected success state"
         );
     }
 
@@ -350,7 +352,8 @@ mod tests {
 
         assert_eq!(
             result,
-            "label=\"waiting-product:0.9.0\", shape=\"box\", color=\"lightgrey\", style=\"bold\""
+            "label=\"waiting-product:0.9.0\", shape=\"box\", color=\"lightgrey\", style=\"bold\"",
+            "Formatted node should match expected waiting state"
         );
     }
 
@@ -366,7 +369,11 @@ mod tests {
 
         let result = format_node(non_existent_id, &plan);
 
-        assert_eq!(result, String::new());
+        assert_eq!(
+            result,
+            String::new(),
+            "Formatted node should be empty if data product not found"
+        );
     }
 
     /// Test format_node with special characters in name and version
@@ -385,7 +392,8 @@ mod tests {
 
         assert_eq!(
             result,
-            "label=\"test-product_with.special-chars:1.0.0-beta.1\", shape=\"box\", color=\"green\", style=\"bold\""
+            "label=\"test-product_with.special-chars:1.0.0-beta.1\", shape=\"box\", color=\"green\", style=\"bold\"",
+            "Formatted node should match expected special characters state"
         );
     }
 
@@ -397,7 +405,11 @@ mod tests {
 
         let result = format_node(id, &plan);
 
-        assert_eq!(result, String::new());
+        assert_eq!(
+            result,
+            String::new(),
+            "Formatted node should be empty for empty plan"
+        );
     }
 
     /// Test format_node output format structure
@@ -410,16 +422,40 @@ mod tests {
         let result = format_node(id, &plan);
 
         // Verify the output follows GraphViz DOT notation format
-        assert!(result.starts_with("label=\""));
-        assert!(result.contains("shape=\"box\""));
-        assert!(result.contains("color=\""));
-        assert!(result.contains("style=\""));
-        assert!(result.ends_with("\""));
+        assert!(
+            result.starts_with("label=\""),
+            "Formatted node should start with label attribute"
+        );
+        assert!(
+            result.contains("shape=\"box\""),
+            "Formatted node should contain box shape"
+        );
+        assert!(
+            result.contains("color=\""),
+            "Formatted node should contain color attribute"
+        );
+        assert!(
+            result.contains("style=\""),
+            "Formatted node should contain style attribute"
+        );
+        assert!(
+            result.ends_with("\""),
+            "Formatted node should end with closing quote"
+        );
 
         // Verify all components are present
-        assert!(result.contains("format-test:1.0"));
-        assert!(result.contains("lightgreen"));
-        assert!(result.contains("bold"));
+        assert!(
+            result.contains("format-test:1.0"),
+            "Formatted node should contain data product name and version"
+        );
+        assert!(
+            result.contains("lightgreen"),
+            "Formatted node should contain lightgreen color for Success state"
+        );
+        assert!(
+            result.contains("bold"),
+            "Formatted node should contain bold style for Success state"
+        );
     }
 
     // =============== Render Dot Tests ===============
@@ -1407,39 +1443,89 @@ mod tests {
         // Should contain "Plan Details:" heading
         let h2_selector = Selector::parse("h2").unwrap();
         let headings: Vec<_> = document.select(&h2_selector).collect();
-        let plan_details_heading = headings.iter().find(|h2| h2.inner_html() == "Plan Details:");
-        assert!(plan_details_heading.is_some(), "Should have 'Plan Details:' heading");
+        let plan_details_heading = headings
+            .iter()
+            .find(|h2| h2.inner_html() == "Plan Details:");
+        assert!(
+            plan_details_heading.is_some(),
+            "Should have 'Plan Details:' heading"
+        );
 
         // Should contain pre > code structure with language-json class
         let pre_code_selector = Selector::parse("pre code.language-json").unwrap();
         let json_code_block = document.select(&pre_code_selector).next();
-        assert!(json_code_block.is_some(), "Should have pre > code.language-json structure");
+        assert!(
+            json_code_block.is_some(),
+            "Should have pre > code.language-json structure"
+        );
 
         // Get the JSON content from the code block
         let json_content = json_code_block.unwrap().inner_html();
         assert!(!json_content.is_empty(), "JSON content should not be empty");
 
         // Verify JSON structure contains expected plan elements
-        assert!(json_content.contains("dataset"), "JSON should contain dataset object");
-        assert!(json_content.contains("data_products"), "JSON should contain data_products array");
-        assert!(json_content.contains("dependencies"), "JSON should contain dependencies array");
+        assert!(
+            json_content.contains("dataset"),
+            "JSON should contain dataset object"
+        );
+        assert!(
+            json_content.contains("data_products"),
+            "JSON should contain data_products array"
+        );
+        assert!(
+            json_content.contains("dependencies"),
+            "JSON should contain dependencies array"
+        );
 
         // Verify dataset fields are present
-        assert!(json_content.contains("\"id\""), "JSON should contain dataset id field");
-        assert!(json_content.contains("\"paused\""), "JSON should contain paused field");
-        assert!(json_content.contains("\"modified_by\""), "JSON should contain modified_by field");
-        assert!(json_content.contains("\"modified_date\""), "JSON should contain modified_date field");
+        assert!(
+            json_content.contains("\"id\""),
+            "JSON should contain dataset id field"
+        );
+        assert!(
+            json_content.contains("\"paused\""),
+            "JSON should contain paused field"
+        );
+        assert!(
+            json_content.contains("\"modified_by\""),
+            "JSON should contain modified_by field"
+        );
+        assert!(
+            json_content.contains("\"modified_date\""),
+            "JSON should contain modified_date field"
+        );
 
         // Verify data product fields are present
-        assert!(json_content.contains("test-product-0"), "JSON should contain first data product name");
-        assert!(json_content.contains("test-product-1"), "JSON should contain second data product name");
-        assert!(json_content.contains("\"compute\""), "JSON should contain compute field");
-        assert!(json_content.contains("\"version\""), "JSON should contain version field");
-        assert!(json_content.contains("\"eager\""), "JSON should contain eager field");
-        assert!(json_content.contains("\"state\""), "JSON should contain state field");
+        assert!(
+            json_content.contains("test-product-0"),
+            "JSON should contain first data product name"
+        );
+        assert!(
+            json_content.contains("test-product-1"),
+            "JSON should contain second data product name"
+        );
+        assert!(
+            json_content.contains("\"compute\""),
+            "JSON should contain compute field"
+        );
+        assert!(
+            json_content.contains("\"version\""),
+            "JSON should contain version field"
+        );
+        assert!(
+            json_content.contains("\"eager\""),
+            "JSON should contain eager field"
+        );
+        assert!(
+            json_content.contains("\"state\""),
+            "JSON should contain state field"
+        );
 
         // Verify JSON is properly formatted (should contain indentation/whitespace)
-        assert!(json_content.contains("\n"), "JSON should be pretty-printed with newlines");
+        assert!(
+            json_content.contains("\n"),
+            "JSON should be pretty-printed with newlines"
+        );
         assert!(json_content.contains("  "), "JSON should be indented");
 
         // Verify the JSON content is valid by attempting to parse it
@@ -1449,19 +1535,36 @@ mod tests {
         // Verify specific JSON structure
         let json_value = parsed_json.unwrap();
         assert!(json_value.is_object(), "Root JSON should be an object");
-        assert!(json_value.get("dataset").is_some(), "Should have dataset field");
-        assert!(json_value.get("data_products").is_some(), "Should have data_products field");
-        assert!(json_value.get("dependencies").is_some(), "Should have dependencies field");
+        assert!(
+            json_value.get("dataset").is_some(),
+            "Should have dataset field"
+        );
+        assert!(
+            json_value.get("data_products").is_some(),
+            "Should have data_products field"
+        );
+        assert!(
+            json_value.get("dependencies").is_some(),
+            "Should have dependencies field"
+        );
 
         // Verify data_products is an array with correct count
         let data_products = json_value.get("data_products").unwrap();
         assert!(data_products.is_array(), "data_products should be an array");
-        assert_eq!(data_products.as_array().unwrap().len(), 2, "Should have 2 data products");
+        assert_eq!(
+            data_products.as_array().unwrap().len(),
+            2,
+            "Should have 2 data products"
+        );
 
         // Verify dependencies is an array
         let dependencies = json_value.get("dependencies").unwrap();
         assert!(dependencies.is_array(), "dependencies should be an array");
-        assert_eq!(dependencies.as_array().unwrap().len(), 1, "Should have 1 dependency");
+        assert_eq!(
+            dependencies.as_array().unwrap().len(),
+            1,
+            "Should have 1 dependency"
+        );
     }
 
     /// Test plan_page JSON rendering with empty plan
@@ -1493,27 +1596,50 @@ mod tests {
         // Should still contain JSON structure even with empty plan
         let pre_code_selector = Selector::parse("pre code.language-json").unwrap();
         let json_code_block = document.select(&pre_code_selector).next();
-        assert!(json_code_block.is_some(), "Should have JSON structure even with empty plan");
+        assert!(
+            json_code_block.is_some(),
+            "Should have JSON structure even with empty plan"
+        );
 
         // Get the JSON content
         let json_content = json_code_block.unwrap().inner_html();
-        assert!(!json_content.is_empty(), "JSON content should not be empty even with empty plan");
+        assert!(
+            !json_content.is_empty(),
+            "JSON content should not be empty even with empty plan"
+        );
 
         // Verify JSON is valid and contains expected structure
         let parsed_json: Result<serde_json::Value, _> = serde_json::from_str(&json_content);
-        assert!(parsed_json.is_ok(), "JSON content should be valid JSON for empty plan");
+        assert!(
+            parsed_json.is_ok(),
+            "JSON content should be valid JSON for empty plan"
+        );
 
         let json_value = parsed_json.unwrap();
-        assert!(json_value.get("dataset").is_some(), "Should have dataset field");
-        assert!(json_value.get("data_products").is_some(), "Should have data_products field");
+        assert!(
+            json_value.get("dataset").is_some(),
+            "Should have dataset field"
+        );
+        assert!(
+            json_value.get("data_products").is_some(),
+            "Should have data_products field"
+        );
 
         // Verify empty arrays
         let data_products = json_value.get("data_products").unwrap();
         assert!(data_products.is_array(), "data_products should be an array");
-        assert_eq!(data_products.as_array().unwrap().len(), 0, "Should have 0 data products");
+        assert_eq!(
+            data_products.as_array().unwrap().len(),
+            0,
+            "Should have 0 data products"
+        );
 
         let dependencies = json_value.get("dependencies").unwrap();
         assert!(dependencies.is_array(), "dependencies should be an array");
-        assert_eq!(dependencies.as_array().unwrap().len(), 0, "Should have 0 dependencies");
+        assert_eq!(
+            dependencies.as_array().unwrap().len(),
+            0,
+            "Should have 0 dependencies"
+        );
     }
 }

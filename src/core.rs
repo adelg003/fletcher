@@ -1108,10 +1108,24 @@ mod tests {
         assert!(result.is_ok());
 
         let plan = result.unwrap();
-        assert_eq!(plan.dataset.id, param.dataset.id);
-        assert_eq!(plan.data_products.len(), 3);
-        assert_eq!(plan.dependencies.len(), 2);
-        assert_eq!(plan.dataset.modified_by, username);
+        assert_eq!(
+            plan.dataset.id, param.dataset.id,
+            "Plan dataset ID should match the parameter"
+        );
+        assert_eq!(
+            plan.data_products.len(),
+            3,
+            "Plan should have 3 data products"
+        );
+        assert_eq!(
+            plan.dependencies.len(),
+            2,
+            "Plan should have 2 dependencies"
+        );
+        assert_eq!(
+            plan.dataset.modified_by, username,
+            "Plan should be modified by the test user"
+        );
     }
 
     /// Test plan_add can add new data products to existing plan
@@ -1144,10 +1158,21 @@ mod tests {
         assert!(result.is_ok());
 
         let updated_plan = result.unwrap();
-        assert_eq!(updated_plan.data_products.len(), 4);
+        assert_eq!(
+            updated_plan.data_products.len(),
+            4,
+            "Updated plan should have 4 data products after adding new one"
+        );
         let new_dp = updated_plan.data_product(new_dp_id);
-        assert!(new_dp.is_some());
-        assert_eq!(new_dp.unwrap().name, "new-product");
+        assert!(
+            new_dp.is_some(),
+            "Updated plan should contain the new data product"
+        );
+        assert_eq!(
+            new_dp.unwrap().name,
+            "new-product",
+            "New data product should have correct name"
+        );
     }
 
     /// Test plan_add can add new dependencies to existing plan
@@ -1181,7 +1206,10 @@ mod tests {
             .dependencies
             .iter()
             .find(|dep| dep.parent_id == dp1_id && dep.child_id == dp3_id);
-        assert!(new_dep.is_some());
+        assert!(
+            new_dep.is_some(),
+            "Updated plan should contain the new dependency"
+        );
     }
 
     /// Test plan_add can update existing data products
@@ -1213,10 +1241,23 @@ mod tests {
 
         let updated_plan = result.unwrap();
         let updated_dp = updated_plan.data_product(dp1_id).unwrap();
-        assert_eq!(updated_dp.name, "updated-product-name");
-        assert_eq!(updated_dp.compute, Compute::Dbxaas);
-        assert_eq!(updated_dp.version, "2.5.0");
-        assert!(!updated_dp.eager);
+        assert_eq!(
+            updated_dp.name, "updated-product-name",
+            "Data product name should be updated"
+        );
+        assert_eq!(
+            updated_dp.compute,
+            Compute::Dbxaas,
+            "Data product compute should be updated to Dbxaas"
+        );
+        assert_eq!(
+            updated_dp.version, "2.5.0",
+            "Data product version should be updated"
+        );
+        assert!(
+            !updated_dp.eager,
+            "Data product eager should be updated to false"
+        );
     }
 
     /// Test plan_add can update existing dependencies
@@ -1270,12 +1311,20 @@ mod tests {
         assert!(result.is_ok());
 
         let read_plan = result.unwrap();
-        assert_eq!(read_plan.dataset.id, added_plan.dataset.id);
+        assert_eq!(
+            read_plan.dataset.id, added_plan.dataset.id,
+            "Read plan dataset ID should match added plan"
+        );
         assert_eq!(
             read_plan.data_products.len(),
-            added_plan.data_products.len()
+            added_plan.data_products.len(),
+            "Read plan should have same number of data products as added plan"
         );
-        assert_eq!(read_plan.dependencies.len(), added_plan.dependencies.len());
+        assert_eq!(
+            read_plan.dependencies.len(),
+            added_plan.dependencies.len(),
+            "Read plan should have same number of dependencies as added plan"
+        );
     }
 
     /// Test plan_read returns error for non-existent plan
@@ -1449,10 +1498,24 @@ mod tests {
         let result =
             clear_downstream_nodes(&mut tx, &mut plan, &nodes, username, modified_date).await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[1].state, State::Waiting);
-        assert_eq!(plan.data_products[2].state, State::Disabled);
-        assert_eq!(plan.data_products[1].modified_date, original_dp1_modified);
-        assert_eq!(plan.data_products[2].modified_date, original_dp2_modified);
+        assert_eq!(
+            plan.data_products[1].state,
+            State::Waiting,
+            "Data product 1 should be set to Waiting state"
+        );
+        assert_eq!(
+            plan.data_products[2].state,
+            State::Disabled,
+            "Data product 2 should remain Disabled"
+        );
+        assert_eq!(
+            plan.data_products[1].modified_date, original_dp1_modified,
+            "Data product 1 modified date should remain unchanged"
+        );
+        assert_eq!(
+            plan.data_products[2].modified_date, original_dp2_modified,
+            "Data product 2 modified date should remain unchanged"
+        );
     }
 
     // Tests for trigger_next_batch function
@@ -1505,7 +1568,11 @@ mod tests {
 
         let result = trigger_next_batch(&mut tx, &mut plan, username, modified_date).await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[1].state, State::Queued);
+        assert_eq!(
+            plan.data_products[1].state,
+            State::Queued,
+            "Data product should be set to Queued state after trigger"
+        );
     }
 
     /// Test trigger_next_batch skips when dataset is paused
@@ -1560,7 +1627,11 @@ mod tests {
 
         let result = trigger_next_batch(&mut tx, &mut plan, username, modified_date).await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[1].state, State::Waiting);
+        assert_eq!(
+            plan.data_products[1].state,
+            State::Waiting,
+            "Data product should remain in Waiting state when parent has multiple dependencies"
+        );
     }
 
     /// Test trigger_next_batch skips non-eager data products
@@ -1693,7 +1764,11 @@ mod tests {
 
         let result = trigger_next_batch(&mut tx, &mut plan, username, modified_date).await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[2].state, State::Queued);
+        assert_eq!(
+            plan.data_products[2].state,
+            State::Queued,
+            "Data product should be set to Queued when all parent dependencies are successful"
+        );
     }
 
     // Integration tests for states_edit function
@@ -2069,7 +2144,11 @@ mod tests {
 
         let plan = result.unwrap();
         let data_product = plan.data_product(dp_id).unwrap();
-        assert_eq!(data_product.state, State::Disabled);
+        assert_eq!(
+            data_product.state,
+            State::Disabled,
+            "Data product should be disabled after disable_drop operation"
+        );
     }
 
     /// Test disable_drop - Non-existent Data Product
@@ -2231,15 +2310,21 @@ mod tests {
         let dataset_id = plan.dataset.id;
 
         // Initially paused should be false
-        assert!(!plan.dataset.paused);
+        assert!(!plan.dataset.paused, "Plan should initially be unpaused");
 
         // Set pause state to true
         let result = plan_pause_edit(&mut tx, dataset_id, true, username).await;
         assert!(result.is_ok());
 
         let paused_plan = result.unwrap();
-        assert!(paused_plan.dataset.paused);
-        assert_eq!(paused_plan.dataset.modified_by, username);
+        assert!(
+            paused_plan.dataset.paused,
+            "Plan should be paused after setting pause to true"
+        );
+        assert_eq!(
+            paused_plan.dataset.modified_by, username,
+            "Modified by should be updated to the user"
+        );
     }
 
     /// Test plan_pause_edit can set pause state to false
@@ -2257,15 +2342,24 @@ mod tests {
         plan.paused(&mut tx, true, username, modified_date)
             .await
             .unwrap();
-        assert!(plan.dataset.paused);
+        assert!(
+            plan.dataset.paused,
+            "Plan should be paused after calling paused method"
+        );
 
         // Now unpause it
         let result = plan_pause_edit(&mut tx, dataset_id, false, username).await;
         assert!(result.is_ok());
 
         let unpaused_plan = result.unwrap();
-        assert!(!unpaused_plan.dataset.paused);
-        assert_eq!(unpaused_plan.dataset.modified_by, username);
+        assert!(
+            !unpaused_plan.dataset.paused,
+            "Plan should be unpaused after setting pause to false"
+        );
+        assert_eq!(
+            unpaused_plan.dataset.modified_by, username,
+            "Modified by should be updated to the user"
+        );
     }
 
     /// Test plan_pause_edit errors when trying to set pause state to current state
@@ -2292,7 +2386,10 @@ mod tests {
         let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username)
             .await
             .unwrap();
-        assert!(paused_plan.dataset.paused);
+        assert!(
+            paused_plan.dataset.paused,
+            "Plan should be paused after first pause operation"
+        );
 
         // Try to pause it again
         let result = plan_pause_edit(&mut tx, dataset_id, true, username).await;
@@ -2365,13 +2462,16 @@ mod tests {
 
         let dataset_id = param.dataset.id;
         let plan = plan_add(&mut tx, &param, username).await.unwrap();
-        assert!(!plan.dataset.paused);
+        assert!(!plan.dataset.paused, "Plan should initially be unpaused");
 
         // Pause the plan
         let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username)
             .await
             .unwrap();
-        assert!(paused_plan.dataset.paused);
+        assert!(
+            paused_plan.dataset.paused,
+            "Plan should be paused after pause operation"
+        );
 
         // Set parent to Success so children would normally be triggered
         let plan = states_edit(
@@ -2481,7 +2581,10 @@ mod tests {
         let unpaused_plan = plan_pause_edit(&mut tx, dataset_id, false, username)
             .await
             .unwrap();
-        assert!(!unpaused_plan.dataset.paused);
+        assert!(
+            !unpaused_plan.dataset.paused,
+            "Plan should be unpaused after unpause operation"
+        );
 
         // Children should now be queued since parent is successful and plan is unpaused
         assert_eq!(
@@ -2799,7 +2902,10 @@ mod tests {
         assert!(result.is_ok());
         let results = result.unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, created_datasets[4]);
+        assert_eq!(
+            results[0].dataset_id, created_datasets[4],
+            "Search should return the dataset with the highest modified date"
+        );
     }
 
     // Tests for data_product_read function
@@ -2819,18 +2925,30 @@ mod tests {
         assert!(result.is_ok());
 
         let read_data_product = result.unwrap();
-        assert_eq!(read_data_product.id, data_product_id);
-        assert_eq!(read_data_product.name, added_plan.data_products[0].name);
         assert_eq!(
-            read_data_product.compute,
-            added_plan.data_products[0].compute
+            read_data_product.id, data_product_id,
+            "Read data product ID should match the requested ID"
         );
         assert_eq!(
-            read_data_product.version,
-            added_plan.data_products[0].version
+            read_data_product.name, added_plan.data_products[0].name,
+            "Read data product name should match added plan data product name"
         );
-        assert_eq!(read_data_product.eager, added_plan.data_products[0].eager);
-        assert_eq!(read_data_product.state, added_plan.data_products[0].state);
+        assert_eq!(
+            read_data_product.compute, added_plan.data_products[0].compute,
+            "Read data product compute should match added plan data product compute"
+        );
+        assert_eq!(
+            read_data_product.version, added_plan.data_products[0].version,
+            "Read data product version should match added plan data product version"
+        );
+        assert_eq!(
+            read_data_product.eager, added_plan.data_products[0].eager,
+            "Read data product eager should match added plan data product eager"
+        );
+        assert_eq!(
+            read_data_product.state, added_plan.data_products[0].state,
+            "Read data product state should match added plan data product state"
+        );
     }
 
     /// Test data_product_read returns error for non-existent data product

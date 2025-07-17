@@ -275,7 +275,11 @@ mod tests {
 
         // Test response from API for Data Products
         let data_products = json_value.object().get("data_products").object_array();
-        assert_eq!(data_products.len(), 2);
+        assert_eq!(
+            data_products.len(),
+            2,
+            "Should have 2 data products in the API response"
+        );
 
         let dp1 = data_products
             .iter()
@@ -325,7 +329,11 @@ mod tests {
 
         // Test response from API for Dependencies
         let dependencies = json_value.object().get("dependencies").object_array();
-        assert_eq!(dependencies.len(), 1);
+        assert_eq!(
+            dependencies.len(),
+            1,
+            "Should have 1 dependency in the API response"
+        );
 
         let dep = dependencies
             .iter()
@@ -806,10 +814,18 @@ mod tests {
         let json_value = test_json.value();
 
         let data_products = json_value.object().get("data_products").object_array();
-        assert_eq!(data_products.len(), 0);
+        assert_eq!(
+            data_products.len(),
+            0,
+            "Empty plan should have 0 data products"
+        );
 
         let dependencies = json_value.object().get("dependencies").object_array();
-        assert_eq!(dependencies.len(), 0);
+        assert_eq!(
+            dependencies.len(),
+            0,
+            "Empty plan should have 0 dependencies"
+        );
     }
 
     /// Test Plan Post - Duplicate Data Product IDs in Payload

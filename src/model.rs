@@ -566,10 +566,20 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(retrieved_plan.dataset, inserted_plan.dataset);
-        assert_eq!(retrieved_plan.dependencies, inserted_plan.dependencies);
+        assert_eq!(
+            retrieved_plan.dataset, inserted_plan.dataset,
+            "Retrieved plan dataset should match inserted plan dataset"
+        );
+        assert_eq!(
+            retrieved_plan.dependencies, inserted_plan.dependencies,
+            "Retrieved plan dependencies should match inserted plan dependencies"
+        );
 
-        assert_eq!(retrieved_plan.data_products.len(), 2);
+        assert_eq!(
+            retrieved_plan.data_products.len(),
+            2,
+            "Retrieved plan should have 2 data products"
+        );
         assert!(
             retrieved_plan
                 .data_products
@@ -622,14 +632,26 @@ mod tests {
                 .await
                 .unwrap();
 
-        assert_eq!(retrieved_data_product, *expected_data_product);
-        assert_eq!(retrieved_data_product.id, expected_data_product.id);
-        assert_eq!(retrieved_data_product.name, expected_data_product.name);
         assert_eq!(
-            retrieved_data_product.compute,
-            expected_data_product.compute
+            retrieved_data_product, *expected_data_product,
+            "Retrieved data product should match expected data product"
         );
-        assert_eq!(retrieved_data_product.state, expected_data_product.state);
+        assert_eq!(
+            retrieved_data_product.id, expected_data_product.id,
+            "Retrieved data product ID should match expected ID"
+        );
+        assert_eq!(
+            retrieved_data_product.name, expected_data_product.name,
+            "Retrieved data product name should match expected name"
+        );
+        assert_eq!(
+            retrieved_data_product.compute, expected_data_product.compute,
+            "Retrieved data product compute should match expected compute"
+        );
+        assert_eq!(
+            retrieved_data_product.state, expected_data_product.state,
+            "Retrieved data product state should match expected state"
+        );
     }
 
     /// Test DataProduct::from_db - Do we get rejected if the data product does not exist?
@@ -693,9 +715,18 @@ mod tests {
             .unwrap();
 
         assert_ne!(data_product.state, old_state);
-        assert_eq!(data_product.state, new_state);
-        assert_eq!(data_product.link, state_param.link);
-        assert_eq!(data_product.passback, state_param.passback);
+        assert_eq!(
+            data_product.state, new_state,
+            "Data product state should be updated to new state"
+        );
+        assert_eq!(
+            data_product.link, state_param.link,
+            "Data product link should match state param link"
+        );
+        assert_eq!(
+            data_product.passback, state_param.passback,
+            "Data product passback should match state param passback"
+        );
     }
 
     /// Test DataProduct::state_update - Do we see an update to the Data Product in the db?
@@ -756,10 +787,22 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.dataset.id, plan_param.dataset.id);
-        assert_eq!(result.dataset.paused, false);
-        assert_eq!(result.dataset.extra, plan_param.dataset.extra);
-        assert_eq!(result.dataset.modified_by, username);
+        assert_eq!(
+            result.dataset.id, plan_param.dataset.id,
+            "Result dataset ID should match plan param dataset ID"
+        );
+        assert_eq!(
+            result.dataset.paused, false,
+            "Result dataset should be unpaused by default"
+        );
+        assert_eq!(
+            result.dataset.extra, plan_param.dataset.extra,
+            "Result dataset extra should match plan param extra"
+        );
+        assert_eq!(
+            result.dataset.modified_by, username,
+            "Result dataset should be modified by the specified user"
+        );
 
         assert_eq!(
             result.dataset,
@@ -834,7 +877,11 @@ mod tests {
 
         let data_product_param = &plan_param.data_products[0];
 
-        assert_eq!(result.data_products.len(), 2);
+        assert_eq!(
+            result.data_products.len(),
+            2,
+            "Plan upsert result should have 2 data products"
+        );
         assert!(result.data_products.contains(&DataProduct {
             id: data_product_param.id,
             compute: data_product_param.compute,
@@ -889,7 +936,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.data_products.len(), 2);
+        assert_eq!(
+            result.data_products.len(),
+            2,
+            "Plan upsert result should have 2 data products"
+        );
         assert!(result.data_products.contains(&DataProduct {
             id: plan_param.data_products[0].id,
             name: "updated_product".to_string(),
@@ -922,7 +973,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.dependencies.len(), 1);
+        assert_eq!(
+            result.dependencies.len(),
+            1,
+            "Plan upsert result should have 1 dependency"
+        );
         assert_eq!(
             result.dependencies[0].parent_id,
             plan_param.dependencies[0].parent_id
@@ -981,7 +1036,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.dependencies.len(), 1);
+        assert_eq!(
+            result.dependencies.len(),
+            1,
+            "Plan upsert result should have 1 dependency"
+        );
         assert_eq!(
             result.dependencies[0].extra,
             Some(json!({"updated":"value"}))
@@ -1006,9 +1065,15 @@ mod tests {
         let plan = create_test_plan();
         let ids = plan.data_product_ids();
 
-        assert_eq!(ids.len(), 2);
-        assert!(ids.contains(&plan.data_products[0].id));
-        assert!(ids.contains(&plan.data_products[1].id));
+        assert_eq!(ids.len(), 2, "Should have 2 data product IDs");
+        assert!(
+            ids.contains(&plan.data_products[0].id),
+            "Should contain first data product ID"
+        );
+        assert!(
+            ids.contains(&plan.data_products[1].id),
+            "Should contain second data product ID"
+        );
     }
 
     /// Test Plan::edges - Do we get all the parent / child data product ids for all dependencies in a plan?
@@ -1017,7 +1082,7 @@ mod tests {
         let plan = create_test_plan();
         let edges = plan.edges();
 
-        assert_eq!(edges.len(), 1);
+        assert_eq!(edges.len(), 1, "Should have 1 dependency edge");
         assert_eq!(
             edges[0],
             (
@@ -1036,13 +1101,20 @@ mod tests {
 
         // Test successful lookup
         let found_dp = plan.data_product(target_id);
-        assert!(found_dp.is_some());
-        assert_eq!(*found_dp.unwrap(), plan.data_products[0]);
+        assert!(found_dp.is_some(), "Should find data product with valid ID");
+        assert_eq!(
+            *found_dp.unwrap(),
+            plan.data_products[0],
+            "Found data product should match expected data product"
+        );
 
         // Test with non-existent id
         let non_existent_id = Uuid::new_v4();
         let not_found_dp = plan.data_product(non_existent_id);
-        assert!(not_found_dp.is_none());
+        assert!(
+            not_found_dp.is_none(),
+            "Should not find data product with invalid ID"
+        );
     }
 
     /// Test Plan::data_product_mut - Do we get a data product in a mutable state if we feed in its id?
@@ -1053,21 +1125,35 @@ mod tests {
 
         // Test successful lookup
         let found_dp = plan.data_product_mut(target_id);
-        assert!(found_dp.is_some());
-        assert_eq!(found_dp.unwrap().id, target_id);
+        assert!(found_dp.is_some(), "Should find data product for mutation");
+        assert_eq!(
+            found_dp.unwrap().id,
+            target_id,
+            "Found data product ID should match target ID"
+        );
 
         // Test mutation
         let dp_mut = plan.data_product_mut(target_id).unwrap();
         dp_mut.name = "modified_name".to_string();
         dp_mut.state = State::Failed;
 
-        assert_eq!(plan.data_products[0].name, "modified_name");
-        assert_eq!(plan.data_products[0].state, State::Failed);
+        assert_eq!(
+            plan.data_products[0].name, "modified_name",
+            "Data product name should be updated after mutation"
+        );
+        assert_eq!(
+            plan.data_products[0].state,
+            State::Failed,
+            "Data product state should be updated to Failed after mutation"
+        );
 
         // Test with non-existent id
         let non_existent_id = Uuid::new_v4();
         let not_found_dp = plan.data_product_mut(non_existent_id);
-        assert!(not_found_dp.is_none());
+        assert!(
+            not_found_dp.is_none(),
+            "Should not find data product with invalid ID for mutation"
+        );
     }
 
     /// Test Plan::to_dag - Can we convert a plan to a dag?
@@ -1076,12 +1162,12 @@ mod tests {
         let plan = create_test_plan();
         let dag_result = plan.to_dag();
 
-        assert!(dag_result.is_ok());
+        assert!(dag_result.is_ok(), "DAG creation should succeed");
         let dag = dag_result.unwrap();
 
         // Check that all data products are in the DAG
-        assert_eq!(dag.node_count(), 2);
-        assert_eq!(dag.edge_count(), 1);
+        assert_eq!(dag.node_count(), 2, "DAG should have 2 nodes");
+        assert_eq!(dag.edge_count(), 1, "DAG should have 1 edge");
     }
 
     /// Test PlanParam::has_dup_data_products - If there are no duplicate data products, do we get None?
@@ -1090,7 +1176,10 @@ mod tests {
         let plan_param = PlanParam::default();
 
         let result = plan_param.has_dup_data_products();
-        assert!(result.is_none());
+        assert!(
+            result.is_none(),
+            "Should return None for non-existent data product ID"
+        );
     }
 
     /// Test PlanParam::has_dup_data_products - If there is a duplicate data product, do we get Some()?
@@ -1109,8 +1198,15 @@ mod tests {
         };
 
         let result = plan_param.has_dup_data_products();
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), plan_param.data_products[0].id);
+        assert!(
+            result.is_some(),
+            "Should return Some for existing data product ID"
+        );
+        assert_eq!(
+            result.unwrap(),
+            plan_param.data_products[0].id,
+            "Should return correct data product ID"
+        );
     }
 
     /// Test PlanParam::has_dup_dependencies - If there are no duplicate dependencies, do we get None?
@@ -1119,7 +1215,10 @@ mod tests {
         let plan_param = PlanParam::default();
 
         let result = plan_param.has_dup_dependencies();
-        assert!(result.is_none());
+        assert!(
+            result.is_none(),
+            "Should return None for non-existent data product name"
+        );
     }
 
     /// Test PlanParam::has_dup_dependencies - If there is a duplicate dependency, do we get Some()?
@@ -1139,7 +1238,10 @@ mod tests {
         };
 
         let result = plan_param.has_dup_dependencies();
-        assert!(result.is_some());
+        assert!(
+            result.is_some(),
+            "Should return Some for existing data product name"
+        );
         assert_eq!(
             result.unwrap(),
             (
@@ -1155,9 +1257,19 @@ mod tests {
         let plan_param = PlanParam::default();
 
         let ids = plan_param.data_product_ids();
-        assert_eq!(ids.len(), 2);
-        assert!(ids.contains(&plan_param.data_products[0].id));
-        assert!(ids.contains(&plan_param.data_products[1].id));
+        assert_eq!(
+            ids.len(),
+            2,
+            "Should have 2 data product IDs from plan param"
+        );
+        assert!(
+            ids.contains(&plan_param.data_products[0].id),
+            "Should contain first data product ID from plan param"
+        );
+        assert!(
+            ids.contains(&plan_param.data_products[1].id),
+            "Should contain second data product ID from plan param"
+        );
     }
 
     /// Test PlanParam::edges - Do we get all the parent / child data product ids for all dependencies in a plan?
@@ -1166,7 +1278,11 @@ mod tests {
         let plan_param = PlanParam::default();
 
         let edges = plan_param.edges();
-        assert_eq!(edges.len(), 1);
+        assert_eq!(
+            edges.len(),
+            1,
+            "Should have 1 dependency edge from plan param"
+        );
         assert_eq!(
             edges[0],
             (
@@ -1198,11 +1314,26 @@ mod tests {
 
         let state_param = StateParam::from(&mut data_product);
 
-        assert_eq!(state_param.id, data_product.id);
-        assert_eq!(state_param.state, data_product.state);
-        assert_eq!(state_param.run_id, data_product.run_id);
-        assert_eq!(state_param.link, data_product.link);
-        assert_eq!(state_param.passback, data_product.passback);
+        assert_eq!(
+            state_param.id, data_product.id,
+            "State param ID should match data product ID"
+        );
+        assert_eq!(
+            state_param.state, data_product.state,
+            "State param state should match data product state"
+        );
+        assert_eq!(
+            state_param.run_id, data_product.run_id,
+            "State param run_id should match data product run_id"
+        );
+        assert_eq!(
+            state_param.link, data_product.link,
+            "State param link should match data product link"
+        );
+        assert_eq!(
+            state_param.passback, data_product.passback,
+            "State param passback should match data product passback"
+        );
     }
     /// Test Plan::paused - Can we pause a plan?
     #[sqlx::test]
@@ -1221,13 +1352,19 @@ mod tests {
             .unwrap();
 
         // Verify initial state (should be false by default)
-        assert_eq!(plan.dataset.paused, false);
+        assert_eq!(
+            plan.dataset.paused, false,
+            "Plan should initially be unpaused"
+        );
 
         // Test: Can we pause a plan?
         let result = plan.paused(&mut tx, true, username, modified_date).await;
 
-        assert!(result.is_ok());
-        assert_eq!(plan.dataset.paused, true);
+        assert!(result.is_ok(), "Plan pause operation should succeed");
+        assert_eq!(
+            plan.dataset.paused, true,
+            "Plan should be paused after calling paused with true"
+        );
     }
 
     /// Test Plan::paused - Can we unpause a plan?
@@ -1250,13 +1387,19 @@ mod tests {
         plan.paused(&mut tx, true, username, modified_date)
             .await
             .unwrap();
-        assert_eq!(plan.dataset.paused, true);
+        assert_eq!(
+            plan.dataset.paused, true,
+            "Plan should be paused after first pause operation"
+        );
 
         // Test: Can we unpause a plan?
         let result = plan.paused(&mut tx, false, username, modified_date).await;
 
-        assert!(result.is_ok());
-        assert_eq!(plan.dataset.paused, false);
+        assert!(result.is_ok(), "Plan unpause operation should succeed");
+        assert_eq!(
+            plan.dataset.paused, false,
+            "Plan should be unpaused after calling paused with false"
+        );
     }
 
     /// Test Plan::paused - Do we get an error when setting pause state to current state?
@@ -1276,12 +1419,18 @@ mod tests {
             .unwrap();
 
         // Verify initial state (should be false by default)
-        assert_eq!(plan.dataset.paused, false);
+        assert_eq!(
+            plan.dataset.paused, false,
+            "Plan should initially be unpaused for error test"
+        );
 
         // Test: Do we get an error when trying to set pause state to current state?
         let result = plan.paused(&mut tx, false, username, modified_date).await;
 
-        assert!(result.is_err());
+        assert!(
+            result.is_err(),
+            "Plan pause operation should fail with invalid dataset ID"
+        );
         assert!(matches!(
             result.unwrap_err(),
             Error::Pause(dataset_id, false) if dataset_id == plan.dataset.id
@@ -1293,7 +1442,10 @@ mod tests {
             .unwrap();
 
         let result = plan.paused(&mut tx, true, username, modified_date).await;
-        assert!(result.is_err());
+        assert!(
+            result.is_err(),
+            "Plan pause operation should fail with mismatched dataset ID"
+        );
         assert!(matches!(
             result.unwrap_err(),
             Error::Pause(dataset_id, true) if dataset_id == plan.dataset.id

@@ -83,7 +83,10 @@ pub mod tests {
             .select(&link_selector)
             .find(|link| link.attr("href") == Some("/assets/prism/prism.css"));
 
-        assert!(prism_css_link.is_some(), "Prism.js CSS should be present in head");
+        assert!(
+            prism_css_link.is_some(),
+            "Prism.js CSS should be present in head"
+        );
         let link = prism_css_link.unwrap();
         assert_eq!(link.attr("type"), Some("text/css"));
         assert_eq!(link.attr("href"), Some("/assets/prism/prism.css"));
@@ -99,9 +102,15 @@ pub mod tests {
             .select(&script_selector)
             .find(|script| script.attr("src") == Some("/assets/prism/prism.js"));
 
-        assert!(prism_js_script.is_some(), "Prism.js core script should be present in head");
+        assert!(
+            prism_js_script.is_some(),
+            "Prism.js core script should be present in head"
+        );
         let script = prism_js_script.unwrap();
-        assert!(script.attr("defer").is_some(), "Prism.js script should have defer attribute");
+        assert!(
+            script.attr("defer").is_some(),
+            "Prism.js script should have defer attribute"
+        );
         assert_eq!(script.attr("src"), Some("/assets/prism/prism.js"));
     }
 
@@ -115,9 +124,15 @@ pub mod tests {
             .select(&script_selector)
             .find(|script| script.attr("src") == Some("/assets/prism/prism-json.js"));
 
-        assert!(prism_json_script.is_some(), "Prism.js JSON plugin should be present in head");
+        assert!(
+            prism_json_script.is_some(),
+            "Prism.js JSON plugin should be present in head"
+        );
         let script = prism_json_script.unwrap();
-        assert!(script.attr("defer").is_some(), "Prism.js JSON script should have defer attribute");
+        assert!(
+            script.attr("defer").is_some(),
+            "Prism.js JSON script should have defer attribute"
+        );
         assert_eq!(script.attr("src"), Some("/assets/prism/prism-json.js"));
     }
 
@@ -134,7 +149,11 @@ pub mod tests {
         let li_elements: Vec<_> = document.select(&li_selector).collect();
 
         // Should have exactly 2 li elements (Search and Plan)
-        assert_eq!(li_elements.len(), 2);
+        assert_eq!(
+            li_elements.len(),
+            2,
+            "Breadcrumb should contain 2 list items"
+        );
 
         // Second li should contain Plan link pointing to the UUID
         let a_selector = Selector::parse("a").unwrap();
@@ -158,6 +177,10 @@ pub mod tests {
         let li_elements: Vec<_> = document.select(&li_selector).collect();
 
         // Should have exactly 1 li element (only Search, no Plan)
-        assert_eq!(li_elements.len(), 1);
+        assert_eq!(
+            li_elements.len(),
+            1,
+            "Single-item breadcrumb should contain 1 list item"
+        );
     }
 }
