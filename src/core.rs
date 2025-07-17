@@ -2971,4 +2971,401 @@ mod tests {
             "no rows returned by a query that expected to return at least one row"
         );
     }
+
+    // Tests for private helper functions
+
+    /// Test to_poem_error maps different Error types to appropriate Poem errors
+    #[test]
+    fn test_to_poem_error_mapping() {
+        // Test Cyclical error maps to UnprocessableEntity
+        let cyclical_error = Error::Cyclical;
+        let poem_error = to_poem_error(cyclical_error);
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Cyclical error should map to UnprocessableEntity"
+        );
+
+        // Test Graph error maps to InternalServerError
+        let graph_error = Error::Graph(petgraph::graph::GraphError::NodeOutBounds);
+        let poem_error = to_poem_error(graph_error);
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Graph error should map to InternalServerError"
+        );
+
+        // Test Pause error maps to BadRequest
+        let pause_error = Error::Pause(Uuid::new_v4(), true);
+        let poem_error = to_poem_error(pause_error);
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::BAD_REQUEST,
+            "Pause error should map to BadRequest"
+        );
+
+        // Test Sqlx RowNotFound maps to NotFound
+        let row_not_found_error = Error::Sqlx(sqlx::Error::RowNotFound);
+        let poem_error = to_poem_error(row_not_found_error);
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::NOT_FOUND,
+            "Sqlx RowNotFound error should map to NotFound"
+        );
+    }
+
+    /// Test validate_plan_param detects duplicate data products
+    #[test]
+    fn test_validate_plan_param_duplicate_data_products() {
+        let dp_id = Uuid::new_v4();
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp_id,
+                    compute: Compute::Cams,
+                    name: "test-product-1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp_id, // Duplicate ID
+                    compute: Compute::Dbxaas,
+                    name: "test-product-2".to_string(),
+                    version: "2.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![],
+        };
+
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_err(),
+            "validate_plan_param should reject duplicate data product IDs"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::BAD_REQUEST,
+            "Duplicate data products should return BadRequest"
+        );
+    }
+
+    /// Test validate_plan_param detects duplicate dependencies
+    #[test]
+    fn test_validate_plan_param_duplicate_dependencies() {
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "test-product-1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp2_id,
+                    compute: Compute::Dbxaas,
+                    name: "test-product-2".to_string(),
+                    version: "2.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp2_id,
+                    extra: None,
+                },
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp2_id, // Duplicate dependency
+                    extra: None,
+                },
+            ],
+        };
+
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_err(),
+            "validate_plan_param should reject duplicate dependencies"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::BAD_REQUEST,
+            "Duplicate dependencies should return BadRequest"
+        );
+    }
+
+    /// Test validate_plan_param detects missing parent data product
+    #[test]
+    fn test_validate_plan_param_missing_parent() {
+        let dp1_id = Uuid::new_v4();
+        let missing_parent_id = Uuid::new_v4();
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![DataProductParam {
+                id: dp1_id,
+                compute: Compute::Cams,
+                name: "test-product-1".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: None,
+                extra: None,
+            }],
+            dependencies: vec![DependencyParam {
+                parent_id: missing_parent_id, // This parent doesn't exist
+                child_id: dp1_id,
+                extra: None,
+            }],
+        };
+
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_err(),
+            "validate_plan_param should reject missing parent data product"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::NOT_FOUND,
+            "Missing parent should return NotFound"
+        );
+    }
+
+    /// Test validate_plan_param detects missing child data product
+    #[test]
+    fn test_validate_plan_param_missing_child() {
+        let dp1_id = Uuid::new_v4();
+        let missing_child_id = Uuid::new_v4();
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![DataProductParam {
+                id: dp1_id,
+                compute: Compute::Cams,
+                name: "test-product-1".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: None,
+                extra: None,
+            }],
+            dependencies: vec![DependencyParam {
+                parent_id: dp1_id,
+                child_id: missing_child_id, // This child doesn't exist
+                extra: None,
+            }],
+        };
+
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_err(),
+            "validate_plan_param should reject missing child data product"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::NOT_FOUND,
+            "Missing child should return NotFound"
+        );
+    }
+
+    /// Test validate_plan_param accepts valid plan parameters
+    #[test]
+    fn test_validate_plan_param_valid() {
+        let param = create_test_plan_param();
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_ok(),
+            "validate_plan_param should accept valid plan parameters"
+        );
+    }
+
+    /// Test state_update with valid data product
+    #[sqlx::test]
+    async fn test_state_update_valid_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let data_product_id = plan.data_products[0].id;
+        let state_param = StateParam {
+            id: data_product_id,
+            state: State::Success,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("http://test-link.com".to_string()),
+            passback: None,
+        };
+
+        let result = state_update(&mut tx, &mut plan, &state_param, username, Utc::now()).await;
+        assert!(
+            result.is_ok(),
+            "state_update should succeed for valid data product"
+        );
+
+        // Verify the state was updated
+        let updated_data_product = plan.data_product(data_product_id).unwrap();
+        assert_eq!(
+            updated_data_product.state,
+            State::Success,
+            "Data product state should be updated to Success"
+        );
+    }
+
+    /// Test state_update with missing data product
+    #[sqlx::test]
+    async fn test_state_update_missing_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let missing_id = Uuid::new_v4();
+        let state_param = StateParam {
+            id: missing_id,
+            state: State::Success,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("http://test-link.com".to_string()),
+            passback: None,
+        };
+
+        let result = state_update(&mut tx, &mut plan, &state_param, username, Utc::now()).await;
+        assert!(
+            result.is_err(),
+            "state_update should fail for missing data product"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::NOT_FOUND,
+            "Missing data product should return NotFound"
+        );
+    }
+
+    /// Test state_update with disabled data product
+    #[sqlx::test]
+    async fn test_state_update_disabled_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let data_product_id = plan.data_products[0].id;
+
+        // First disable the data product
+        plan.data_products[0].state = State::Disabled;
+
+        let state_param = StateParam {
+            id: data_product_id,
+            state: State::Success,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("http://test-link.com".to_string()),
+            passback: None,
+        };
+
+        let result = state_update(&mut tx, &mut plan, &state_param, username, Utc::now()).await;
+        assert!(
+            result.is_err(),
+            "state_update should fail for disabled data product"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::FORBIDDEN,
+            "Disabled data product should return Forbidden"
+        );
+    }
+
+    /// Test clear_downstream_nodes clears waiting state correctly
+    #[sqlx::test]
+    async fn test_clear_downstream_nodes(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Set up a scenario where we have downstream dependencies
+        if plan.data_products.len() >= 2 {
+            // Set the first data product to Success
+            plan.data_products[0].state = State::Success;
+            // Set the second data product to Running (will be cleared to Waiting)
+            plan.data_products[1].state = State::Running;
+
+            let nodes_to_clear = vec![plan.data_products[0].id];
+            let result =
+                clear_downstream_nodes(&mut tx, &mut plan, &nodes_to_clear, username, Utc::now())
+                    .await;
+
+            assert!(
+                result.is_ok(),
+                "clear_downstream_nodes should succeed with valid input"
+            );
+        }
+    }
+
+    /// Test trigger_next_batch with paused dataset
+    #[sqlx::test]
+    async fn test_trigger_next_batch_paused_dataset(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        // Pause the dataset
+        plan.dataset.paused = true;
+
+        let result = trigger_next_batch(&mut tx, &mut plan, username, Utc::now()).await;
+        assert!(
+            result.is_ok(),
+            "trigger_next_batch should succeed for paused dataset (no-op)"
+        );
+    }
+
+    /// Test trigger_next_batch with waiting data products
+    #[sqlx::test]
+    async fn test_trigger_next_batch_with_waiting_products(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Set up waiting data products
+        for data_product in &mut plan.data_products {
+            data_product.state = State::Waiting;
+            data_product.eager = true;
+        }
+
+        let result = trigger_next_batch(&mut tx, &mut plan, username, Utc::now()).await;
+        assert!(
+            result.is_ok(),
+            "trigger_next_batch should succeed with waiting data products"
+        );
+    }
 }

@@ -183,4 +183,107 @@ pub mod tests {
             "Single-item breadcrumb should contain 1 list item"
         );
     }
+
+    /// Test page_title generates proper h1 element with title
+    #[test]
+    fn test_page_title_basic() {
+        let title = "Dashboard";
+        let page_title_markup = page_title(title);
+        let page_title_html = page_title_markup.into_string();
+        let document = Html::parse_fragment(&page_title_html);
+
+        // Should have h1 element
+        let h1_selector = Selector::parse("h1").unwrap();
+        let h1_element = document.select(&h1_selector).next().unwrap();
+        assert_eq!(
+            h1_element.inner_html(),
+            "Fletcher: Dashboard",
+            "Page title should include 'Fletcher: ' prefix and the provided title"
+        );
+    }
+
+    /// Test page_title with empty string
+    #[test]
+    fn test_page_title_empty_string() {
+        let title = "";
+        let page_title_markup = page_title(title);
+        let page_title_html = page_title_markup.into_string();
+        let document = Html::parse_fragment(&page_title_html);
+
+        let h1_selector = Selector::parse("h1").unwrap();
+        let h1_element = document.select(&h1_selector).next().unwrap();
+        assert_eq!(
+            h1_element.inner_html(),
+            "Fletcher: ",
+            "Page title should handle empty title gracefully"
+        );
+    }
+
+    /// Test page_title with special characters
+    #[test]
+    fn test_page_title_special_characters() {
+        let title = "Data & Analytics <Report>";
+        let page_title_markup = page_title(title);
+        let page_title_html = page_title_markup.into_string();
+        let document = Html::parse_fragment(&page_title_html);
+
+        let h1_selector = Selector::parse("h1").unwrap();
+        let h1_element = document.select(&h1_selector).next().unwrap();
+        assert_eq!(
+            h1_element.inner_html(),
+            "Fletcher: Data &amp; Analytics &lt;Report&gt;",
+            "Page title should properly escape HTML special characters"
+        );
+    }
+
+    /// Test page_title with long title
+    #[test]
+    fn test_page_title_long_title() {
+        let title = "This is a very long page title that should still be handled correctly by the page_title function";
+        let page_title_markup = page_title(title);
+        let page_title_html = page_title_markup.into_string();
+        let document = Html::parse_fragment(&page_title_html);
+
+        let h1_selector = Selector::parse("h1").unwrap();
+        let h1_element = document.select(&h1_selector).next().unwrap();
+        let expected = format!("Fletcher: {title}");
+        assert_eq!(
+            h1_element.inner_html(),
+            expected,
+            "Page title should handle long titles correctly"
+        );
+    }
+
+    /// Test page_title with numeric and mixed content
+    #[test]
+    fn test_page_title_mixed_content() {
+        let title = "Plan 42 - Version 1.2.3";
+        let page_title_markup = page_title(title);
+        let page_title_html = page_title_markup.into_string();
+        let document = Html::parse_fragment(&page_title_html);
+
+        let h1_selector = Selector::parse("h1").unwrap();
+        let h1_element = document.select(&h1_selector).next().unwrap();
+        assert_eq!(
+            h1_element.inner_html(),
+            "Fletcher: Plan 42 - Version 1.2.3",
+            "Page title should handle mixed alphanumeric content correctly"
+        );
+    }
+
+    /// Test page_title always generates exactly one h1 element
+    #[test]
+    fn test_page_title_single_h1() {
+        let title = "Test Title";
+        let page_title_markup = page_title(title);
+        let page_title_html = page_title_markup.into_string();
+        let document = Html::parse_fragment(&page_title_html);
+
+        let h1_selector = Selector::parse("h1").unwrap();
+        let h1_count = document.select(&h1_selector).count();
+        assert_eq!(
+            h1_count, 1,
+            "Page title should generate exactly one h1 element"
+        );
+    }
 }
