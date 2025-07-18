@@ -15,7 +15,7 @@ const ASCII_404: &str = r"
                                            /____/
 ";
 
-const ASCII_COW_SAY: &str = r#"
+const COW_SAY_404: &str = r#"
  ___________________________________________________________
 / What are you...                                           \
 \ There's no Mars bars down here, what are you looking for? /
@@ -36,7 +36,7 @@ const ASCII_COW_SAY: &str = r#"
                      |_____|        |_____|         ~ - . _ _ _ _ _>
 "#;
 
-/// 404 page
+/// 404 Error page
 pub async fn not_found_404(_: NotFoundError) -> Response {
     Response::builder()
         .status(StatusCode::NOT_FOUND)
@@ -50,7 +50,7 @@ pub async fn not_found_404(_: NotFoundError) -> Response {
                 &None,
                 html! {
                     pre { (ASCII_404) }
-                    pre { (ASCII_COW_SAY) }
+                    pre { (COW_SAY_404) }
                 },
             )
             .into_string(),

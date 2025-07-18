@@ -8,7 +8,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use petgraph::graph::DiGraph;
-use poem::error::{BadRequest, Forbidden, InternalServerError, NotFound, UnprocessableEntity};
+use poem::error::InternalServerError;
 use sqlx::{Postgres, Transaction};
 use std::collections::HashSet;
 use tracing::warn;
@@ -16,36 +16,16 @@ use tracing::warn;
 /// How much do we want to paginate by
 const PAGE_SIZE: u32 = 50;
 
-/// Map Crate Error to Poem Error
-fn to_poem_error(err: Error) -> poem::Error {
-    match err {
-        // Graph is cyclical
-        Error::Cyclical => UnprocessableEntity(err),
-        // Failed to build graph
-        Error::Graph(error) => InternalServerError(error),
-        // Already desired pause state
-        Error::Pause(_, _) => BadRequest(err),
-        // Row not found
-        Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
-        // We hit a db constraint
-        Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some() => BadRequest(err),
-        // Unknown error
-        error => InternalServerError(error),
-    }
-}
-
 /// Validate a PlanParam from the user
 fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<()> {
     // Does Plan have any dup data products?
     if let Some(data_product_id) = param.has_dup_data_products() {
-        return Err(BadRequest(Error::Duplicate(data_product_id)));
+        return Err(Error::Duplicate(data_product_id).into_poem_error());
     }
 
     // Does Plan have any dup dependencies?
     if let Some((parent_id, child_id)) = param.has_dup_dependencies() {
-        return Err(BadRequest(Error::DuplicateDependencies(
-            parent_id, child_id,
-        )));
+        return Err(Error::DuplicateDependencies(parent_id, child_id).into_poem_error());
     }
 
     // Get a list of all Data Product IDs
@@ -69,7 +49,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&parent_id) {
                 Ok(())
             } else {
-                Err(NotFound(Error::Missing(parent_id)))
+                Err(Error::Missing(parent_id).into_poem_error())
             }
         })?;
 
@@ -81,7 +61,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&child_id) {
                 Ok(())
             } else {
-                Err(NotFound(Error::Missing(child_id)))
+                Err(Error::Missing(child_id).into_poem_error())
             }
         })?;
 
@@ -95,7 +75,8 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
     }
 
     // If you take all our data products and map them to a graph are they a valid dag?
-    DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges).map_err(to_poem_error)?;
+    DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges)
+        .map_err(|e| e.into_poem_error())?;
 
     Ok(())
 }
@@ -113,7 +94,7 @@ pub async fn plan_add(
     let current_plan: Option<Plan> = match wip_plan {
         Ok(plan) => Some(plan),
         Err(Error::Sqlx(sqlx::Error::RowNotFound)) => None,
-        Err(err) => return Err(InternalServerError(err)),
+        Err(err) => return Err(err.into_poem_error()),
     };
 
     // Validate to make sure the user submitted valid parameters
@@ -125,7 +106,7 @@ pub async fn plan_add(
     let mut plan: Plan = param
         .upsert(tx, username, modified_date)
         .await
-        .map_err(to_poem_error)?;
+        .map_err(|e| e.into_poem_error())?;
 
     // Triger the next batch of data products
     trigger_next_batch(tx, &mut plan, username, modified_date).await?;
@@ -135,7 +116,7 @@ pub async fn plan_add(
 
 /// Read a Plan Dag from the DB
 pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> poem::Result<Plan> {
-    Plan::from_db(tx, id).await.map_err(to_poem_error)
+    Plan::from_db(tx, id).await.map_err(|e| e.into_poem_error())
 }
 
 /// Set the pause state of a plan
@@ -146,7 +127,9 @@ pub async fn plan_pause_edit(
     username: &str,
 ) -> poem::Result<Plan> {
     // Pull the current plan from the DB
-    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id)
+        .await
+        .map_err(|e| e.into_poem_error())?;
 
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
@@ -154,7 +137,7 @@ pub async fn plan_pause_edit(
     // Set the new pause state
     plan.paused(tx, paused, username, modified_date)
         .await
-        .map_err(to_poem_error)?;
+        .map_err(|e| e.into_poem_error())?;
 
     // If unpaused, lets run the next batch
     if !paused {
@@ -172,7 +155,7 @@ pub async fn data_product_read(
 ) -> poem::Result<DataProduct> {
     DataProduct::from_db(tx, dataset_id, data_product_id)
         .await
-        .map_err(to_poem_error)
+        .map_err(|e| e.into_poem_error())
 }
 
 /// Update the state of our data product
@@ -189,18 +172,18 @@ async fn state_update(
     // Pull our Data Product
     let data_product: &mut DataProduct = plan
         .data_product_mut(state.id)
-        .ok_or(NotFound(Error::Missing(state.id)))?;
+        .ok_or(Error::Missing(state.id).into_poem_error())?;
 
     // Is the data product locked?
     if data_product.state == State::Disabled {
-        return Err(Forbidden(Error::Disabled(data_product.id)));
+        return Err(Error::Disabled(data_product.id).into_poem_error());
     }
 
     // Update our Data Product State
     data_product
         .state_update(tx, dataset_id, state, username, modified_date)
         .await
-        .map_err(to_poem_error)?;
+        .map_err(|e| e.into_poem_error())?;
 
     Ok(())
 }
@@ -217,7 +200,7 @@ async fn clear_downstream_nodes(
     let dataset_id: DatasetId = plan.dataset.id;
 
     // Generate Dag representation of the plan
-    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
+    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(|e| e.into_poem_error())?;
 
     // What are all the downstream nodes of our updated states?
     let mut downstream_ids = HashSet::<DataProductId>::new();
@@ -251,7 +234,7 @@ async fn clear_downstream_nodes(
         data_product
             .state_update(tx, dataset_id, &new_state, username, modified_date)
             .await
-            .map_err(to_poem_error)?;
+            .map_err(|e| e.into_poem_error())?;
     }
 
     Ok(())
@@ -286,7 +269,7 @@ async fn trigger_next_batch(
         .collect();
 
     // Generate Dag representation of the plan (Disabled nodes are not part of the dag.)
-    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
+    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(|e| e.into_poem_error())?;
 
     // Check each data product's parents to see if any of them are blocking
     for waiting_id in waiting_ids {
@@ -321,7 +304,7 @@ async fn trigger_next_batch(
             data_product
                 .state_update(tx, dataset_id, &new_state, username, modified_date)
                 .await
-                .map_err(to_poem_error)?;
+                .map_err(|e| e.into_poem_error())?;
         }
     }
 
@@ -344,12 +327,14 @@ pub async fn states_edit(
             state.state,
             State::Disabled | State::Queued | State::Waiting
         ) {
-            return Err(BadRequest(Error::BadState(state.id, state.state)));
+            return Err(Error::BadState(state.id, state.state).into_poem_error());
         }
     }
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id)
+        .await
+        .map_err(|e| e.into_poem_error())?;
 
     // Apply our updates to the data products
     for state in states {
@@ -377,14 +362,16 @@ pub async fn clear_edit(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id)
+        .await
+        .map_err(|e| e.into_poem_error())?;
 
     // Clear the data products
     for id in data_product_ids {
         // Pull Data Product of interest
         let data_product: &DataProduct = plan
             .data_product(*id)
-            .ok_or(NotFound(Error::Missing(*id)))?;
+            .ok_or(Error::Missing(*id).into_poem_error())?;
 
         // Build new cleared state
         let state = StateParam {
@@ -416,13 +403,15 @@ pub async fn disable_drop(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id)
+        .await
+        .map_err(|e| e.into_poem_error())?;
 
     for id in data_product_ids {
         // Pull the Data Product we want
         let data_product: &DataProduct = plan
             .data_product(*id)
-            .ok_or(NotFound(Error::Missing(*id)))?;
+            .ok_or(Error::Missing(*id).into_poem_error())?;
 
         // Get the new state params for the selected data product by using the old state params.
         let state = StateParam {
@@ -452,7 +441,7 @@ pub async fn plan_search_read(
     // Pull the Systems
     search_plans_select(tx, search_by, PAGE_SIZE, offset)
         .await
-        .map_err(to_poem_error)
+        .map_err(|e| e.into_poem_error())
 }
 
 #[cfg(test)]
@@ -2973,46 +2962,6 @@ mod tests {
     }
 
     // Tests for private helper functions
-
-    /// Test to_poem_error maps different Error types to appropriate Poem errors
-    #[test]
-    fn test_to_poem_error_mapping() {
-        // Test Cyclical error maps to UnprocessableEntity
-        let cyclical_error = Error::Cyclical;
-        let poem_error = to_poem_error(cyclical_error);
-        assert_eq!(
-            poem_error.status(),
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Cyclical error should map to UnprocessableEntity"
-        );
-
-        // Test Graph error maps to InternalServerError
-        let graph_error = Error::Graph(petgraph::graph::GraphError::NodeOutBounds);
-        let poem_error = to_poem_error(graph_error);
-        assert_eq!(
-            poem_error.status(),
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Graph error should map to InternalServerError"
-        );
-
-        // Test Pause error maps to BadRequest
-        let pause_error = Error::Pause(Uuid::new_v4(), true);
-        let poem_error = to_poem_error(pause_error);
-        assert_eq!(
-            poem_error.status(),
-            StatusCode::BAD_REQUEST,
-            "Pause error should map to BadRequest"
-        );
-
-        // Test Sqlx RowNotFound maps to NotFound
-        let row_not_found_error = Error::Sqlx(sqlx::Error::RowNotFound);
-        let poem_error = to_poem_error(row_not_found_error);
-        assert_eq!(
-            poem_error.status(),
-            StatusCode::NOT_FOUND,
-            "Sqlx RowNotFound error should map to NotFound"
-        );
-    }
 
     /// Test validate_plan_param detects duplicate data products
     #[test]
