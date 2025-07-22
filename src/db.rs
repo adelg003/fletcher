@@ -2,7 +2,7 @@ use crate::{
     error::Result,
     model::{
         Compute, DataProduct, DataProductId, DataProductParam, Dataset, DatasetId, DatasetParam,
-        Dependency, DependencyParam, Search, State, StateParam,
+        Dependency, DependencyParam, SearchRow, State, StateParam,
     },
 };
 use chrono::{DateTime, Utc};
@@ -398,13 +398,13 @@ pub async fn search_plans_select(
     search_by: &str,
     limit: u32,
     offset: u32,
-) -> Result<Vec<Search>> {
+) -> Result<Vec<SearchRow>> {
     // Format search_by so it supports SQL wildcars while allowing for save SQL preperation.
     let search_by: String = format!("%{search_by}%");
 
     // Pull all datasets that meet our query
     let rows = query_as!(
-        Search,
+        SearchRow,
         "SELECT
             ds.dataset_id,
             GREATEST(

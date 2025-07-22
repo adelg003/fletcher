@@ -1,4 +1,4 @@
-use crate::{core::plan_search_read, model::Search};
+use crate::{core::plan_search_read, model::SearchReturn};
 use maud::{Markup, html};
 use poem::{
     Result,
@@ -16,39 +16,27 @@ pub async fn plan_search_component(
     page: u32,
 ) -> Result<Markup> {
     // Search for anything that meets our criteria
-    let plans: Vec<Search> = plan_search_read(tx, search_by, page).await?;
-
-    // Page number for the next page if it is valid
-    let maybe_next_page: u32 = page.saturating_add(1);
-
-    // More Systems on next page?
-    let more_plans: Vec<Search> = plan_search_read(tx, search_by, maybe_next_page).await?;
-
-    let next_page: Option<u32> = if more_plans.is_empty() {
-        None
-    } else {
-        Some(maybe_next_page)
-    };
+    let search: SearchReturn = plan_search_read(tx, search_by, page).await?;
 
     Ok(html! {
         // One Row per Plan returned
-        @for plan in plans {
+        @for row in search.rows {
             // Pre-compute / format some values
-            @let modified_date: String = match plan.modified_date {
+            @let modified_date: String = match row.modified_date {
                 Some(modified_date) => modified_date.to_string(),
                 None => "".to_string()
             };
 
             tr
-                id={ "row_" (plan.dataset_id) }
+                id={ "row_" (row.dataset_id) }
                 class="hover:bg-base-300 cursor-pointer animate-fade-up"
-                onclick={ "window.location='/plan/" (plan.dataset_id) "';" } {
-                td { (plan.dataset_id) }
+                onclick={ "window.location='/plan/" (row.dataset_id) "';" } {
+                td { (row.dataset_id) }
                 td { (modified_date) }
             }
         }
         // Pagination Placeholder
-        @if let Some(next_page) = next_page {
+        @if let Some(next_page) = search.next_page {
             tr
                 id="search_pagination"
                 hx-get={ "/component/plan_search?search_by=" (search_by) r"&page=" (next_page) }

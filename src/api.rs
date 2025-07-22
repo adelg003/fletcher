@@ -3,7 +3,7 @@ use crate::{
         clear_edit, data_product_read, disable_drop, plan_add, plan_pause_edit, plan_read,
         plan_search_read, states_edit,
     },
-    model::{DataProduct, DataProductId, DatasetId, Plan, PlanParam, Search, StateParam},
+    model::{DataProduct, DataProductId, DatasetId, Plan, PlanParam, SearchReturn, StateParam},
 };
 use poem::{error::InternalServerError, web::Data};
 use poem_openapi::{
@@ -71,17 +71,17 @@ impl Api {
         Data(pool): Data<&PgPool>,
         Query(search_by): Query<String>,
         Query(page): Query<u32>,
-    ) -> poem::Result<Json<Vec<Search>>> {
+    ) -> poem::Result<Json<SearchReturn>> {
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Search for plans
-        let rows: Vec<Search> = plan_search_read(&mut tx, &search_by, page).await?;
+        let search: SearchReturn = plan_search_read(&mut tx, &search_by, page).await?;
 
         // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
 
-        Ok(Json(rows))
+        Ok(Json(search))
     }
 
     /// Pause a plan
@@ -1454,7 +1454,8 @@ mod tests {
         let json_value = test_json.value();
 
         // Verify we get back search results
-        let results = json_value.array();
+        let search_return = json_value.object();
+        let results = search_return.get("rows").array();
         assert!(!results.is_empty(), "Search results should not be empty");
 
         // Verify the structure of the search results
@@ -1485,7 +1486,8 @@ mod tests {
         let json_value = test_json.value();
 
         // Verify empty results
-        let results = json_value.array();
+        let search_return = json_value.object();
+        let results = search_return.get("rows").array();
         assert!(
             results.is_empty(),
             "Search results should be empty for non-existent search term"
@@ -1547,10 +1549,12 @@ mod tests {
 
         // Both pages should return successfully (specific result validation depends on implementation)
         let page_1_json = response_page_1.json().await;
-        let page_1_results = page_1_json.value().array();
+        let page_1_search_return = page_1_json.value().object();
+        let page_1_results = page_1_search_return.get("rows").array();
 
         let page_2_json = response_page_2.json().await;
-        let page_2_results = page_2_json.value().array();
+        let page_2_search_return = page_2_json.value().object();
+        let page_2_results = page_2_search_return.get("rows").array();
 
         // At least one page should have results
         assert!(
@@ -1634,7 +1638,8 @@ mod tests {
 
         let test_json = response.json().await;
         let json_value = test_json.value();
-        let results = json_value.array();
+        let search_return = json_value.object();
+        let results = search_return.get("rows").array();
 
         // Empty search term should return empty results
         results.assert_is_empty();

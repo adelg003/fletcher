@@ -403,11 +403,18 @@ pub struct DependencyParam {
     pub extra: Option<Value>,
 }
 
-/// Search return
+/// Search row
 #[derive(Object)]
-pub struct Search {
+pub struct SearchRow {
     pub dataset_id: DatasetId,
     pub modified_date: Option<DateTime<Utc>>,
+}
+
+/// Search return
+#[derive(Object)]
+pub struct SearchReturn {
+    pub rows: Vec<SearchRow>,
+    pub next_page: Option<u32>,
 }
 
 #[cfg(test)]

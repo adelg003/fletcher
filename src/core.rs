@@ -3,7 +3,8 @@ use crate::{
     db::search_plans_select,
     error::Error,
     model::{
-        DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, Search, State, StateParam,
+        DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, SearchReturn, SearchRow,
+        State, StateParam,
     },
 };
 use chrono::{DateTime, Utc};
@@ -434,14 +435,30 @@ pub async fn plan_search_read(
     tx: &mut Transaction<'_, Postgres>,
     search_by: &str,
     page: u32,
-) -> poem::Result<Vec<Search>> {
+) -> poem::Result<SearchReturn> {
     // Compute offset
     let offset: u32 = page.saturating_mul(PAGE_SIZE);
 
-    // Pull the Systems
-    search_plans_select(tx, search_by, PAGE_SIZE, offset)
-        .await
-        .map_err(|e| e.into_poem_error())
+    // Fetch one extra item to check if there's a next page
+    let mut rows: Vec<SearchRow> =
+        search_plans_select(tx, search_by, PAGE_SIZE.saturating_add(1), offset)
+            .await
+            .map_err(|e| e.into_poem_error())?;
+
+    // PAGE_SIZE as usize
+    let page_size: usize = PAGE_SIZE.try_into().map_err(InternalServerError)?;
+
+    // Check if we have more than the page size
+    let next_page: Option<u32> = if rows.len() > page_size {
+        Some(page.saturating_add(1))
+    } else {
+        None
+    };
+
+    // Truncate to page size if we have extra
+    rows.truncate(page_size);
+
+    Ok(SearchReturn { rows, next_page })
 }
 
 #[cfg(test)]
@@ -2634,10 +2651,10 @@ mod tests {
 
         let search_results = result.unwrap();
         // Should return at least 2 results (test-dataset-alpha and test-dataset-beta)
-        assert!(search_results.len() >= 2);
+        assert!(search_results.rows.len() >= 2);
 
         // Verify that the datasets we created are in the results
-        let result_ids: Vec<_> = search_results.iter().map(|s| s.dataset_id).collect();
+        let result_ids: Vec<_> = search_results.rows.iter().map(|s| s.dataset_id).collect();
         assert!(result_ids.contains(&param1.dataset.id));
         assert!(result_ids.contains(&param2.dataset.id));
     }
@@ -2659,7 +2676,7 @@ mod tests {
         assert!(result.is_ok());
 
         let search_results = result.unwrap();
-        assert!(search_results.is_empty());
+        assert!(search_results.rows.is_empty());
     }
 
     /// Test plan_search_read pagination logic
@@ -2682,23 +2699,27 @@ mod tests {
         let result = plan_search_read(&mut tx, search_term, 0).await;
         assert!(result.is_ok());
         let page_0_results = result.unwrap();
-        assert_eq!(page_0_results.len(), 50); // PAGE_SIZE is 50
+        assert_eq!(page_0_results.rows.len(), 50); // PAGE_SIZE is 50
+        assert!(page_0_results.next_page.is_some()); // Should have next page
+        assert_eq!(page_0_results.next_page, Some(1)); // Next page should be 1
 
         // Test second page (page 1)
         let result = plan_search_read(&mut tx, search_term, 1).await;
         assert!(result.is_ok());
         let page_1_results = result.unwrap();
-        assert_eq!(page_1_results.len(), 10); // Remaining 10 results
+        assert_eq!(page_1_results.rows.len(), 10); // Remaining 10 results
+        assert!(page_1_results.next_page.is_none()); // Should not have next page
 
         // Test third page (page 2) - should be empty
         let result = plan_search_read(&mut tx, search_term, 2).await;
         assert!(result.is_ok());
         let page_2_results = result.unwrap();
-        assert!(page_2_results.is_empty());
+        assert!(page_2_results.rows.is_empty());
+        assert!(page_2_results.next_page.is_none()); // Should not have next page
 
         // Verify results are different between pages
-        let page_0_ids: Vec<_> = page_0_results.iter().map(|s| s.dataset_id).collect();
-        let page_1_ids: Vec<_> = page_1_results.iter().map(|s| s.dataset_id).collect();
+        let page_0_ids: Vec<_> = page_0_results.rows.iter().map(|s| s.dataset_id).collect();
+        let page_1_ids: Vec<_> = page_1_results.rows.iter().map(|s| s.dataset_id).collect();
         assert!(page_0_ids.iter().all(|id| !page_1_ids.contains(id)));
     }
 
@@ -2717,15 +2738,25 @@ mod tests {
         let result = plan_search_read(&mut tx, "mixedcase", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(!results.is_empty());
-        assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
+        assert!(!results.rows.is_empty());
+        assert!(
+            results
+                .rows
+                .iter()
+                .any(|s| s.dataset_id == param.dataset.id)
+        );
 
         // Search with uppercase
         let result = plan_search_read(&mut tx, "MIXEDCASE", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(!results.is_empty());
-        assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
+        assert!(!results.rows.is_empty());
+        assert!(
+            results
+                .rows
+                .iter()
+                .any(|s| s.dataset_id == param.dataset.id)
+        );
     }
 
     /// Test plan_search_read with special characters
@@ -2743,15 +2774,20 @@ mod tests {
         let result = plan_search_read(&mut tx, "special_chars", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(!results.is_empty());
-        assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
+        assert!(!results.rows.is_empty());
+        assert!(
+            results
+                .rows
+                .iter()
+                .any(|s| s.dataset_id == param.dataset.id)
+        );
 
         // Test with empty search string
         let result = plan_search_read(&mut tx, "", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         // Should return results (likely all datasets)
-        assert!(!results.is_empty());
+        assert!(!results.rows.is_empty());
     }
 
     /// Test plan_search_read with very long search term
@@ -2769,7 +2805,7 @@ mod tests {
         let result = plan_search_read(&mut tx, &long_search_term, 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(results.is_empty());
+        assert!(results.rows.is_empty());
     }
 
     /// Test plan_search_read offset calculation
@@ -2793,13 +2829,13 @@ mod tests {
         let page_1_result = plan_search_read(&mut tx, search_term, 1).await.unwrap();
 
         // Page 0 should have 50 results (PAGE_SIZE)
-        assert_eq!(page_0_result.len(), 50);
+        assert_eq!(page_0_result.rows.len(), 50);
         // Page 1 should have 25 results (75 - 50)
-        assert_eq!(page_1_result.len(), 25);
+        assert_eq!(page_1_result.rows.len(), 25);
 
         // Verify no overlap between pages
-        let page_0_ids: Vec<_> = page_0_result.iter().map(|s| s.dataset_id).collect();
-        let page_1_ids: Vec<_> = page_1_result.iter().map(|s| s.dataset_id).collect();
+        let page_0_ids: Vec<_> = page_0_result.rows.iter().map(|s| s.dataset_id).collect();
+        let page_1_ids: Vec<_> = page_1_result.rows.iter().map(|s| s.dataset_id).collect();
         assert!(page_0_ids.iter().all(|id| !page_1_ids.contains(id)));
     }
 
@@ -2818,7 +2854,7 @@ mod tests {
         let result = plan_search_read(&mut tx, "test", high_page).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(results.is_empty());
+        assert!(results.rows.is_empty());
     }
 
     /// Test plan_search_read function does not error on database constraints
@@ -2878,21 +2914,21 @@ mod tests {
         let result = plan_search_read(&mut tx, "-data-", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert_eq!(results.len(), 4);
+        assert_eq!(results.rows.len(), 4);
 
         // Search for "pipeline" should match first 3 datasets
         let result = plan_search_read(&mut tx, "pipeline", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert_eq!(results.len(), 3);
+        assert_eq!(results.rows.len(), 3);
 
         // Search for "analytics" should match only 1 dataset
         let result = plan_search_read(&mut tx, "analytics", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert_eq!(results.len(), 1);
+        assert_eq!(results.rows.len(), 1);
         assert_eq!(
-            results[0].dataset_id, created_datasets[4],
+            results.rows[0].dataset_id, created_datasets[4],
             "Search should return the dataset with the highest modified date"
         );
     }
