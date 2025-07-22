@@ -2,7 +2,7 @@ use crate::{
     error::Result,
     model::{
         Compute, DataProduct, DataProductId, DataProductParam, Dataset, DatasetId, DatasetParam,
-        Dependency, DependencyParam, Search, State, StateParam,
+        Dependency, DependencyParam, SearchRow, State, StateParam,
     },
 };
 use chrono::{DateTime, Utc};
@@ -398,13 +398,13 @@ pub async fn search_plans_select(
     search_by: &str,
     limit: u32,
     offset: u32,
-) -> Result<Vec<Search>> {
+) -> Result<Vec<SearchRow>> {
     // Format search_by so it supports SQL wildcars while allowing for save SQL preperation.
     let search_by: String = format!("%{search_by}%");
 
     // Pull all datasets that meet our query
     let rows = query_as!(
-        Search,
+        SearchRow,
         "SELECT
             ds.dataset_id,
             GREATEST(
@@ -566,7 +566,10 @@ pub mod tests {
         let selected_dataset = dataset_select(&mut tx, param.id).await.unwrap();
 
         // Did we get what we wanted?
-        assert_eq!(selected_dataset, inserted_dataset);
+        assert_eq!(
+            selected_dataset, inserted_dataset,
+            "Selected dataset should match inserted dataset"
+        );
         assert_eq!(
             selected_dataset,
             Dataset {
@@ -709,7 +712,10 @@ pub mod tests {
             .unwrap();
 
         // Verify we got the same data product back
-        assert_eq!(selected_data_product, inserted_data_product);
+        assert_eq!(
+            selected_data_product, inserted_data_product,
+            "Selected data product should match inserted data product"
+        );
         assert_eq!(
             selected_data_product,
             DataProduct {
@@ -971,9 +977,19 @@ pub mod tests {
             .unwrap();
 
         // Verify we got both data products
-        assert_eq!(retrieved_data_products.len(), 2);
-        assert!(retrieved_data_products.contains(&inserted_dp1));
-        assert!(retrieved_data_products.contains(&inserted_dp2));
+        assert_eq!(
+            retrieved_data_products.len(),
+            2,
+            "Should retrieve 2 data products by dataset ID"
+        );
+        assert!(
+            retrieved_data_products.contains(&inserted_dp1),
+            "Should contain first inserted data product"
+        );
+        assert!(
+            retrieved_data_products.contains(&inserted_dp2),
+            "Should contain second inserted data product"
+        );
     }
 
     /// Test dependency_upsert can add a new dependency
@@ -1349,9 +1365,19 @@ pub mod tests {
             .unwrap();
 
         // Verify we got both dependencies
-        assert_eq!(retrieved_dependencies.len(), 2);
-        assert!(retrieved_dependencies.contains(&dep1));
-        assert!(retrieved_dependencies.contains(&dep2));
+        assert_eq!(
+            retrieved_dependencies.len(),
+            2,
+            "Should retrieve 2 dependencies by dataset ID"
+        );
+        assert!(
+            retrieved_dependencies.contains(&dep1),
+            "Should contain first inserted dependency"
+        );
+        assert!(
+            retrieved_dependencies.contains(&dep2),
+            "Should contain second inserted dependency"
+        );
     }
 
     /// Test dataset_pause_update setting pause to true
@@ -1369,7 +1395,10 @@ pub mod tests {
             .unwrap();
 
         // Verify dataset starts as not paused
-        assert_eq!(dataset.paused, false);
+        assert_eq!(
+            dataset.paused, false,
+            "Dataset should initially be unpaused"
+        );
 
         // Now pause the dataset
         let pause_username = "pause_user";
@@ -1427,7 +1456,10 @@ pub mod tests {
         .unwrap();
 
         // Verify it's paused
-        assert_eq!(paused_dataset.paused, true);
+        assert_eq!(
+            paused_dataset.paused, true,
+            "Dataset should be paused after pause operation"
+        );
 
         // Now unpause the dataset
         let unpause_username = "unpause_user";
@@ -1539,8 +1571,14 @@ pub mod tests {
             .unwrap();
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, dataset.id);
-        assert!(results[0].modified_date.is_some());
+        assert_eq!(
+            results[0].dataset_id, dataset.id,
+            "Search result dataset ID should match the created dataset"
+        );
+        assert!(
+            results[0].modified_date.is_some(),
+            "Search result should have modified date"
+        );
     }
 
     /// Test search_plans_select with no matching results
@@ -1643,7 +1681,10 @@ pub mod tests {
         let results = search_plans_select(&mut tx, "", 10, 0).await.unwrap();
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(
+            results[0].dataset_id, dataset.id,
+            "Empty search should return the created dataset"
+        );
     }
 
     /// Test search_plans_select with pagination
@@ -1766,16 +1807,30 @@ pub mod tests {
             .await
             .unwrap();
 
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(
+            results.len(),
+            1,
+            "Case-insensitive search should return 1 result by product name"
+        );
+        assert_eq!(
+            results[0].dataset_id, dataset.id,
+            "Case-insensitive search by product name should return the dataset"
+        );
 
         // Test search by username (case-insensitive)
         let results = search_plans_select(&mut tx, "testuser", 10, 0)
             .await
             .unwrap();
 
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(
+            results.len(),
+            1,
+            "Case-insensitive search should return 1 result by username"
+        );
+        assert_eq!(
+            results[0].dataset_id, dataset.id,
+            "Case-insensitive search by username should return the dataset"
+        );
     }
 
     /// Test search_plans_select across different fields
@@ -1833,26 +1888,54 @@ pub mod tests {
         let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
             .await
             .unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(
+            results.len(),
+            1,
+            "Search by dataset extra field should return 1 result"
+        );
+        assert_eq!(
+            results[0].dataset_id, dataset.id,
+            "Search by dataset extra field should return the dataset"
+        );
 
         // Test search by data product version
         let results = search_plans_select(&mut tx, "unique-version-123", 10, 0)
             .await
             .unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(
+            results.len(),
+            1,
+            "Search by data product version should return 1 result"
+        );
+        assert_eq!(
+            results[0].dataset_id, dataset.id,
+            "Search by data product version should return the dataset"
+        );
 
         // Test search by username
         let results = search_plans_select(&mut tx, "search_user", 10, 0)
             .await
             .unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(
+            results.len(),
+            1,
+            "Search by username should return 1 result"
+        );
+        assert_eq!(
+            results[0].dataset_id, dataset.id,
+            "Search by username should return the dataset"
+        );
 
         // Test search by compute type
         let results = search_plans_select(&mut tx, "dbxaas", 10, 0).await.unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, dataset.id);
+        assert_eq!(
+            results.len(),
+            1,
+            "Search by compute type should return 1 result"
+        );
+        assert_eq!(
+            results[0].dataset_id, dataset.id,
+            "Search by compute type should return the dataset"
+        );
     }
 }

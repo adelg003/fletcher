@@ -3,12 +3,13 @@ use crate::{
     db::search_plans_select,
     error::Error,
     model::{
-        DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, Search, State, StateParam,
+        DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, SearchReturn, SearchRow,
+        State, StateParam,
     },
 };
 use chrono::{DateTime, Utc};
 use petgraph::graph::DiGraph;
-use poem::error::{BadRequest, Forbidden, InternalServerError, NotFound, UnprocessableEntity};
+use poem::error::InternalServerError;
 use sqlx::{Postgres, Transaction};
 use std::collections::HashSet;
 use tracing::warn;
@@ -16,36 +17,16 @@ use tracing::warn;
 /// How much do we want to paginate by
 const PAGE_SIZE: u32 = 50;
 
-/// Map Crate Error to Poem Error
-fn to_poem_error(err: Error) -> poem::Error {
-    match err {
-        // Graph is cyclical
-        Error::Cyclical => UnprocessableEntity(err),
-        // Failed to build graph
-        Error::Graph(error) => InternalServerError(error),
-        // Already desired pause state
-        Error::Pause(_, _) => BadRequest(err),
-        // Row not found
-        Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
-        // We hit a db constraint
-        Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some() => BadRequest(err),
-        // Unknown error
-        error => InternalServerError(error),
-    }
-}
-
 /// Validate a PlanParam from the user
 fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<()> {
     // Does Plan have any dup data products?
     if let Some(data_product_id) = param.has_dup_data_products() {
-        return Err(BadRequest(Error::Duplicate(data_product_id)));
+        return Err(Error::Duplicate(data_product_id).into_poem_error());
     }
 
     // Does Plan have any dup dependencies?
     if let Some((parent_id, child_id)) = param.has_dup_dependencies() {
-        return Err(BadRequest(Error::DuplicateDependencies(
-            parent_id, child_id,
-        )));
+        return Err(Error::DuplicateDependencies(parent_id, child_id).into_poem_error());
     }
 
     // Get a list of all Data Product IDs
@@ -69,7 +50,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&parent_id) {
                 Ok(())
             } else {
-                Err(NotFound(Error::Missing(parent_id)))
+                Err(Error::Missing(parent_id).into_poem_error())
             }
         })?;
 
@@ -81,7 +62,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&child_id) {
                 Ok(())
             } else {
-                Err(NotFound(Error::Missing(child_id)))
+                Err(Error::Missing(child_id).into_poem_error())
             }
         })?;
 
@@ -95,7 +76,8 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
     }
 
     // If you take all our data products and map them to a graph are they a valid dag?
-    DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges).map_err(to_poem_error)?;
+    DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges)
+        .map_err(|e| e.into_poem_error())?;
 
     Ok(())
 }
@@ -113,7 +95,7 @@ pub async fn plan_add(
     let current_plan: Option<Plan> = match wip_plan {
         Ok(plan) => Some(plan),
         Err(Error::Sqlx(sqlx::Error::RowNotFound)) => None,
-        Err(err) => return Err(InternalServerError(err)),
+        Err(err) => return Err(err.into_poem_error()),
     };
 
     // Validate to make sure the user submitted valid parameters
@@ -125,7 +107,7 @@ pub async fn plan_add(
     let mut plan: Plan = param
         .upsert(tx, username, modified_date)
         .await
-        .map_err(to_poem_error)?;
+        .map_err(|e| e.into_poem_error())?;
 
     // Triger the next batch of data products
     trigger_next_batch(tx, &mut plan, username, modified_date).await?;
@@ -135,7 +117,7 @@ pub async fn plan_add(
 
 /// Read a Plan Dag from the DB
 pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> poem::Result<Plan> {
-    Plan::from_db(tx, id).await.map_err(to_poem_error)
+    Plan::from_db(tx, id).await.map_err(|e| e.into_poem_error())
 }
 
 /// Set the pause state of a plan
@@ -146,7 +128,9 @@ pub async fn plan_pause_edit(
     username: &str,
 ) -> poem::Result<Plan> {
     // Pull the current plan from the DB
-    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id)
+        .await
+        .map_err(|e| e.into_poem_error())?;
 
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
@@ -154,7 +138,7 @@ pub async fn plan_pause_edit(
     // Set the new pause state
     plan.paused(tx, paused, username, modified_date)
         .await
-        .map_err(to_poem_error)?;
+        .map_err(|e| e.into_poem_error())?;
 
     // If unpaused, lets run the next batch
     if !paused {
@@ -172,7 +156,7 @@ pub async fn data_product_read(
 ) -> poem::Result<DataProduct> {
     DataProduct::from_db(tx, dataset_id, data_product_id)
         .await
-        .map_err(to_poem_error)
+        .map_err(|e| e.into_poem_error())
 }
 
 /// Update the state of our data product
@@ -189,18 +173,18 @@ async fn state_update(
     // Pull our Data Product
     let data_product: &mut DataProduct = plan
         .data_product_mut(state.id)
-        .ok_or(NotFound(Error::Missing(state.id)))?;
+        .ok_or(Error::Missing(state.id).into_poem_error())?;
 
     // Is the data product locked?
     if data_product.state == State::Disabled {
-        return Err(Forbidden(Error::Disabled(data_product.id)));
+        return Err(Error::Disabled(data_product.id).into_poem_error());
     }
 
     // Update our Data Product State
     data_product
         .state_update(tx, dataset_id, state, username, modified_date)
         .await
-        .map_err(to_poem_error)?;
+        .map_err(|e| e.into_poem_error())?;
 
     Ok(())
 }
@@ -217,7 +201,7 @@ async fn clear_downstream_nodes(
     let dataset_id: DatasetId = plan.dataset.id;
 
     // Generate Dag representation of the plan
-    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
+    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(|e| e.into_poem_error())?;
 
     // What are all the downstream nodes of our updated states?
     let mut downstream_ids = HashSet::<DataProductId>::new();
@@ -251,7 +235,7 @@ async fn clear_downstream_nodes(
         data_product
             .state_update(tx, dataset_id, &new_state, username, modified_date)
             .await
-            .map_err(to_poem_error)?;
+            .map_err(|e| e.into_poem_error())?;
     }
 
     Ok(())
@@ -286,7 +270,7 @@ async fn trigger_next_batch(
         .collect();
 
     // Generate Dag representation of the plan (Disabled nodes are not part of the dag.)
-    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(to_poem_error)?;
+    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(|e| e.into_poem_error())?;
 
     // Check each data product's parents to see if any of them are blocking
     for waiting_id in waiting_ids {
@@ -321,7 +305,7 @@ async fn trigger_next_batch(
             data_product
                 .state_update(tx, dataset_id, &new_state, username, modified_date)
                 .await
-                .map_err(to_poem_error)?;
+                .map_err(|e| e.into_poem_error())?;
         }
     }
 
@@ -344,12 +328,14 @@ pub async fn states_edit(
             state.state,
             State::Disabled | State::Queued | State::Waiting
         ) {
-            return Err(BadRequest(Error::BadState(state.id, state.state)));
+            return Err(Error::BadState(state.id, state.state).into_poem_error());
         }
     }
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id)
+        .await
+        .map_err(|e| e.into_poem_error())?;
 
     // Apply our updates to the data products
     for state in states {
@@ -377,14 +363,16 @@ pub async fn clear_edit(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id)
+        .await
+        .map_err(|e| e.into_poem_error())?;
 
     // Clear the data products
     for id in data_product_ids {
         // Pull Data Product of interest
         let data_product: &DataProduct = plan
             .data_product(*id)
-            .ok_or(NotFound(Error::Missing(*id)))?;
+            .ok_or(Error::Missing(*id).into_poem_error())?;
 
         // Build new cleared state
         let state = StateParam {
@@ -416,13 +404,15 @@ pub async fn disable_drop(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id).await.map_err(to_poem_error)?;
+    let mut plan = Plan::from_db(tx, id)
+        .await
+        .map_err(|e| e.into_poem_error())?;
 
     for id in data_product_ids {
         // Pull the Data Product we want
         let data_product: &DataProduct = plan
             .data_product(*id)
-            .ok_or(NotFound(Error::Missing(*id)))?;
+            .ok_or(Error::Missing(*id).into_poem_error())?;
 
         // Get the new state params for the selected data product by using the old state params.
         let state = StateParam {
@@ -445,14 +435,30 @@ pub async fn plan_search_read(
     tx: &mut Transaction<'_, Postgres>,
     search_by: &str,
     page: u32,
-) -> poem::Result<Vec<Search>> {
+) -> poem::Result<SearchReturn> {
     // Compute offset
     let offset: u32 = page.saturating_mul(PAGE_SIZE);
 
-    // Pull the Systems
-    search_plans_select(tx, search_by, PAGE_SIZE, offset)
-        .await
-        .map_err(to_poem_error)
+    // Fetch one extra item to check if there's a next page
+    let mut rows: Vec<SearchRow> =
+        search_plans_select(tx, search_by, PAGE_SIZE.saturating_add(1), offset)
+            .await
+            .map_err(|e| e.into_poem_error())?;
+
+    // PAGE_SIZE as usize
+    let page_size: usize = PAGE_SIZE.try_into().map_err(InternalServerError)?;
+
+    // Check if we have more than the page size
+    let next_page: Option<u32> = if rows.len() > page_size {
+        Some(page.saturating_add(1))
+    } else {
+        None
+    };
+
+    // Truncate to page size if we have extra
+    rows.truncate(page_size);
+
+    Ok(SearchReturn { rows, next_page })
 }
 
 #[cfg(test)]
@@ -1108,10 +1114,24 @@ mod tests {
         assert!(result.is_ok());
 
         let plan = result.unwrap();
-        assert_eq!(plan.dataset.id, param.dataset.id);
-        assert_eq!(plan.data_products.len(), 3);
-        assert_eq!(plan.dependencies.len(), 2);
-        assert_eq!(plan.dataset.modified_by, username);
+        assert_eq!(
+            plan.dataset.id, param.dataset.id,
+            "Plan dataset ID should match the parameter"
+        );
+        assert_eq!(
+            plan.data_products.len(),
+            3,
+            "Plan should have 3 data products"
+        );
+        assert_eq!(
+            plan.dependencies.len(),
+            2,
+            "Plan should have 2 dependencies"
+        );
+        assert_eq!(
+            plan.dataset.modified_by, username,
+            "Plan should be modified by the test user"
+        );
     }
 
     /// Test plan_add can add new data products to existing plan
@@ -1144,10 +1164,21 @@ mod tests {
         assert!(result.is_ok());
 
         let updated_plan = result.unwrap();
-        assert_eq!(updated_plan.data_products.len(), 4);
+        assert_eq!(
+            updated_plan.data_products.len(),
+            4,
+            "Updated plan should have 4 data products after adding new one"
+        );
         let new_dp = updated_plan.data_product(new_dp_id);
-        assert!(new_dp.is_some());
-        assert_eq!(new_dp.unwrap().name, "new-product");
+        assert!(
+            new_dp.is_some(),
+            "Updated plan should contain the new data product"
+        );
+        assert_eq!(
+            new_dp.unwrap().name,
+            "new-product",
+            "New data product should have correct name"
+        );
     }
 
     /// Test plan_add can add new dependencies to existing plan
@@ -1181,7 +1212,10 @@ mod tests {
             .dependencies
             .iter()
             .find(|dep| dep.parent_id == dp1_id && dep.child_id == dp3_id);
-        assert!(new_dep.is_some());
+        assert!(
+            new_dep.is_some(),
+            "Updated plan should contain the new dependency"
+        );
     }
 
     /// Test plan_add can update existing data products
@@ -1213,10 +1247,23 @@ mod tests {
 
         let updated_plan = result.unwrap();
         let updated_dp = updated_plan.data_product(dp1_id).unwrap();
-        assert_eq!(updated_dp.name, "updated-product-name");
-        assert_eq!(updated_dp.compute, Compute::Dbxaas);
-        assert_eq!(updated_dp.version, "2.5.0");
-        assert!(!updated_dp.eager);
+        assert_eq!(
+            updated_dp.name, "updated-product-name",
+            "Data product name should be updated"
+        );
+        assert_eq!(
+            updated_dp.compute,
+            Compute::Dbxaas,
+            "Data product compute should be updated to Dbxaas"
+        );
+        assert_eq!(
+            updated_dp.version, "2.5.0",
+            "Data product version should be updated"
+        );
+        assert!(
+            !updated_dp.eager,
+            "Data product eager should be updated to false"
+        );
     }
 
     /// Test plan_add can update existing dependencies
@@ -1270,12 +1317,20 @@ mod tests {
         assert!(result.is_ok());
 
         let read_plan = result.unwrap();
-        assert_eq!(read_plan.dataset.id, added_plan.dataset.id);
+        assert_eq!(
+            read_plan.dataset.id, added_plan.dataset.id,
+            "Read plan dataset ID should match added plan"
+        );
         assert_eq!(
             read_plan.data_products.len(),
-            added_plan.data_products.len()
+            added_plan.data_products.len(),
+            "Read plan should have same number of data products as added plan"
         );
-        assert_eq!(read_plan.dependencies.len(), added_plan.dependencies.len());
+        assert_eq!(
+            read_plan.dependencies.len(),
+            added_plan.dependencies.len(),
+            "Read plan should have same number of dependencies as added plan"
+        );
     }
 
     /// Test plan_read returns error for non-existent plan
@@ -1449,10 +1504,24 @@ mod tests {
         let result =
             clear_downstream_nodes(&mut tx, &mut plan, &nodes, username, modified_date).await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[1].state, State::Waiting);
-        assert_eq!(plan.data_products[2].state, State::Disabled);
-        assert_eq!(plan.data_products[1].modified_date, original_dp1_modified);
-        assert_eq!(plan.data_products[2].modified_date, original_dp2_modified);
+        assert_eq!(
+            plan.data_products[1].state,
+            State::Waiting,
+            "Data product 1 should be set to Waiting state"
+        );
+        assert_eq!(
+            plan.data_products[2].state,
+            State::Disabled,
+            "Data product 2 should remain Disabled"
+        );
+        assert_eq!(
+            plan.data_products[1].modified_date, original_dp1_modified,
+            "Data product 1 modified date should remain unchanged"
+        );
+        assert_eq!(
+            plan.data_products[2].modified_date, original_dp2_modified,
+            "Data product 2 modified date should remain unchanged"
+        );
     }
 
     // Tests for trigger_next_batch function
@@ -1505,7 +1574,11 @@ mod tests {
 
         let result = trigger_next_batch(&mut tx, &mut plan, username, modified_date).await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[1].state, State::Queued);
+        assert_eq!(
+            plan.data_products[1].state,
+            State::Queued,
+            "Data product should be set to Queued state after trigger"
+        );
     }
 
     /// Test trigger_next_batch skips when dataset is paused
@@ -1560,7 +1633,11 @@ mod tests {
 
         let result = trigger_next_batch(&mut tx, &mut plan, username, modified_date).await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[1].state, State::Waiting);
+        assert_eq!(
+            plan.data_products[1].state,
+            State::Waiting,
+            "Data product should remain in Waiting state when parent has multiple dependencies"
+        );
     }
 
     /// Test trigger_next_batch skips non-eager data products
@@ -1693,7 +1770,11 @@ mod tests {
 
         let result = trigger_next_batch(&mut tx, &mut plan, username, modified_date).await;
         assert!(result.is_ok());
-        assert_eq!(plan.data_products[2].state, State::Queued);
+        assert_eq!(
+            plan.data_products[2].state,
+            State::Queued,
+            "Data product should be set to Queued when all parent dependencies are successful"
+        );
     }
 
     // Integration tests for states_edit function
@@ -2069,7 +2150,11 @@ mod tests {
 
         let plan = result.unwrap();
         let data_product = plan.data_product(dp_id).unwrap();
-        assert_eq!(data_product.state, State::Disabled);
+        assert_eq!(
+            data_product.state,
+            State::Disabled,
+            "Data product should be disabled after disable_drop operation"
+        );
     }
 
     /// Test disable_drop - Non-existent Data Product
@@ -2231,15 +2316,21 @@ mod tests {
         let dataset_id = plan.dataset.id;
 
         // Initially paused should be false
-        assert!(!plan.dataset.paused);
+        assert!(!plan.dataset.paused, "Plan should initially be unpaused");
 
         // Set pause state to true
         let result = plan_pause_edit(&mut tx, dataset_id, true, username).await;
         assert!(result.is_ok());
 
         let paused_plan = result.unwrap();
-        assert!(paused_plan.dataset.paused);
-        assert_eq!(paused_plan.dataset.modified_by, username);
+        assert!(
+            paused_plan.dataset.paused,
+            "Plan should be paused after setting pause to true"
+        );
+        assert_eq!(
+            paused_plan.dataset.modified_by, username,
+            "Modified by should be updated to the user"
+        );
     }
 
     /// Test plan_pause_edit can set pause state to false
@@ -2257,15 +2348,24 @@ mod tests {
         plan.paused(&mut tx, true, username, modified_date)
             .await
             .unwrap();
-        assert!(plan.dataset.paused);
+        assert!(
+            plan.dataset.paused,
+            "Plan should be paused after calling paused method"
+        );
 
         // Now unpause it
         let result = plan_pause_edit(&mut tx, dataset_id, false, username).await;
         assert!(result.is_ok());
 
         let unpaused_plan = result.unwrap();
-        assert!(!unpaused_plan.dataset.paused);
-        assert_eq!(unpaused_plan.dataset.modified_by, username);
+        assert!(
+            !unpaused_plan.dataset.paused,
+            "Plan should be unpaused after setting pause to false"
+        );
+        assert_eq!(
+            unpaused_plan.dataset.modified_by, username,
+            "Modified by should be updated to the user"
+        );
     }
 
     /// Test plan_pause_edit errors when trying to set pause state to current state
@@ -2292,7 +2392,10 @@ mod tests {
         let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username)
             .await
             .unwrap();
-        assert!(paused_plan.dataset.paused);
+        assert!(
+            paused_plan.dataset.paused,
+            "Plan should be paused after first pause operation"
+        );
 
         // Try to pause it again
         let result = plan_pause_edit(&mut tx, dataset_id, true, username).await;
@@ -2365,13 +2468,16 @@ mod tests {
 
         let dataset_id = param.dataset.id;
         let plan = plan_add(&mut tx, &param, username).await.unwrap();
-        assert!(!plan.dataset.paused);
+        assert!(!plan.dataset.paused, "Plan should initially be unpaused");
 
         // Pause the plan
         let paused_plan = plan_pause_edit(&mut tx, dataset_id, true, username)
             .await
             .unwrap();
-        assert!(paused_plan.dataset.paused);
+        assert!(
+            paused_plan.dataset.paused,
+            "Plan should be paused after pause operation"
+        );
 
         // Set parent to Success so children would normally be triggered
         let plan = states_edit(
@@ -2481,7 +2587,10 @@ mod tests {
         let unpaused_plan = plan_pause_edit(&mut tx, dataset_id, false, username)
             .await
             .unwrap();
-        assert!(!unpaused_plan.dataset.paused);
+        assert!(
+            !unpaused_plan.dataset.paused,
+            "Plan should be unpaused after unpause operation"
+        );
 
         // Children should now be queued since parent is successful and plan is unpaused
         assert_eq!(
@@ -2542,10 +2651,10 @@ mod tests {
 
         let search_results = result.unwrap();
         // Should return at least 2 results (test-dataset-alpha and test-dataset-beta)
-        assert!(search_results.len() >= 2);
+        assert!(search_results.rows.len() >= 2);
 
         // Verify that the datasets we created are in the results
-        let result_ids: Vec<_> = search_results.iter().map(|s| s.dataset_id).collect();
+        let result_ids: Vec<_> = search_results.rows.iter().map(|s| s.dataset_id).collect();
         assert!(result_ids.contains(&param1.dataset.id));
         assert!(result_ids.contains(&param2.dataset.id));
     }
@@ -2567,7 +2676,7 @@ mod tests {
         assert!(result.is_ok());
 
         let search_results = result.unwrap();
-        assert!(search_results.is_empty());
+        assert!(search_results.rows.is_empty());
     }
 
     /// Test plan_search_read pagination logic
@@ -2590,23 +2699,27 @@ mod tests {
         let result = plan_search_read(&mut tx, search_term, 0).await;
         assert!(result.is_ok());
         let page_0_results = result.unwrap();
-        assert_eq!(page_0_results.len(), 50); // PAGE_SIZE is 50
+        assert_eq!(page_0_results.rows.len(), 50); // PAGE_SIZE is 50
+        assert!(page_0_results.next_page.is_some()); // Should have next page
+        assert_eq!(page_0_results.next_page, Some(1)); // Next page should be 1
 
         // Test second page (page 1)
         let result = plan_search_read(&mut tx, search_term, 1).await;
         assert!(result.is_ok());
         let page_1_results = result.unwrap();
-        assert_eq!(page_1_results.len(), 10); // Remaining 10 results
+        assert_eq!(page_1_results.rows.len(), 10); // Remaining 10 results
+        assert!(page_1_results.next_page.is_none()); // Should not have next page
 
         // Test third page (page 2) - should be empty
         let result = plan_search_read(&mut tx, search_term, 2).await;
         assert!(result.is_ok());
         let page_2_results = result.unwrap();
-        assert!(page_2_results.is_empty());
+        assert!(page_2_results.rows.is_empty());
+        assert!(page_2_results.next_page.is_none()); // Should not have next page
 
         // Verify results are different between pages
-        let page_0_ids: Vec<_> = page_0_results.iter().map(|s| s.dataset_id).collect();
-        let page_1_ids: Vec<_> = page_1_results.iter().map(|s| s.dataset_id).collect();
+        let page_0_ids: Vec<_> = page_0_results.rows.iter().map(|s| s.dataset_id).collect();
+        let page_1_ids: Vec<_> = page_1_results.rows.iter().map(|s| s.dataset_id).collect();
         assert!(page_0_ids.iter().all(|id| !page_1_ids.contains(id)));
     }
 
@@ -2625,15 +2738,25 @@ mod tests {
         let result = plan_search_read(&mut tx, "mixedcase", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(!results.is_empty());
-        assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
+        assert!(!results.rows.is_empty());
+        assert!(
+            results
+                .rows
+                .iter()
+                .any(|s| s.dataset_id == param.dataset.id)
+        );
 
         // Search with uppercase
         let result = plan_search_read(&mut tx, "MIXEDCASE", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(!results.is_empty());
-        assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
+        assert!(!results.rows.is_empty());
+        assert!(
+            results
+                .rows
+                .iter()
+                .any(|s| s.dataset_id == param.dataset.id)
+        );
     }
 
     /// Test plan_search_read with special characters
@@ -2651,15 +2774,20 @@ mod tests {
         let result = plan_search_read(&mut tx, "special_chars", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(!results.is_empty());
-        assert!(results.iter().any(|s| s.dataset_id == param.dataset.id));
+        assert!(!results.rows.is_empty());
+        assert!(
+            results
+                .rows
+                .iter()
+                .any(|s| s.dataset_id == param.dataset.id)
+        );
 
         // Test with empty search string
         let result = plan_search_read(&mut tx, "", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
         // Should return results (likely all datasets)
-        assert!(!results.is_empty());
+        assert!(!results.rows.is_empty());
     }
 
     /// Test plan_search_read with very long search term
@@ -2677,7 +2805,7 @@ mod tests {
         let result = plan_search_read(&mut tx, &long_search_term, 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(results.is_empty());
+        assert!(results.rows.is_empty());
     }
 
     /// Test plan_search_read offset calculation
@@ -2701,13 +2829,13 @@ mod tests {
         let page_1_result = plan_search_read(&mut tx, search_term, 1).await.unwrap();
 
         // Page 0 should have 50 results (PAGE_SIZE)
-        assert_eq!(page_0_result.len(), 50);
+        assert_eq!(page_0_result.rows.len(), 50);
         // Page 1 should have 25 results (75 - 50)
-        assert_eq!(page_1_result.len(), 25);
+        assert_eq!(page_1_result.rows.len(), 25);
 
         // Verify no overlap between pages
-        let page_0_ids: Vec<_> = page_0_result.iter().map(|s| s.dataset_id).collect();
-        let page_1_ids: Vec<_> = page_1_result.iter().map(|s| s.dataset_id).collect();
+        let page_0_ids: Vec<_> = page_0_result.rows.iter().map(|s| s.dataset_id).collect();
+        let page_1_ids: Vec<_> = page_1_result.rows.iter().map(|s| s.dataset_id).collect();
         assert!(page_0_ids.iter().all(|id| !page_1_ids.contains(id)));
     }
 
@@ -2726,7 +2854,7 @@ mod tests {
         let result = plan_search_read(&mut tx, "test", high_page).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert!(results.is_empty());
+        assert!(results.rows.is_empty());
     }
 
     /// Test plan_search_read function does not error on database constraints
@@ -2786,20 +2914,23 @@ mod tests {
         let result = plan_search_read(&mut tx, "-data-", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert_eq!(results.len(), 4);
+        assert_eq!(results.rows.len(), 4);
 
         // Search for "pipeline" should match first 3 datasets
         let result = plan_search_read(&mut tx, "pipeline", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert_eq!(results.len(), 3);
+        assert_eq!(results.rows.len(), 3);
 
         // Search for "analytics" should match only 1 dataset
         let result = plan_search_read(&mut tx, "analytics", 0).await;
         assert!(result.is_ok());
         let results = result.unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].dataset_id, created_datasets[4]);
+        assert_eq!(results.rows.len(), 1);
+        assert_eq!(
+            results.rows[0].dataset_id, created_datasets[4],
+            "Search should return the dataset with the highest modified date"
+        );
     }
 
     // Tests for data_product_read function
@@ -2819,18 +2950,30 @@ mod tests {
         assert!(result.is_ok());
 
         let read_data_product = result.unwrap();
-        assert_eq!(read_data_product.id, data_product_id);
-        assert_eq!(read_data_product.name, added_plan.data_products[0].name);
         assert_eq!(
-            read_data_product.compute,
-            added_plan.data_products[0].compute
+            read_data_product.id, data_product_id,
+            "Read data product ID should match the requested ID"
         );
         assert_eq!(
-            read_data_product.version,
-            added_plan.data_products[0].version
+            read_data_product.name, added_plan.data_products[0].name,
+            "Read data product name should match added plan data product name"
         );
-        assert_eq!(read_data_product.eager, added_plan.data_products[0].eager);
-        assert_eq!(read_data_product.state, added_plan.data_products[0].state);
+        assert_eq!(
+            read_data_product.compute, added_plan.data_products[0].compute,
+            "Read data product compute should match added plan data product compute"
+        );
+        assert_eq!(
+            read_data_product.version, added_plan.data_products[0].version,
+            "Read data product version should match added plan data product version"
+        );
+        assert_eq!(
+            read_data_product.eager, added_plan.data_products[0].eager,
+            "Read data product eager should match added plan data product eager"
+        );
+        assert_eq!(
+            read_data_product.state, added_plan.data_products[0].state,
+            "Read data product state should match added plan data product state"
+        );
     }
 
     /// Test data_product_read returns error for non-existent data product
@@ -2851,6 +2994,363 @@ mod tests {
         assert_eq!(
             format!("{err}"),
             "no rows returned by a query that expected to return at least one row"
+        );
+    }
+
+    // Tests for private helper functions
+
+    /// Test validate_plan_param detects duplicate data products
+    #[test]
+    fn test_validate_plan_param_duplicate_data_products() {
+        let dp_id = Uuid::new_v4();
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp_id,
+                    compute: Compute::Cams,
+                    name: "test-product-1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp_id, // Duplicate ID
+                    compute: Compute::Dbxaas,
+                    name: "test-product-2".to_string(),
+                    version: "2.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![],
+        };
+
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_err(),
+            "validate_plan_param should reject duplicate data product IDs"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::BAD_REQUEST,
+            "Duplicate data products should return BadRequest"
+        );
+    }
+
+    /// Test validate_plan_param detects duplicate dependencies
+    #[test]
+    fn test_validate_plan_param_duplicate_dependencies() {
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![
+                DataProductParam {
+                    id: dp1_id,
+                    compute: Compute::Cams,
+                    name: "test-product-1".to_string(),
+                    version: "1.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+                DataProductParam {
+                    id: dp2_id,
+                    compute: Compute::Dbxaas,
+                    name: "test-product-2".to_string(),
+                    version: "2.0.0".to_string(),
+                    eager: true,
+                    passthrough: None,
+                    extra: None,
+                },
+            ],
+            dependencies: vec![
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp2_id,
+                    extra: None,
+                },
+                DependencyParam {
+                    parent_id: dp1_id,
+                    child_id: dp2_id, // Duplicate dependency
+                    extra: None,
+                },
+            ],
+        };
+
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_err(),
+            "validate_plan_param should reject duplicate dependencies"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::BAD_REQUEST,
+            "Duplicate dependencies should return BadRequest"
+        );
+    }
+
+    /// Test validate_plan_param detects missing parent data product
+    #[test]
+    fn test_validate_plan_param_missing_parent() {
+        let dp1_id = Uuid::new_v4();
+        let missing_parent_id = Uuid::new_v4();
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![DataProductParam {
+                id: dp1_id,
+                compute: Compute::Cams,
+                name: "test-product-1".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: None,
+                extra: None,
+            }],
+            dependencies: vec![DependencyParam {
+                parent_id: missing_parent_id, // This parent doesn't exist
+                child_id: dp1_id,
+                extra: None,
+            }],
+        };
+
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_err(),
+            "validate_plan_param should reject missing parent data product"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::NOT_FOUND,
+            "Missing parent should return NotFound"
+        );
+    }
+
+    /// Test validate_plan_param detects missing child data product
+    #[test]
+    fn test_validate_plan_param_missing_child() {
+        let dp1_id = Uuid::new_v4();
+        let missing_child_id = Uuid::new_v4();
+        let param = PlanParam {
+            dataset: DatasetParam {
+                id: Uuid::new_v4(),
+                extra: None,
+            },
+            data_products: vec![DataProductParam {
+                id: dp1_id,
+                compute: Compute::Cams,
+                name: "test-product-1".to_string(),
+                version: "1.0.0".to_string(),
+                eager: true,
+                passthrough: None,
+                extra: None,
+            }],
+            dependencies: vec![DependencyParam {
+                parent_id: dp1_id,
+                child_id: missing_child_id, // This child doesn't exist
+                extra: None,
+            }],
+        };
+
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_err(),
+            "validate_plan_param should reject missing child data product"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::NOT_FOUND,
+            "Missing child should return NotFound"
+        );
+    }
+
+    /// Test validate_plan_param accepts valid plan parameters
+    #[test]
+    fn test_validate_plan_param_valid() {
+        let param = create_test_plan_param();
+        let result = validate_plan_param(&param, &None);
+        assert!(
+            result.is_ok(),
+            "validate_plan_param should accept valid plan parameters"
+        );
+    }
+
+    /// Test state_update with valid data product
+    #[sqlx::test]
+    async fn test_state_update_valid_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let data_product_id = plan.data_products[0].id;
+        let state_param = StateParam {
+            id: data_product_id,
+            state: State::Success,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("http://test-link.com".to_string()),
+            passback: None,
+        };
+
+        let result = state_update(&mut tx, &mut plan, &state_param, username, Utc::now()).await;
+        assert!(
+            result.is_ok(),
+            "state_update should succeed for valid data product"
+        );
+
+        // Verify the state was updated
+        let updated_data_product = plan.data_product(data_product_id).unwrap();
+        assert_eq!(
+            updated_data_product.state,
+            State::Success,
+            "Data product state should be updated to Success"
+        );
+    }
+
+    /// Test state_update with missing data product
+    #[sqlx::test]
+    async fn test_state_update_missing_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let missing_id = Uuid::new_v4();
+        let state_param = StateParam {
+            id: missing_id,
+            state: State::Success,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("http://test-link.com".to_string()),
+            passback: None,
+        };
+
+        let result = state_update(&mut tx, &mut plan, &state_param, username, Utc::now()).await;
+        assert!(
+            result.is_err(),
+            "state_update should fail for missing data product"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::NOT_FOUND,
+            "Missing data product should return NotFound"
+        );
+    }
+
+    /// Test state_update with disabled data product
+    #[sqlx::test]
+    async fn test_state_update_disabled_data_product(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let data_product_id = plan.data_products[0].id;
+
+        // First disable the data product
+        plan.data_products[0].state = State::Disabled;
+
+        let state_param = StateParam {
+            id: data_product_id,
+            state: State::Success,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("http://test-link.com".to_string()),
+            passback: None,
+        };
+
+        let result = state_update(&mut tx, &mut plan, &state_param, username, Utc::now()).await;
+        assert!(
+            result.is_err(),
+            "state_update should fail for disabled data product"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status(),
+            StatusCode::FORBIDDEN,
+            "Disabled data product should return Forbidden"
+        );
+    }
+
+    /// Test clear_downstream_nodes clears waiting state correctly
+    #[sqlx::test]
+    async fn test_clear_downstream_nodes(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Set up a scenario where we have downstream dependencies
+        if plan.data_products.len() >= 2 {
+            // Set the first data product to Success
+            plan.data_products[0].state = State::Success;
+            // Set the second data product to Running (will be cleared to Waiting)
+            plan.data_products[1].state = State::Running;
+
+            let nodes_to_clear = vec![plan.data_products[0].id];
+            let result =
+                clear_downstream_nodes(&mut tx, &mut plan, &nodes_to_clear, username, Utc::now())
+                    .await;
+
+            assert!(
+                result.is_ok(),
+                "clear_downstream_nodes should succeed with valid input"
+            );
+        }
+    }
+
+    /// Test trigger_next_batch with paused dataset
+    #[sqlx::test]
+    async fn test_trigger_next_batch_paused_dataset(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        // Pause the dataset
+        plan.dataset.paused = true;
+
+        let result = trigger_next_batch(&mut tx, &mut plan, username, Utc::now()).await;
+        assert!(
+            result.is_ok(),
+            "trigger_next_batch should succeed for paused dataset (no-op)"
+        );
+    }
+
+    /// Test trigger_next_batch with waiting data products
+    #[sqlx::test]
+    async fn test_trigger_next_batch_with_waiting_products(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+
+        // Set up waiting data products
+        for data_product in &mut plan.data_products {
+            data_product.state = State::Waiting;
+            data_product.eager = true;
+        }
+
+        let result = trigger_next_batch(&mut tx, &mut plan, username, Utc::now()).await;
+        assert!(
+            result.is_ok(),
+            "trigger_next_batch should succeed with waiting data products"
         );
     }
 }

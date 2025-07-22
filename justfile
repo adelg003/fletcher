@@ -30,7 +30,7 @@ check_w_sqlx_cache:
 
 # Check Rust Linting
 clippy:
-  cargo clippy --locked -- --deny warnings
+  cargo clippy --locked --all-targets -- --deny warnings
 
 # Check Rust Linting using SQLx Cache
 clippy_w_sqlx_cache:

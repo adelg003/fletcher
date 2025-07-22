@@ -4,11 +4,24 @@ mod dag;
 mod db;
 mod error;
 mod model;
+mod ui;
 
-use api::Api;
-use poem::{EndpointExt, Route, Server, listener::TcpListener, middleware::Tracing};
+use crate::{
+    api::Api,
+    ui::{not_found_404, user_service},
+};
+use poem::{
+    EndpointExt, Route, Server, endpoint::EmbeddedFilesEndpoint, listener::TcpListener,
+    middleware::Tracing,
+};
 use poem_openapi::OpenApiService;
+use rust_embed::Embed;
 use sqlx::PgPool;
+
+/// Static files hosted via webserver
+#[derive(Embed)]
+#[folder = "assets"]
+struct Assets;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -31,8 +44,12 @@ async fn main() -> color_eyre::Result<()> {
     let app = Route::new()
         // Developer friendly locations
         .nest("/api", api_service)
+        .nest("/assets", EmbeddedFilesEndpoint::<Assets>::new())
         .at("/spec", spec)
         .nest("/swagger", swagger)
+        // User UI
+        .nest("/", user_service())
+        .catch_error(not_found_404)
         // Global context to be shared
         .data(pool)
         // Utilites being added to our services
@@ -44,4 +61,55 @@ async fn main() -> color_eyre::Result<()> {
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test that required asset files are embedded correctly
+    #[test]
+    fn test_required_assets_exist() {
+        // Check that tailwind.css exists in the embedded assets
+        let tailwind_css_file = Assets::get("tailwindcss/tailwind.css");
+        assert!(
+            tailwind_css_file.is_some(),
+            "tailwindcss/tailwind.css should be present in embedded assets",
+        );
+
+        // Check that htmx.min.js exists in the embedded assets
+        let htmx_file = Assets::get("htmx/htmx.min.js");
+        assert!(
+            htmx_file.is_some(),
+            "htmx/htmx.min.js should be present in embedded assets",
+        );
+
+        // Check that viz-standalone.js exists in the embedded assets
+        let viz_file = Assets::get("viz/viz-standalone.js");
+        assert!(
+            viz_file.is_some(),
+            "viz/viz-standalone.js should be present in embedded assets",
+        );
+
+        // Check that prism.js exists in the embedded assets
+        let prism_js_file = Assets::get("prism/prism.js");
+        assert!(
+            prism_js_file.is_some(),
+            "prism/prism.js should be present in embedded assets",
+        );
+
+        // Check that prism-json.js exists in the embedded assets
+        let prism_json_file = Assets::get("prism/prism-json.js");
+        assert!(
+            prism_json_file.is_some(),
+            "prism/prism-json.js should be present in embedded assets",
+        );
+
+        // Check that prism.css exists in the embedded assets
+        let prism_css_file = Assets::get("prism/prism.css");
+        assert!(
+            prism_css_file.is_some(),
+            "prism/prism.css should be present in embedded assets",
+        );
+    }
 }
