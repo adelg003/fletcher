@@ -71,7 +71,7 @@ fn format_node(id: DataProductId, plan: &Plan) -> String {
 
     // Map state to the respective color and style
     let (color, style): (&str, &str) = match dp.state {
-        State::Disabled => ("grey", "filed"),
+        State::Disabled => ("grey", "filled"),
         State::Failed => ("red", "bold"),
         State::Queued => ("grey", "bold"),
         State::Running => ("lightgreen", "bold"),
@@ -88,9 +88,11 @@ fn format_node(id: DataProductId, plan: &Plan) -> String {
 
 /// Render a GraphViz DOT notation to HTML format
 fn render_dot(dot: &str) -> Markup {
+    // Escape backticks to prevent breaking the JavaScript template literal
+    let escaped_dot = dot.replace('`', "\\`");
     let viz_js_script: PreEscaped<String> = PreEscaped(format!(
         r#"Viz.instance().then(function(viz) {{
-            var svg = viz.renderSVGElement(` {dot} `);
+            var svg = viz.renderSVGElement(` {escaped_dot} `);
             svg.classList.add('w-[800px]', 'h-auto');
 
             document.getElementById("graph").appendChild(svg);
@@ -254,8 +256,10 @@ pub async fn plan_page(
                                 td {}
                             }
                             @if let Some(link) = &dp.link {
-                                td onclick={ "window.location='" (link) "';"} {
-                                    (link)
+                                td {
+                                    a href=(link) {
+                                        (link)
+                                    }
                                 }
                             } @else {
                                 td {}
@@ -356,7 +360,7 @@ mod tests {
         let result = format_node(id, &plan);
 
         assert_eq!(
-            result, "label=\"test-product:1.0.0\", shape=\"box\", color=\"grey\", style=\"filed\"",
+            result, "label=\"test-product:1.0.0\", shape=\"box\", color=\"grey\", style=\"filled\"",
             "Formatted node should match expected disabled state"
         );
     }
@@ -820,6 +824,72 @@ mod tests {
         assert!(
             !html_string.contains("&gt;"),
             "Should not double-encode HTML"
+        );
+    }
+
+    /// Test render_dot with backtick character escaping
+    #[test]
+    fn test_render_dot_backtick_escaping() {
+        let dot_string = "digraph test { A [label=`backtick`]; B [label=\"normal\"]; A -> B; }";
+        let result = render_dot(dot_string);
+        let html_string = result.into_string();
+
+        // Parse HTML and verify structure
+        let document = Html::parse_fragment(&html_string);
+
+        // Should contain div with id="graph"
+        let div_selector = Selector::parse("div#graph").unwrap();
+        let div = document.select(&div_selector).next();
+        assert!(div.is_some(), "Should have div with id='graph'");
+
+        // Should contain script tag for viz-js library
+        let script_selector = Selector::parse("script[src]").unwrap();
+        let script_tag = document.select(&script_selector).next();
+        assert!(
+            script_tag.is_some(),
+            "Should have script tag with src attribute"
+        );
+
+        // Should contain inline script with escaped backticks
+        assert!(
+            html_string.contains("Viz.instance().then"),
+            "Should contain Viz.instance() call"
+        );
+        assert!(
+            html_string.contains("renderSVGElement"),
+            "Should contain renderSVGElement call"
+        );
+
+        // Verify backticks are properly escaped in the JavaScript template literal
+        assert!(
+            html_string.contains("label=\\`backtick\\`"),
+            "Should escape backticks in DOT string to prevent breaking JavaScript template literal"
+        );
+
+        // Verify that the original unescaped backticks from the DOT string are not present
+        assert!(
+            !html_string.contains("label=`backtick`"),
+            "Should not contain unescaped backticks from DOT string that could break JavaScript"
+        );
+
+        // Verify the escaped DOT string is within the template literal
+        assert!(
+            html_string.contains("renderSVGElement(` digraph test { A [label=\\`backtick\\`]; B [label=\"normal\"]; A -> B; } `)"),
+            "Should contain the properly escaped DOT string within template literal"
+        );
+
+        // Verify the DOT string structure is preserved (just with escaped backticks)
+        assert!(
+            html_string.contains("digraph test"),
+            "Should preserve DOT string structure"
+        );
+        assert!(
+            html_string.contains("label=\"normal\""),
+            "Should preserve normal quotes unchanged"
+        );
+        assert!(
+            html_string.contains("A -> B"),
+            "Should preserve graph relationships"
         );
     }
 

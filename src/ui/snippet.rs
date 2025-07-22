@@ -92,7 +92,6 @@ pub mod tests {
         let head = Html::parse_fragment(&head().into_string());
 
         let script_selector = Selector::parse("script").unwrap();
-        dbg!(&head);
         let script: ElementRef = head.select(&script_selector).next().unwrap();
 
         assert!(script.attr("defer").is_some());

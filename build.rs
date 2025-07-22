@@ -60,7 +60,8 @@ fn main() {
     )
     .unwrap();
 
-    // Generate TailwindCSS file fs::create_dir_all("assets/tailwindcss").unwrap();
+    // Generate TailwindCSS file
+    fs::create_dir_all("assets/tailwindcss").unwrap();
     let output = Command::new("sh")
         .arg("-c")
         .arg("npx @tailwindcss/cli -i ./tailwind.css -o ./assets/tailwindcss/tailwind.css")

@@ -33,7 +33,7 @@ pub async fn plan_search_component(
     Ok(html! {
         // One Row per Plan returned
         @for plan in plans {
-            // Pre-compute / formate some values
+            // Pre-compute / format some values
             @let modified_date: String = match plan.modified_date {
                 Some(modified_date) => modified_date.to_string(),
                 None => "".to_string()
@@ -42,7 +42,6 @@ pub async fn plan_search_component(
             tr
                 id={ "row_" (plan.dataset_id) }
                 class="hover:bg-base-300 cursor-pointer animate-fade-up"
-                href={ "/plan/" (plan.dataset_id) }
                 onclick={ "window.location='/plan/" (plan.dataset_id) "';" } {
                 td { (plan.dataset_id) }
                 td { (modified_date) }
