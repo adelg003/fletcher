@@ -28,7 +28,8 @@ fn main() {
 
     // Copy all images to assets working folder
     fs::create_dir_all("assets/images/").expect("Failed to create assets/images directory");
-    copy("images/", "assets/", &CopyOptions::default()).expect("Failed to copy images directory to assets");
+    copy("images/", "assets/", &CopyOptions::default())
+        .expect("Failed to copy images directory to assets");
 
     // Populate Assets directory with HTMX
     fs::create_dir_all("assets/htmx").expect("Failed to create assets/htmx directory");
@@ -48,7 +49,8 @@ fn main() {
 
     // Populate Assets directory with Prism.js
     fs::create_dir_all("assets/prism").expect("Failed to create assets/prism directory");
-    fs::copy("node_modules/prismjs/prism.js", "assets/prism/prism.js").expect("Failed to copy prism.js from node_modules");
+    fs::copy("node_modules/prismjs/prism.js", "assets/prism/prism.js")
+        .expect("Failed to copy prism.js from node_modules");
     fs::copy(
         "node_modules/prismjs/components/prism-json.js",
         "assets/prism/prism-json.js",
@@ -61,7 +63,8 @@ fn main() {
     .expect("Failed to copy prism-holi-theme.css from node_modules");
 
     // Generate TailwindCSS file
-    fs::create_dir_all("assets/tailwindcss").expect("Failed to create assets/tailwindcss directory");
+    fs::create_dir_all("assets/tailwindcss")
+        .expect("Failed to create assets/tailwindcss directory");
     let output = Command::new("sh")
         .arg("-c")
         .arg("npx @tailwindcss/cli -i ./tailwind.css -o ./assets/tailwindcss/tailwind.css")
