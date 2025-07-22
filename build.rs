@@ -28,7 +28,7 @@ fn main() {
 
     // Copy all images to assets working folder
     fs::create_dir_all("assets/images/").expect("Failed to create assets/images directory");
-    copy("images/", "assets/", &CopyOptions::default())
+    copy("images/", "assets/images/", &CopyOptions::default())
         .expect("Failed to copy images directory to assets");
 
     // Populate Assets directory with HTMX

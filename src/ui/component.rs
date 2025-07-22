@@ -22,10 +22,8 @@ pub async fn plan_search_component(
         // One Row per Plan returned
         @for row in search.rows {
             // Pre-compute / format some values
-            @let modified_date: String = match row.modified_date {
-                Some(modified_date) => modified_date.to_string(),
-                None => "".to_string()
-            };
+            @let modified_date: String = row.modified_date
+                .map_or(String::new(), |date| date.to_string());
 
             tr
                 id={ "row_" (row.dataset_id) }
