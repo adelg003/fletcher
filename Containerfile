@@ -11,10 +11,15 @@ RUN apk update --no-cache && \
 
 # Copy files to build Rust Application
 WORKDIR /opt/fletcher
+COPY ./build.rs ./build.rs
 COPY ./Cargo.toml ./Cargo.toml
 COPY ./Cargo.lock ./Cargo.lock
+COPY ./images/* ./images/*
+COPY ./package.json ./package.json
+COPY ./package-lock.json ./package-lock.json
 COPY ./.sqlx ./.sqlx
 COPY ./src ./src
+COPY ./tailwind.css ./tailwind.css
 
 # Accept compile mode as an argument (default: release)
 ARG BUILD_MODE=release
