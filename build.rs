@@ -8,6 +8,9 @@ fn main() {
         fs::remove_dir_all(build_location).unwrap();
     }
 
+    // Create Assets directory
+    fs::create_dir_all("assets/").unwrap();
+
     // Install Node Dependencies
     let output = Command::new("sh")
         .arg("-c")
@@ -23,10 +26,8 @@ fn main() {
         );
     }
 
-    // Create Assets directory
-    fs::create_dir_all("assets/images/").unwrap();
-
     // Copy all images to assets working folder
+    fs::create_dir_all("assets/images/").unwrap();
     copy("images/", "assets/", &CopyOptions::default()).unwrap();
 
     // Populate Assets directory with HTMX

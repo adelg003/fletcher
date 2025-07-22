@@ -6,7 +6,8 @@ FROM rust:alpine as builder
 # Update system packages and install setup dependencies
 RUN apk update --no-cache && \
     apk add --no-cache \
-        musl-dev
+        musl-dev \
+        npm
 
 # Copy files to build Rust Application
 WORKDIR /opt/fletcher
