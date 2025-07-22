@@ -33,8 +33,8 @@ pub async fn index_page(Data(pool): Data<&PgPool>) -> Result<Markup> {
         &None,
         html! {
             // Search for a Plan
-            fieldset {
-                legend { "Search by:" }
+            fieldset class="fieldset m-8 animate-fade" {
+                legend class="fieldset-legend" { "Search by:" }
                 input
                     id="search_by_input"
                     name="search_by"
@@ -47,7 +47,7 @@ pub async fn index_page(Data(pool): Data<&PgPool>) -> Result<Markup> {
                     hx-swap="innerHTML";
             }
             // Search Results
-            table {
+            table class="table table-zebra table-md animate-fade" {
                 thead {
                     tr {
                         th { "Dataset ID" }
@@ -91,6 +91,7 @@ fn render_dot(dot: &str) -> Markup {
     let viz_js_script: PreEscaped<String> = PreEscaped(format!(
         r#"Viz.instance().then(function(viz) {{
             var svg = viz.renderSVGElement(` {dot} `);
+            svg.classList.add('w-[800px]', 'h-auto');
 
             document.getElementById("graph").appendChild(svg);
         }});"#,
@@ -149,13 +150,57 @@ pub async fn plan_page(
         "Plan",
         &Some(dataset_id),
         html! {
+            // Data Sets Stats
+            div class="stats shadow animate-fade" {
+                // Data Set
+                div class="stat" {
+                    div class="stat-title" { "Dataset ID:" }
+                    div class="stat-value" { (&plan.dataset.id) }
+                    div class="stat-desc" {
+                        @if plan.dataset.paused {
+                            span class={ "badge badge-sm badge-warning" } {
+                                "Paused"
+                            }
+                        } @else {
+                            span class={ "badge badge-sm badge-info" } {
+                                "Active"
+                            }
+                        }
+                    }
+                }
+                // Modified
+                div class="stat" {
+                    div class="stat-title" { "Modified By:" }
+                    div class="stat-value" { (&plan.dataset.modified_by) }
+                    div class="stat-desc" { "Date: " (&plan.dataset.modified_date) }
+                }
+            }
+
             // GraphViz representation of the plan's state
-            h2 { "Plan's Current State:" }
-            (render_dot(&dag_viz))
+            div class="ml-12 animate-fade" {
+                h2 class="text-4xl mb-2" {
+                    span class="bg-gradient-to-r from-orange-700 to-amber-600 bg-clip-text text-transparent" {
+                        "Plan's Current "
+                    }
+                    span class="bg-gradient-to-r from-amber-600 to-amber-400 bg-clip-text text-transparent" {
+                        "State:"
+                    }
+                }
+                div class="ml-4" {
+                    (render_dot(&dag_viz))
+                }
+            }
 
             // Data Products state details
-            h2 { "Data Products:" }
-            table {
+            h2 class="ml-12 mt-10 text-4xl mb-2 animate-fade" {
+                span class="bg-gradient-to-r from-orange-700 to-amber-600 bg-clip-text text-transparent" {
+                    "Data "
+                }
+                span class="bg-gradient-to-r from-amber-600 to-amber-400 bg-clip-text text-transparent" {
+                    "Products:"
+                }
+            }
+            table class="table table-zebra table-sm animate-fade" {
                 thead {
                     tr {
                         th { "Data Product ID" }
@@ -171,21 +216,47 @@ pub async fn plan_page(
                 }
                 tbody {
                     @for dp in &plan.data_products {
+                        // Badge style for the eager flag
+                        @let eager_badge: &str = if dp.eager {
+                            "badge-primary"
+                        } else {
+                            "badge-secondary"
+                        };
+
+                        // Badge style for the state flag
+                        @let state_badge: &str = match dp.state {
+                            State::Disabled => "badge-error",
+                            State::Failed => "badge-error",
+                            State::Queued => "badge-neutral",
+                            State::Running => "badge-info",
+                            State::Success => "badge-success",
+                            State::Waiting => "badge-neutral",
+                        };
+
                         tr
-                            id={ "row_" (dp.id) } {
+                            id={ "row_" (dp.id) }
+                            class="hover:bg-base-300" {
                             td { (dp.id) }
                             td { (dp.compute) }
                             td { (dp.name) }
                             td { (dp.version) }
-                            td { (dp.eager) }
-                            td { (dp.state) }
+                            // Put badges into span since if the badge is at the td level, and two
+                            // badge td meet, they merge into one for some reason
+                            td { span class={ "badge " (eager_badge) } {
+                                (dp.eager)
+                            } }
+                            td { span class={ "badge " (state_badge) } {
+                                (dp.state)
+                            } }
                             @if let Some(run_id) = &dp.run_id {
                                 td { (run_id) }
                             } @else {
                                 td {}
                             }
                             @if let Some(link) = &dp.link {
-                                td { (link) }
+                                td onclick={ "window.location='" (link) "';"} {
+                                    (link)
+                                }
                             } @else {
                                 td {}
                             }
@@ -195,8 +266,19 @@ pub async fn plan_page(
                 }
             }
             // Json Payload for the Plan
-            h2 { "Plan Details:" }
-            pre { code class="language-json" { (plan_json_pretty) } }
+            h2 class="ml-12 mt-10 text-4xl mb-2 animate-fade" {
+                span class="bg-gradient-to-r from-orange-700 to-amber-600 bg-clip-text text-transparent" {
+                    "Plan "
+                }
+                span class="bg-gradient-to-r from-amber-600 to-amber-400 bg-clip-text text-transparent" {
+                    "Details:"
+                }
+            }
+            pre class="animate-fade" {
+                code class="language-json" {
+                    (plan_json_pretty)
+                }
+            }
         },
     ))
 }

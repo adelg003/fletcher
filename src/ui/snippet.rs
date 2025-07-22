@@ -10,6 +10,8 @@ pub fn head() -> Markup {
             meta name="keywords" content="Conductor, Data Product, Dataset, Fletcher, OaaS, Search";
             meta name="viewport" content="width=device-width, initial-scale=1.0";
             link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico";
+            // TailwindCSS
+            link rel="stylesheet" type="text/css" href="/assets/tailwindcss/tailwind.css";
             // HTMX
             script defer src="/assets/htmx/htmx.min.js" {}
             // Prism.js
@@ -23,7 +25,7 @@ pub fn head() -> Markup {
 /// NavBar
 fn navbar(dataset_id: &Option<DatasetId>) -> Markup {
     html! {
-        nav {
+        nav class="breadcrumbs ml-8" {
             ul {
               li { a href="/" { "Search" } }
                 @if let Some(dataset_id) = dataset_id {
@@ -37,8 +39,13 @@ fn navbar(dataset_id: &Option<DatasetId>) -> Markup {
 // Page Title
 fn page_title(title: &str) -> Markup {
     html! {
-        h1 {
-            "Fletcher: " (title)
+        h1 class="text-6xl ml-8 pb-2" {
+            span class="bg-gradient-to-r from-orange-700 to-amber-600 bg-clip-text text-transparent" {
+                "Fletcher: "
+            }
+            span class="animate-fade bg-gradient-to-r from-amber-600 to-amber-400 bg-clip-text text-transparent" {
+                (title)
+            }
         }
     }
 }

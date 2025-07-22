@@ -41,6 +41,7 @@ pub async fn plan_search_component(
 
             tr
                 id={ "row_" (plan.dataset_id) }
+                class="hover:bg-base-300 cursor-pointer animate-fade-up"
                 href={ "/plan/" (plan.dataset_id) }
                 onclick={ "window.location='/plan/" (plan.dataset_id) "';" } {
                 td { (plan.dataset_id) }

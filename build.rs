@@ -58,4 +58,19 @@ fn main() {
         "assets/prism/prism.css",
     )
     .unwrap();
+
+    // Generate TailwindCSS file fs::create_dir_all("assets/tailwindcss").unwrap();
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg("npx @tailwindcss/cli -i ./tailwind.css -o ./assets/tailwindcss/tailwind.css")
+        .output()
+        .unwrap();
+
+    // Ensure TailwindCSS worked
+    if !output.status.success() {
+        panic!(
+            "Shell command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
