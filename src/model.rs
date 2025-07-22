@@ -1335,6 +1335,50 @@ mod tests {
             "State param passback should match data product passback"
         );
     }
+
+    /// Test StateParam::from - Can we convert a reference to DataProduct to a StateParam?
+    #[test]
+    fn test_state_param_from_data_product_ref() {
+        let data_product = DataProduct {
+            id: Uuid::new_v4(),
+            compute: Compute::Cams,
+            name: "test_product".to_string(),
+            version: "1.0.0".to_string(),
+            eager: true,
+            passthrough: Some(json!({"test":"passthrough"})),
+            state: State::Success,
+            run_id: Some(Uuid::new_v4()),
+            link: Some("http://test-ref.com".to_string()),
+            passback: Some(json!({"test":"passback_ref"})),
+            extra: Some(json!({"test":"extra"})),
+            modified_by: "test_user".to_string(),
+            modified_date: Utc::now(),
+        };
+
+        let state_param = StateParam::from(&data_product);
+
+        assert_eq!(
+            state_param.id, data_product.id,
+            "State param ID should match data product ID"
+        );
+        assert_eq!(
+            state_param.state, data_product.state,
+            "State param state should match data product state"
+        );
+        assert_eq!(
+            state_param.run_id, data_product.run_id,
+            "State param run_id should match data product run_id"
+        );
+        assert_eq!(
+            state_param.link, data_product.link,
+            "State param link should match data product link"
+        );
+        assert_eq!(
+            state_param.passback, data_product.passback,
+            "State param passback should match data product passback"
+        );
+    }
+
     /// Test Plan::paused - Can we pause a plan?
     #[sqlx::test]
     async fn test_plan_paused_pause_success(pool: PgPool) {
@@ -1450,5 +1494,55 @@ mod tests {
             result.unwrap_err(),
             Error::Pause(dataset_id, true) if dataset_id == plan.dataset.id
         ));
+    }
+
+    /// Test Compute Display implementation
+    #[test]
+    fn test_compute_display() {
+        assert_eq!(
+            format!("{}", Compute::Cams),
+            "C-AMS",
+            "Compute::Cams should display as 'C-AMS'"
+        );
+        assert_eq!(
+            format!("{}", Compute::Dbxaas),
+            "DBXaaS",
+            "Compute::Dbxaas should display as 'DBXaaS'"
+        );
+    }
+
+    /// Test State Display implementation
+    #[test]
+    fn test_state_display() {
+        assert_eq!(
+            format!("{}", State::Disabled),
+            "disabled",
+            "State::Disabled should display as 'disabled'"
+        );
+        assert_eq!(
+            format!("{}", State::Failed),
+            "failed",
+            "State::Failed should display as 'failed'"
+        );
+        assert_eq!(
+            format!("{}", State::Queued),
+            "queued",
+            "State::Queued should display as 'queued'"
+        );
+        assert_eq!(
+            format!("{}", State::Running),
+            "running",
+            "State::Running should display as 'running'"
+        );
+        assert_eq!(
+            format!("{}", State::Success),
+            "success",
+            "State::Success should display as 'success'"
+        );
+        assert_eq!(
+            format!("{}", State::Waiting),
+            "waiting",
+            "State::Waiting should display as 'waiting'"
+        );
     }
 }

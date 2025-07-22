@@ -377,4 +377,125 @@ pub mod tests {
             "Page title should generate exactly one h1 element"
         );
     }
+
+    /// Test header function with dataset_id
+    #[test]
+    fn test_header_with_dataset_id() {
+        let title = "Test Page";
+        let dataset_id = Some(Uuid::new_v4());
+        let header_markup = header(title, &dataset_id);
+        let header_html = header_markup.into_string();
+        let document = Html::parse_fragment(&header_html);
+
+        // Should contain header element
+        let header_selector = Selector::parse("header").unwrap();
+        let header_element = document.select(&header_selector).next();
+        assert!(
+            header_element.is_some(),
+            "Header should contain header element"
+        );
+
+        // Should contain navigation
+        let nav_selector = Selector::parse("nav").unwrap();
+        let nav_element = document.select(&nav_selector).next();
+        assert!(nav_element.is_some(), "Header should contain navigation");
+
+        // Should have 2 nav items (Search and Plan)
+        let li_selector = Selector::parse("nav ul li").unwrap();
+        let nav_items = document.select(&li_selector).count();
+        assert_eq!(
+            nav_items, 2,
+            "Header with dataset_id should have 2 nav items"
+        );
+
+        // Should contain page title
+        let h1_selector = Selector::parse("h1").unwrap();
+        let h1_element = document.select(&h1_selector).next();
+        assert!(h1_element.is_some(), "Header should contain h1 title");
+
+        // Should contain title spans
+        let span_selector = Selector::parse("h1 span").unwrap();
+        let spans = document.select(&span_selector).count();
+        assert_eq!(spans, 2, "Header title should have 2 spans");
+    }
+
+    /// Test header function without dataset_id
+    #[test]
+    fn test_header_without_dataset_id() {
+        let title = "Search Page";
+        let dataset_id = None;
+        let header_markup = header(title, &dataset_id);
+        let header_html = header_markup.into_string();
+        let document = Html::parse_fragment(&header_html);
+
+        // Should contain header element
+        let header_selector = Selector::parse("header").unwrap();
+        let header_element = document.select(&header_selector).next();
+        assert!(
+            header_element.is_some(),
+            "Header should contain header element"
+        );
+
+        // Should contain navigation
+        let nav_selector = Selector::parse("nav").unwrap();
+        let nav_element = document.select(&nav_selector).next();
+        assert!(nav_element.is_some(), "Header should contain navigation");
+
+        // Should have 1 nav item (Search only)
+        let li_selector = Selector::parse("nav ul li").unwrap();
+        let nav_items = document.select(&li_selector).count();
+        assert_eq!(
+            nav_items, 1,
+            "Header without dataset_id should have 1 nav item"
+        );
+
+        // Should contain page title
+        let h1_selector = Selector::parse("h1").unwrap();
+        let h1_element = document.select(&h1_selector).next();
+        assert!(h1_element.is_some(), "Header should contain h1 title");
+
+        // Check title content
+        let span_selector = Selector::parse("h1 span").unwrap();
+        let spans: Vec<_> = h1_element.unwrap().select(&span_selector).collect();
+        assert_eq!(spans.len(), 2, "Header title should have 2 spans");
+        assert_eq!(
+            spans[0].inner_html(),
+            "Fletcher: ",
+            "First span should contain Fletcher prefix"
+        );
+        assert_eq!(
+            spans[1].inner_html(),
+            "Search Page",
+            "Second span should contain title"
+        );
+    }
+
+    /// Test header function with empty title
+    #[test]
+    fn test_header_empty_title() {
+        let title = "";
+        let dataset_id = Some(Uuid::new_v4());
+        let header_markup = header(title, &dataset_id);
+        let header_html = header_markup.into_string();
+        let document = Html::parse_fragment(&header_html);
+
+        // Should still contain all structure elements
+        let header_selector = Selector::parse("header").unwrap();
+        assert!(
+            document.select(&header_selector).next().is_some(),
+            "Header should contain header element even with empty title"
+        );
+
+        let nav_selector = Selector::parse("nav").unwrap();
+        assert!(
+            document.select(&nav_selector).next().is_some(),
+            "Header should contain navigation even with empty title"
+        );
+
+        let h1_selector = Selector::parse("h1").unwrap();
+        assert!(
+            document.select(&h1_selector).next().is_some(),
+            "Header should contain h1 title even with empty title"
+        );
+    }
 }
