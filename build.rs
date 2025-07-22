@@ -57,7 +57,7 @@ fn main() {
     )
     .expect("Failed to copy prism-json.js from node_modules");
     fs::copy(
-        "node_modules/prism-themes/themes/prism-holi-theme.css",
+        "node_modules/prism-themes/themes/prism-holi-theme.min.css",
         "assets/prism/prism.css",
     )
     .expect("Failed to copy prism-holi-theme.css from node_modules");
@@ -67,7 +67,7 @@ fn main() {
         .expect("Failed to create assets/tailwindcss directory");
     let output = Command::new("sh")
         .arg("-c")
-        .arg("npx @tailwindcss/cli -i ./tailwind.css -o ./assets/tailwindcss/tailwind.css")
+        .arg("npx @tailwindcss/cli -i ./tailwind.css -o ./assets/tailwindcss/tailwind.css --minify")
         .output()
         .expect("Failed to execute TailwindCSS build command");
 
