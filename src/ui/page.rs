@@ -1061,10 +1061,14 @@ mod tests {
         // Get response text (HTML)
         let html_content = response.0.into_body().into_string().await.unwrap();
 
-        // Verify specific HTML structure
+        // Verify specific HTML structure (page title with spans)
         assert!(
-            html_content.contains("Fletcher: Search"),
-            "Should contain page title"
+            html_content.contains("<span class=\"bg-gradient-to-r from-orange-700 to-amber-600 bg-clip-text text-transparent\">Fletcher: </span>"),
+            "Should contain Fletcher prefix span"
+        );
+        assert!(
+            html_content.contains("<span class=\"animate-fade bg-gradient-to-r from-amber-600 to-amber-400 bg-clip-text text-transparent\">Search</span>"),
+            "Should contain Search title span"
         );
         assert!(
             html_content.contains("Search by:"),
@@ -1189,7 +1193,13 @@ mod tests {
         let h2_selector = Selector::parse("h2").unwrap();
         let h2 = document.select(&h2_selector).next();
         assert!(h2.is_some(), "Should have h2 element");
-        assert_eq!(h2.unwrap().inner_html(), "Plan's Current State:");
+
+        // Check for spans within h2
+        let span_selector = Selector::parse("span").unwrap();
+        let spans: Vec<_> = h2.unwrap().select(&span_selector).collect();
+        assert_eq!(spans.len(), 2, "h2 should have exactly 2 span elements");
+        assert_eq!(spans[0].inner_html(), "Plan's Current ");
+        assert_eq!(spans[1].inner_html(), "State:");
 
         // Should have navigation with both Search and Plan links
         let nav_selector = Selector::parse("nav ul li").unwrap();
@@ -1395,7 +1405,13 @@ mod tests {
         let h2_selector = Selector::parse("h2").unwrap();
         let h2 = document.select(&h2_selector).next();
         assert!(h2.is_some(), "Should have h2 element even with empty plan");
-        assert_eq!(h2.unwrap().inner_html(), "Plan's Current State:");
+
+        // Check for spans within h2
+        let span_selector = Selector::parse("span").unwrap();
+        let spans: Vec<_> = h2.unwrap().select(&span_selector).collect();
+        assert_eq!(spans.len(), 2, "h2 should have exactly 2 span elements");
+        assert_eq!(spans[0].inner_html(), "Plan's Current ");
+        assert_eq!(spans[1].inner_html(), "State:");
 
         // Should still have the table structure
         let table_selector = Selector::parse("table").unwrap();
@@ -1443,22 +1459,38 @@ mod tests {
         // Get response text (HTML)
         let html_content = response.0.into_body().into_string().await.unwrap();
 
-        // Verify specific content elements
+        // Verify specific content elements (page title with spans)
         assert!(
-            html_content.contains("Fletcher: Plan"),
-            "Should contain page title"
+            html_content.contains("<span class=\"bg-gradient-to-r from-orange-700 to-amber-600 bg-clip-text text-transparent\">Fletcher: </span>"),
+            "Should contain Fletcher prefix span"
         );
         assert!(
-            html_content.contains("Plan's Current State:"),
-            "Should contain plan heading"
+            html_content.contains("<span class=\"animate-fade bg-gradient-to-r from-amber-600 to-amber-400 bg-clip-text text-transparent\">Plan</span>"),
+            "Should contain Plan title span"
         );
         assert!(
-            html_content.contains("Data Products:"),
-            "Should contain data products heading"
+            html_content.contains("<span class=\"bg-gradient-to-r from-orange-700 to-amber-600 bg-clip-text text-transparent\">Plan's Current </span>"),
+            "Should contain Plan's Current span"
         );
         assert!(
-            html_content.contains("Plan Details:"),
-            "Should contain plan details heading"
+            html_content.contains("<span class=\"bg-gradient-to-r from-amber-600 to-amber-400 bg-clip-text text-transparent\">State:</span>"),
+            "Should contain State span"
+        );
+        assert!(
+            html_content.contains("<span class=\"bg-gradient-to-r from-orange-700 to-amber-600 bg-clip-text text-transparent\">Data </span>"),
+            "Should contain Data span"
+        );
+        assert!(
+            html_content.contains("<span class=\"bg-gradient-to-r from-amber-600 to-amber-400 bg-clip-text text-transparent\">Products:</span>"),
+            "Should contain Products span"
+        );
+        assert!(
+            html_content.contains("<span class=\"bg-gradient-to-r from-orange-700 to-amber-600 bg-clip-text text-transparent\">Plan </span>"),
+            "Should contain Plan span"
+        );
+        assert!(
+            html_content.contains("<span class=\"bg-gradient-to-r from-amber-600 to-amber-400 bg-clip-text text-transparent\">Details:</span>"),
+            "Should contain Details span"
         );
         assert!(
             html_content.contains("Data Product ID"),
@@ -1491,8 +1523,8 @@ mod tests {
             "Should contain Prism.js JSON language class"
         );
         assert!(
-            html_content.contains("<pre><code class=\"language-json\">"),
-            "Should contain properly formatted JSON code block"
+            html_content.contains("<pre class=\"animate-fade\"><code class=\"language-json\">"),
+            "Should contain properly formatted JSON code block with animation class"
         );
     }
 
@@ -1522,15 +1554,21 @@ mod tests {
         // Parse HTML and verify JSON rendering structure
         let document = Html::parse_fragment(&html_content);
 
-        // Should contain "Plan Details:" heading
+        // Should contain "Plan Details:" heading with spans
         let h2_selector = Selector::parse("h2").unwrap();
         let headings: Vec<_> = document.select(&h2_selector).collect();
-        let plan_details_heading = headings
-            .iter()
-            .find(|h2| h2.inner_html() == "Plan Details:");
+
+        // Find the heading that contains "Plan " and "Details:" in spans
+        let plan_details_heading = headings.iter().find(|h2| {
+            let span_selector = Selector::parse("span").unwrap();
+            let spans: Vec<_> = h2.select(&span_selector).collect();
+            spans.len() == 2
+                && spans[0].inner_html() == "Plan "
+                && spans[1].inner_html() == "Details:"
+        });
         assert!(
             plan_details_heading.is_some(),
-            "Should have 'Plan Details:' heading"
+            "Should have 'Plan Details:' heading with proper span structure"
         );
 
         // Should contain pre > code structure with language-json class

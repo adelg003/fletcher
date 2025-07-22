@@ -70,6 +70,13 @@ mod tests {
     /// Test that required asset files are embedded correctly
     #[test]
     fn test_required_assets_exist() {
+        // Check that tailwind.css exists in the embedded assets
+        let tailwind_css_file = Assets::get("tailwindcss/tailwind.css");
+        assert!(
+            tailwind_css_file.is_some(),
+            "tailwindcss/tailwind.css should be present in embedded assets",
+        );
+
         // Check that htmx.min.js exists in the embedded assets
         let htmx_file = Assets::get("htmx/htmx.min.js");
         assert!(

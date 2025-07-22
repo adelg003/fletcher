@@ -67,6 +67,25 @@ pub mod tests {
     use scraper::{ElementRef, Html, Selector};
     use uuid::Uuid;
 
+    /// Test that TailwindCSS is present in the head
+    #[test]
+    fn test_tailwindcss_present() {
+        let head = Html::parse_fragment(&head().into_string());
+
+        let link_selector = Selector::parse("link[rel=\"stylesheet\"]").unwrap();
+        let tailwind_css_link = head
+            .select(&link_selector)
+            .find(|link| link.attr("href") == Some("/assets/tailwindcss/tailwind.css"));
+
+        assert!(
+            tailwind_css_link.is_some(),
+            "tailwind.css should be present in head"
+        );
+        let link = tailwind_css_link.unwrap();
+        assert_eq!(link.attr("type"), Some("text/css"));
+        assert_eq!(link.attr("href"), Some("/assets/tailwindcss/tailwind.css"));
+    }
+
     /// Test that HTMX is present in the head
     #[test]
     fn test_htmx_present() {
@@ -202,10 +221,24 @@ pub mod tests {
         // Should have h1 element
         let h1_selector = Selector::parse("h1").unwrap();
         let h1_element = document.select(&h1_selector).next().unwrap();
+        // Check spans within h1
+        let span_selector = Selector::parse("span").unwrap();
+        let spans: Vec<_> = h1_element.select(&span_selector).collect();
         assert_eq!(
-            h1_element.inner_html(),
-            "Fletcher: Dashboard",
-            "Page title should include 'Fletcher: ' prefix and the provided title"
+            spans.len(),
+            2,
+            "Page title should have exactly 2 span elements"
+        );
+
+        assert_eq!(
+            spans[0].inner_html(),
+            "Fletcher: ",
+            "First span should contain 'Fletcher: ' prefix"
+        );
+        assert_eq!(
+            spans[1].inner_html(),
+            "Dashboard",
+            "Second span should contain the provided title"
         );
     }
 
@@ -219,10 +252,23 @@ pub mod tests {
 
         let h1_selector = Selector::parse("h1").unwrap();
         let h1_element = document.select(&h1_selector).next().unwrap();
+        let span_selector = Selector::parse("span").unwrap();
+        let spans: Vec<_> = h1_element.select(&span_selector).collect();
+
         assert_eq!(
-            h1_element.inner_html(),
+            spans.len(),
+            2,
+            "Page title should have exactly 2 span elements"
+        );
+        assert_eq!(
+            spans[0].inner_html(),
             "Fletcher: ",
-            "Page title should handle empty title gracefully"
+            "First span should contain 'Fletcher: ' prefix"
+        );
+        assert_eq!(
+            spans[1].inner_html(),
+            "",
+            "Second span should handle empty title gracefully"
         );
     }
 
@@ -236,10 +282,23 @@ pub mod tests {
 
         let h1_selector = Selector::parse("h1").unwrap();
         let h1_element = document.select(&h1_selector).next().unwrap();
+        let span_selector = Selector::parse("span").unwrap();
+        let spans: Vec<_> = h1_element.select(&span_selector).collect();
+
         assert_eq!(
-            h1_element.inner_html(),
-            "Fletcher: Data &amp; Analytics &lt;Report&gt;",
-            "Page title should properly escape HTML special characters"
+            spans.len(),
+            2,
+            "Page title should have exactly 2 span elements"
+        );
+        assert_eq!(
+            spans[0].inner_html(),
+            "Fletcher: ",
+            "First span should contain 'Fletcher: ' prefix"
+        );
+        assert_eq!(
+            spans[1].inner_html(),
+            "Data &amp; Analytics &lt;Report&gt;",
+            "Second span should properly escape HTML special characters"
         );
     }
 
@@ -253,11 +312,23 @@ pub mod tests {
 
         let h1_selector = Selector::parse("h1").unwrap();
         let h1_element = document.select(&h1_selector).next().unwrap();
-        let expected = format!("Fletcher: {title}");
+        let span_selector = Selector::parse("span").unwrap();
+        let spans: Vec<_> = h1_element.select(&span_selector).collect();
+
         assert_eq!(
-            h1_element.inner_html(),
-            expected,
-            "Page title should handle long titles correctly"
+            spans.len(),
+            2,
+            "Page title should have exactly 2 span elements"
+        );
+        assert_eq!(
+            spans[0].inner_html(),
+            "Fletcher: ",
+            "First span should contain 'Fletcher: ' prefix"
+        );
+        assert_eq!(
+            spans[1].inner_html(),
+            title,
+            "Second span should handle long titles correctly"
         );
     }
 
@@ -271,10 +342,23 @@ pub mod tests {
 
         let h1_selector = Selector::parse("h1").unwrap();
         let h1_element = document.select(&h1_selector).next().unwrap();
+        let span_selector = Selector::parse("span").unwrap();
+        let spans: Vec<_> = h1_element.select(&span_selector).collect();
+
         assert_eq!(
-            h1_element.inner_html(),
-            "Fletcher: Plan 42 - Version 1.2.3",
-            "Page title should handle mixed alphanumeric content correctly"
+            spans.len(),
+            2,
+            "Page title should have exactly 2 span elements"
+        );
+        assert_eq!(
+            spans[0].inner_html(),
+            "Fletcher: ",
+            "First span should contain 'Fletcher: ' prefix"
+        );
+        assert_eq!(
+            spans[1].inner_html(),
+            "Plan 42 - Version 1.2.3",
+            "Second span should handle mixed alphanumeric content correctly"
         );
     }
 
