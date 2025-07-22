@@ -399,7 +399,7 @@ pub async fn search_plans_select(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<Search>> {
-    // Format seach_by so it supports SQL wildcars while allowing for save SQL preperation.
+    // Format search_by so it supports SQL wildcars while allowing for save SQL preperation.
     let search_by: String = format!("%{search_by}%");
 
     // Pull all datasets that meet our query
@@ -1822,7 +1822,7 @@ pub mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
+      assert_eq!(
             results.len(),
             1,
             "Case-insensitive search should return 1 result by username"
@@ -1897,6 +1897,7 @@ pub mod tests {
             results[0].dataset_id, dataset.id,
             "Search by dataset extra field should return the dataset"
         );
+
 
         // Test search by data product version
         let results = search_plans_select(&mut tx, "unique-version-123", 10, 0)
