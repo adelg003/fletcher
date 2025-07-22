@@ -1822,7 +1822,7 @@ pub mod tests {
             .await
             .unwrap();
 
-      assert_eq!(
+        assert_eq!(
             results.len(),
             1,
             "Case-insensitive search should return 1 result by username"
@@ -1897,7 +1897,6 @@ pub mod tests {
             results[0].dataset_id, dataset.id,
             "Search by dataset extra field should return the dataset"
         );
-
 
         // Test search by data product version
         let results = search_plans_select(&mut tx, "unique-version-123", 10, 0)
