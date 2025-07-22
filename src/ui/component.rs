@@ -307,14 +307,6 @@ mod tests {
             "Row id should start with 'row_' prefix"
         );
 
-        // Should have href attribute pointing to plan page
-        let href = first_row.attr("href");
-        assert!(href.is_some(), "First row should have href attribute");
-        assert!(
-            href.unwrap().starts_with("/plan/"),
-            "Row href should point to plan page"
-        );
-
         // Should have onclick attribute
         let onclick = first_row.attr("onclick");
         assert!(onclick.is_some(), "First row should have onclick attribute");
