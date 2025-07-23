@@ -22,7 +22,7 @@ run-release:
 
 # Check Rust Code
 check:
-  cargo check --locked
+  cargo check --workspace --locked
 
 # Check Rust Code using the SQLx Cache
 check_w_sqlx_cache:
@@ -30,11 +30,11 @@ check_w_sqlx_cache:
 
 # Check Rust Linting
 clippy:
-  cargo clippy --locked --all-targets -- --deny warnings
+  cargo clippy --workspace --locked --all-targets -- --deny warnings
 
 # Check Rust Linting using SQLx Cache
 clippy_w_sqlx_cache:
-  SQLX_OFFLINE=true cargo clippy --locked -- --deny warnings
+  SQLX_OFFLINE=true cargo clippy --workspace --locked -- --deny warnings
 
 # Apply Rust Formating
 fmt:
@@ -46,7 +46,7 @@ fmt-check:
 
 # Check Rust Unittest
 test:
-  cargo test --locked
+  cargo test --workspace --locked
 
 # Install SQLx-CLI
 sqlx-install:
@@ -79,6 +79,14 @@ deny-install:
 # Check Rust advisories, bans, licenses, sources
 deny:
   cargo deny check
+
+################
+## Key Hasher ##
+################
+
+# Hash a given key (or any value realy)
+hash key:
+  cargo run --package key_hasher -- --key {{ key }}
 
 
 ################

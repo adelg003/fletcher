@@ -1,13 +1,7 @@
 use fs_extra::dir::{CopyOptions, copy};
-use std::{fs, path::Path, process::Command};
+use std::{fs, process::Command};
 
 fn main() {
-    // Cleanup assets folder
-    let build_location = Path::new("assets/");
-    if build_location.exists() {
-        fs::remove_dir_all(build_location).expect("Failed to remove existing assets directory");
-    }
-
     // Create Assets directory
     fs::create_dir_all("assets/").expect("Failed to create assets directory");
 
@@ -28,8 +22,15 @@ fn main() {
 
     // Copy all images to assets working folder
     fs::create_dir_all("assets/images/").expect("Failed to create assets/images directory");
-    copy("images/", "assets/images/", &CopyOptions::default())
-        .expect("Failed to copy images directory to assets");
+    copy(
+        "images/",
+        "assets/images/",
+        &CopyOptions {
+            overwrite: true,
+            ..CopyOptions::default()
+        },
+    )
+    .expect("Failed to copy images directory to assets");
 
     // Populate Assets directory with HTMX
     fs::create_dir_all("assets/htmx").expect("Failed to create assets/htmx directory");
