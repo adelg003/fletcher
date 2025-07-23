@@ -57,6 +57,17 @@ Fletcher manages **Plans** - collections of **Data Products** organized into **D
    ```
 
 3. **Configure environment**
+
+   **Option A: Using .env file (Recommended for development)**
+   ```bash
+   # Create a .env file in the project root
+   cat > .env << 'EOF'
+   DATABASE_URL=postgres://fletcher_user:password@localhost/fletcher_db
+   RUST_BACKTRACE=1
+   EOF
+   ```
+
+   **Option B: Manual export**
    ```bash
    export DATABASE_URL="postgres://fletcher_user:password@localhost/fletcher_db"
    ```
@@ -246,6 +257,26 @@ just sqlx-install
 just deny-install
 ```
 
+### Environment Configuration
+
+Fletcher uses environment variables for configuration. For local development, create a `.env` file in the project root:
+
+```bash
+# .env file for local development
+DATABASE_URL=postgres://fletcher_user:password@localhost/fletcher_db
+RUST_BACKTRACE=1
+
+# Optional: Set log levels
+RUST_LOG=debug
+```
+
+**Available Environment Variables:**
+- `DATABASE_URL` - PostgreSQL connection string (required)
+- `RUST_BACKTRACE` - Set to `1` or `full` for detailed error traces
+- `RUST_LOG` - Log level (`error`, `warn`, `info`, `debug`, `trace`)
+
+**Note:** The `.env` file is automatically loaded by Fletcher using the `dotenvy` crate.
+
 ### Development Commands
 
 ```bash
@@ -353,8 +384,15 @@ just docker-healthcheck
 
 ### Environment Variables
 
-- `DATABASE_URL` - PostgreSQL connection string (required)
-- `RUST_BACKTRACE` - Set to `full` for detailed error traces
+**Required:**
+- `DATABASE_URL` - PostgreSQL connection string
+
+**Optional:**
+- `RUST_BACKTRACE` - Set to `1` or `full` for detailed error traces  
+- `RUST_LOG` - Log level (`error`, `warn`, `info`, `debug`, `trace`)
+
+**For Development:** Use a `.env` file (see Environment Configuration section above)  
+**For Production:** Set environment variables directly in your deployment system
 
 ## Configuration
 
