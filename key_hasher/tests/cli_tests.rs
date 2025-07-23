@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use bcrypt::verify;
+use pretty_assertions::{assert_eq, assert_ne};
 
 #[test]
 fn test_hash_key_with_short_flag() {
