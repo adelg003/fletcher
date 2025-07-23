@@ -16,18 +16,15 @@ fn test_hash_key_with_short_flag() {
     );
     assert!(
         stdout.starts_with("Key hash: $2"),
-        "Output should start with 'Key hash: $2', got: {}",
-        stdout
+        "Output should start with 'Key hash: $2', got: {stdout}"
     );
     assert!(
         stdout.contains("$2"),
-        "Output should contain bcrypt identifier '$2', got: {}",
-        stdout
+        "Output should contain bcrypt identifier '$2', got: {stdout}"
     );
     assert!(
         stdout.ends_with('\n'),
-        "Output should end with newline, got: {:?}",
-        stdout
+        "Output should end with newline, got: {stdout:?}"
     );
 }
 
@@ -46,18 +43,15 @@ fn test_hash_key_with_long_flag() {
     );
     assert!(
         stdout.starts_with("Key hash: $2"),
-        "Output should start with 'Key hash: $2', got: {}",
-        stdout
+        "Output should start with 'Key hash: $2', got: {stdout}"
     );
     assert!(
         stdout.contains("$2"),
-        "Output should contain bcrypt identifier '$2', got: {}",
-        stdout
+        "Output should contain bcrypt identifier '$2', got: {stdout}"
     );
     assert!(
         stdout.ends_with('\n'),
-        "Output should end with newline, got: {:?}",
-        stdout
+        "Output should end with newline, got: {stdout:?}"
     );
 }
 
@@ -80,13 +74,11 @@ fn test_different_keys_produce_different_hashes() {
     // Both should still be valid bcrypt hashes
     assert!(
         hash1.starts_with("Key hash: $2"),
-        "First hash should be valid bcrypt format, got: {}",
-        hash1
+        "First hash should be valid bcrypt format, got: {hash1}"
     );
     assert!(
         hash2.starts_with("Key hash: $2"),
-        "Second hash should be valid bcrypt format, got: {}",
-        hash2
+        "Second hash should be valid bcrypt format, got: {hash2}"
     );
 }
 
@@ -110,13 +102,11 @@ fn test_same_key_produces_different_hashes_due_to_salt() {
     // Both should still be valid bcrypt hashes
     assert!(
         hash1.starts_with("Key hash: $2"),
-        "First hash should be valid bcrypt format, got: {}",
-        hash1
+        "First hash should be valid bcrypt format, got: {hash1}"
     );
     assert!(
         hash2.starts_with("Key hash: $2"),
-        "Second hash should be valid bcrypt format, got: {}",
-        hash2
+        "Second hash should be valid bcrypt format, got: {hash2}"
     );
 }
 
@@ -133,8 +123,7 @@ fn test_missing_key_argument() {
     );
     assert!(
         stderr.contains("required arguments were not provided"),
-        "Error message should mention required arguments, got: {}",
-        stderr
+        "Error message should mention required arguments, got: {stderr}"
     );
 }
 
@@ -153,8 +142,7 @@ fn test_empty_key() {
     );
     assert!(
         stdout.starts_with("Key hash: $2"),
-        "Empty key should still produce valid hash, got: {}",
-        stdout
+        "Empty key should still produce valid hash, got: {stdout}"
     );
 }
 
@@ -173,8 +161,7 @@ fn test_key_with_special_characters() {
     );
     assert!(
         stdout.starts_with("Key hash: $2"),
-        "Special characters should produce valid hash, got: {}",
-        stdout
+        "Special characters should produce valid hash, got: {stdout}"
     );
 }
 
@@ -193,8 +180,7 @@ fn test_key_with_unicode_characters() {
     );
     assert!(
         stdout.starts_with("Key hash: $2"),
-        "Unicode characters should produce valid hash, got: {}",
-        stdout
+        "Unicode characters should produce valid hash, got: {stdout}"
     );
 }
 
@@ -214,8 +200,7 @@ fn test_very_long_key() {
     );
     assert!(
         stdout.starts_with("Key hash: $2"),
-        "Long key should produce valid hash, got: {}",
-        stdout
+        "Long key should produce valid hash, got: {stdout}"
     );
 }
 
@@ -231,13 +216,11 @@ fn test_help_flag() {
     assert!(output.status.success(), "Help command should succeed");
     assert!(
         stdout.contains("Key to hash"),
-        "Help text should contain argument description, got: {}",
-        stdout
+        "Help text should contain argument description, got: {stdout}"
     );
     assert!(
         stdout.contains("Usage:"),
-        "Help text should contain usage information, got: {}",
-        stdout
+        "Help text should contain usage information, got: {stdout}"
     );
 }
 
@@ -253,13 +236,11 @@ fn test_help_short_flag() {
     assert!(output.status.success(), "Short help command should succeed");
     assert!(
         stdout.contains("Key to hash"),
-        "Help text should contain argument description, got: {}",
-        stdout
+        "Help text should contain argument description, got: {stdout}"
     );
     assert!(
         stdout.contains("Usage:"),
-        "Help text should contain usage information, got: {}",
-        stdout
+        "Help text should contain usage information, got: {stdout}"
     );
 }
 
@@ -275,13 +256,11 @@ fn test_version_flag() {
     assert!(output.status.success(), "Version command should succeed");
     assert!(
         stdout.contains("key_hasher"),
-        "Version output should contain program name, got: {}",
-        stdout
+        "Version output should contain program name, got: {stdout}"
     );
     assert!(
         stdout.contains("0.1.0"),
-        "Version output should contain version number, got: {}",
-        stdout
+        "Version output should contain version number, got: {stdout}"
     );
 }
 
@@ -300,13 +279,11 @@ fn test_version_short_flag() {
     );
     assert!(
         stdout.contains("key_hasher"),
-        "Version output should contain program name, got: {}",
-        stdout
+        "Version output should contain program name, got: {stdout}"
     );
     assert!(
         stdout.contains("0.1.0"),
-        "Version output should contain version number, got: {}",
-        stdout
+        "Version output should contain version number, got: {stdout}"
     );
 }
 
@@ -325,8 +302,7 @@ fn test_invalid_argument() {
     );
     assert!(
         stderr.contains("unexpected argument"),
-        "Error message should mention unexpected argument, got: {}",
-        stderr
+        "Error message should mention unexpected argument, got: {stderr}"
     );
 }
 
@@ -358,16 +334,14 @@ fn test_bcrypt_hash_format() {
     );
     assert!(
         hash.starts_with("$2"),
-        "Bcrypt hash should start with '$2', got: '{}'",
-        hash
+        "Bcrypt hash should start with '$2', got: '{hash}'"
     );
 
     // Should contain exactly 3 dollar signs (format: $2x$cost$salthash)
     let dollar_count = hash.chars().filter(|&c| c == '$').count();
     assert_eq!(
         dollar_count, 3,
-        "Bcrypt hash should contain exactly 3 dollar signs, got: {} in '{}'",
-        dollar_count, hash
+        "Bcrypt hash should contain exactly 3 dollar signs, got: {dollar_count} in '{hash}'"
     );
 }
 
@@ -393,15 +367,12 @@ fn test_hash_verification() {
     // Verify that the hash actually matches the original password
     assert!(
         verify(test_password, hash).unwrap(),
-        "Generated hash '{}' should verify against original password '{}'",
-        hash,
-        test_password
+        "Generated hash '{hash}' should verify against original password '{test_password}'"
     );
 
     // Verify that it doesn't match a different password
     assert!(
         !verify("wrong_password", hash).unwrap(),
-        "Generated hash '{}' should NOT verify against wrong password 'wrong_password'",
-        hash
+        "Generated hash '{hash}' should NOT verify against wrong password 'wrong_password'"
     );
 }
