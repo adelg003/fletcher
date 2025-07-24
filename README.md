@@ -63,13 +63,33 @@ Fletcher manages **Plans** - collections of **Data Products** organized into **D
    # Create a .env file in the project root
    cat > .env << 'EOF'
    DATABASE_URL=postgres://fletcher_user:password@localhost/fletcher_db
+   SECRET_KEY=your-secret-key-for-jwt-signing-make-it-long-and-random
+   REMOTE_APIS='[
+     {
+       "service": "local",
+       "hash": "$2b$10$DvqWB.sMjo1XSlgGrOzGAuBTY5E1hkLiDK3BdcK0TiROjCWkgCeaa",
+       "roles": ["publish", "pause", "update", "disable"]
+     },
+     {
+       "service": "readonly",
+       "hash": "$2b$10$46TiUvUaKvp2D/BuoXe8Fu9ktffCBXioF8M0DeeOWvz8X2J0RtpvK",
+       "roles": []
+     }
+   ]'
    RUST_BACKTRACE=1
    EOF
    ```
+   
+   **Note**: The above configuration includes:
+   - `local` service with password `abc123` (full access)
+   - `readonly` service with password `abc123` (read-only access)
+   - Generate new password hashes with: `just hash "your-password"`
 
    **Option B: Manual export**
    ```bash
    export DATABASE_URL="postgres://fletcher_user:password@localhost/fletcher_db"
+   export SECRET_KEY="your-secret-key-for-jwt-signing-make-it-long-and-random"
+   export REMOTE_APIS='[{"service":"local","hash":"$2b$10$DvqWB.sMjo1XSlgGrOzGAuBTY5E1hkLiDK3BdcK0TiROjCWkgCeaa","roles":["publish","pause","update","disable"]},{"service":"readonly","hash":"$2b$10$46TiUvUaKvp2D/BuoXe8Fu9ktffCBXioF8M0DeeOWvz8X2J0RtpvK","roles":[]}]'
    ```
 
 4. **Run database migrations**
@@ -173,25 +193,136 @@ Fletcher's UI works in all modern browsers with:
 - `/component/plan_search` - HTMX search component
 - `/assets/*` - Static assets (CSS, JS, images)
 
+## Authentication
+
+Fletcher uses **JWT (JSON Web Token) authentication** with **role-based access control (RBAC)** to secure API endpoints.
+
+### Authentication Flow
+
+1. **Get JWT Token**
+   ```bash
+   curl -X POST http://localhost:3000/api/authenticate \
+     -H "Content-Type: application/json" \
+     -d '{
+       "service": "local",
+       "key": "abc123"
+     }'
+   ```
+
+2. **Response**
+   ```json
+   {
+     "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+     "token_type": "Bearer",
+     "expires": 1640995200,
+     "issued": 1640991600,
+     "issued_by": "Fletcher",
+     "ttl": 3600,
+     "service": "local",
+     "roles": ["disable", "pause", "publish", "update"]
+   }
+   ```
+
+3. **Use Bearer Token**
+   ```bash
+   curl -X POST http://localhost:3000/api/plan \
+     -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..." \
+     -H "Content-Type: application/json" \
+     -d '{ ... }'
+   ```
+
+### Roles and Permissions
+
+Fletcher implements four distinct roles that control access to different operations:
+
+| Role | Description | Endpoints |
+|------|-------------|-----------|
+| **`publish`** | Create and submit new plans | `POST /api/plan` |
+| **`update`** | Modify data product states and clear dependencies | `PUT /api/data_product/update/*`<br/>`PUT /api/data_product/clear/*` |
+| **`pause`** | Pause and unpause dataset execution | `PUT /api/plan/pause/*`<br/>`PUT /api/plan/unpause/*` |
+| **`disable`** | Permanently disable data products | `DELETE /api/data_product/*` |
+
+### Service Configuration
+
+Services are configured via the `REMOTE_APIS` environment variable:
+
+```json
+[
+  {
+    "service": "local",
+    "hash": "$2b$10$DvqWB.sMjo1XSlgGrOzGAuBTY5E1hkLiDK3BdcK0TiROjCWkgCeaa",
+    "roles": ["publish", "pause", "update", "disable"]
+  },
+  {
+    "service": "readonly", 
+    "hash": "$2b$10$46TiUvUaKvp2D/BuoXe8Fu9ktffCBXioF8M0DeeOWvz8X2J0RtpvK",
+    "roles": []
+  }
+]
+```
+
+- **`local`** - Full access service with all roles
+- **`readonly`** - Limited access service with no modification roles
+- **`hash`** - bcrypt hash of the service's password (use `just hash "password"` to generate)
+
 ## API Endpoints
 
+### Authentication
+- `POST /api/authenticate` - Get JWT token (no auth required)
+
 ### Plans
-- `POST /api/plan` - Create or update a plan
+- `POST /api/plan` - Create or update a plan **[Requires: `publish` role]**
 - `GET /api/plan/{dataset_id}` - Get a plan by dataset ID
-- `GET /api/plan/search` - Search plans
-- `PUT /api/plan/pause/{dataset_id}` - Pause/unpause a dataset
+- `GET /api/plan/search` - Search plans  
+- `PUT /api/plan/pause/{dataset_id}` - Pause a dataset **[Requires: `pause` role]**
+- `PUT /api/plan/unpause/{dataset_id}` - Unpause a dataset **[Requires: `pause` role]**
 
 ### Data Products
 - `GET /api/data_product/{dataset_id}/{data_product_id}` - Get a data product
-- `PUT /api/data_product/update/{dataset_id}` - Update data product states
-- `PUT /api/data_product/clear/{dataset_id}` - Clear data products and downstream dependencies
-- `PUT /api/data_product/disable/{dataset_id}` - Disable data products
+- `PUT /api/data_product/update/{dataset_id}` - Update data product states **[Requires: `update` role]**
+- `PUT /api/data_product/clear/{dataset_id}` - Clear data products and downstream dependencies **[Requires: `update` role]**
+- `DELETE /api/data_product/{dataset_id}` - Disable data products **[Requires: `disable` role]**
 
 ### Documentation
 - `/swagger` - Interactive API documentation
 - `/spec` - OpenAPI specification
 
 ## Usage Examples
+
+### Authentication Workflow
+
+1. **Authenticate and get JWT**
+   ```bash
+   # Get JWT token
+   curl -X POST http://localhost:3000/api/authenticate \
+     -H "Content-Type: application/json" \
+     -d '{
+       "service": "local", 
+       "key": "abc123"
+     }'
+   ```
+
+2. **Extract token from response**
+   ```json
+   {
+     "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+     "token_type": "Bearer",
+     "service": "local",
+     "roles": ["disable", "pause", "publish", "update"]
+   }
+   ```
+
+3. **Use token for authenticated requests**
+   ```bash
+   # Store token in variable
+   TOKEN="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+   
+   # Create a plan (requires 'publish' role)
+   curl -X POST http://localhost:3000/api/plan \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d @plan.json
+   ```
 
 ### Creating a Plan
 
@@ -264,6 +395,19 @@ Fletcher uses environment variables for configuration. For local development, cr
 ```bash
 # .env file for local development
 DATABASE_URL=postgres://fletcher_user:password@localhost/fletcher_db
+SECRET_KEY=your-secret-key-for-jwt-signing-make-it-long-and-random
+REMOTE_APIS='[
+  {
+    "service": "local",
+    "hash": "$2b$10$DvqWB.sMjo1XSlgGrOzGAuBTY5E1hkLiDK3BdcK0TiROjCWkgCeaa",
+    "roles": ["publish", "pause", "update", "disable"]
+  },
+  {
+    "service": "readonly",
+    "hash": "$2b$10$46TiUvUaKvp2D/BuoXe8Fu9ktffCBXioF8M0DeeOWvz8X2J0RtpvK",
+    "roles": []
+  }
+]'
 RUST_BACKTRACE=1
 
 # Optional: Set log levels
@@ -272,6 +416,8 @@ RUST_LOG=debug
 
 **Available Environment Variables:**
 - `DATABASE_URL` - PostgreSQL connection string (required)
+- `SECRET_KEY` - Secret key for JWT token signing (required)
+- `REMOTE_APIS` - JSON array of service configurations with roles (required)
 - `RUST_BACKTRACE` - Set to `1` or `full` for detailed error traces
 - `RUST_LOG` - Log level (`error`, `warn`, `info`, `debug`, `trace`)
 
@@ -386,6 +532,8 @@ just docker-healthcheck
 
 **Required:**
 - `DATABASE_URL` - PostgreSQL connection string
+- `SECRET_KEY` - Secret key for JWT token signing (generate a long, random string)
+- `REMOTE_APIS` - JSON array of service configurations with authentication and roles
 
 **Optional:**
 - `RUST_BACKTRACE` - Set to `1` or `full` for detailed error traces  
@@ -393,6 +541,11 @@ just docker-healthcheck
 
 **For Development:** Use a `.env` file (see Environment Configuration section above)  
 **For Production:** Set environment variables directly in your deployment system
+
+**Security Notes:**
+- Use a strong, randomly generated `SECRET_KEY` in production
+- Store bcrypt password hashes in `REMOTE_APIS`, never plain text passwords
+- Use `just hash "your-password"` to generate secure password hashes
 
 ## Configuration
 
