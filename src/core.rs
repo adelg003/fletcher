@@ -415,8 +415,7 @@ pub async fn plan_search_read(
 
     // Fetch one extra item to check if there's a next page
     let mut rows: Vec<SearchRow> =
-        search_plans_select(tx, search_by, PAGE_SIZE.saturating_add(1), offset)
-            .await?;
+        search_plans_select(tx, search_by, PAGE_SIZE.saturating_add(1), offset).await?;
 
     // PAGE_SIZE as usize
     let page_size: usize = PAGE_SIZE.try_into().map_err(|_| Error::Unreachable)?;
@@ -442,7 +441,6 @@ mod tests {
         Plan, PlanParam, State, StateParam,
     };
     use chrono::Utc;
-    use poem::http::StatusCode;
     use serde_json::json;
     use sqlx::PgPool;
     use uuid::Uuid;
@@ -547,10 +545,10 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err, Error::Duplicate(id) if id == duplicate_id));
         assert_eq!(
             format!("{err}"),
-            format!("Duplicate data-product id in parameter: {duplicate_id}"),
+            format!("Duplicate data-product id in parameter: '{duplicate_id}'"),
         );
     }
 
@@ -602,10 +600,10 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err, Error::DuplicateDependencies(p_id, c_id) if p_id == dp1_id && c_id == dp2_id));
         assert_eq!(
             format!("{err}"),
-            format!("Duplicate dependency in parameter: {dp1_id} -> {dp2_id}")
+            format!("Duplicate dependency in parameter: '{dp1_id}' -> '{dp2_id}'")
         );
     }
 
@@ -638,7 +636,7 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(matches!(err, Error::Cyclical));
         assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
@@ -672,10 +670,10 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == missing_parent_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {missing_parent_id}")
+            format!("Data product not found for: '{missing_parent_id}'")
         );
     }
 
@@ -709,10 +707,10 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == missing_child_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {missing_child_id}")
+            format!("Data product not found for: '{missing_child_id}'")
         );
     }
 
@@ -779,7 +777,7 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(matches!(err, Error::Cyclical));
         assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
@@ -854,7 +852,7 @@ mod tests {
         let result = validate_plan_param(&param, &Some(existing_plan));
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(matches!(err, Error::Cyclical));
         assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
@@ -1070,7 +1068,7 @@ mod tests {
             "DAG should be cyclical when no nodes are disabled"
         );
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(matches!(err, Error::Cyclical));
         assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
@@ -1315,7 +1313,7 @@ mod tests {
         let result = plan_read(&mut tx, nonexistent_id).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Sqlx(sqlx::Error::RowNotFound)));
         assert_eq!(
             format!("{err}"),
             "no rows returned by a query that expected to return at least one row"
@@ -1367,10 +1365,10 @@ mod tests {
         let result = state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == nonexistent_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {nonexistent_id}")
+            format!("Data product not found for: '{nonexistent_id}'")
         );
     }
 
@@ -1397,8 +1395,8 @@ mod tests {
         let result = state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::FORBIDDEN);
-        assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
+        assert!(matches!(err, Error::Disabled(id) if id == dp_id));
+        assert_eq!(format!("{err}"), format!("Data product is locked: '{dp_id}'"));
     }
 
     // Tests for clear_downstream_nodes function
@@ -1821,10 +1819,10 @@ mod tests {
 
             assert!(result.is_err());
             let err = result.unwrap_err();
-            assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+            assert!(matches!(err, Error::BadState(id, state) if id == dp_id && state == invalid_state));
             assert_eq!(
                 format!("{err}"),
-                format!("The requested state for {dp_id} is invalid: {invalid_state}")
+                format!("The requested state for '{dp_id}' is invalid: '{invalid_state}'")
             );
         }
     }
@@ -2059,10 +2057,10 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == nonexistent_dp_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {nonexistent_dp_id}")
+            format!("Data product not found for: '{nonexistent_dp_id}'")
         );
     }
 
@@ -2099,8 +2097,8 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::FORBIDDEN);
-        assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
+        assert!(matches!(err, Error::Disabled(id) if id == dp_id));
+        assert_eq!(format!("{err}"), format!("Data product is locked: '{dp_id}'"));
     }
 
     // Tests for disable_drop function
@@ -2147,10 +2145,10 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == nonexistent_dp_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {nonexistent_dp_id}")
+            format!("Data product not found for: '{nonexistent_dp_id}'")
         );
     }
 
@@ -2179,8 +2177,8 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::FORBIDDEN);
-        assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
+        assert!(matches!(err, Error::Disabled(id) if id == dp_id));
+        assert_eq!(format!("{err}"), format!("Data product is locked: '{dp_id}'"));
     }
 
     /// Test disable_drop - Complex Parent-Child Triggering Scenario
@@ -2355,10 +2353,10 @@ mod tests {
         let result = plan_pause_edit(&mut tx, dataset_id, false, username).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err, Error::Pause(id, paused) if id == dataset_id && !paused));
         assert_eq!(
             format!("{err}"),
-            format!("Dataset '{dataset_id}' pause state is already set to: false")
+            format!("Dataset '{dataset_id}' pause state is already set to: 'false'")
         );
 
         // First pause the plan
@@ -2374,10 +2372,10 @@ mod tests {
         let result = plan_pause_edit(&mut tx, dataset_id, true, username).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err, Error::Pause(id, paused) if id == dataset_id && paused));
         assert_eq!(
             format!("{err}"),
-            format!("Dataset '{dataset_id}' pause state is already set to: true")
+            format!("Dataset '{dataset_id}' pause state is already set to: 'true'")
         );
     }
 
@@ -2586,7 +2584,7 @@ mod tests {
         let result = plan_pause_edit(&mut tx, nonexistent_id, true, username).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Sqlx(sqlx::Error::RowNotFound)));
         assert_eq!(
             format!("{err}"),
             "no rows returned by a query that expected to return at least one row"
@@ -2963,7 +2961,7 @@ mod tests {
         let result = data_product_read(&mut tx, dataset_id, nonexistent_data_product_id).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Sqlx(sqlx::Error::RowNotFound)));
         assert_eq!(
             format!("{err}"),
             "no rows returned by a query that expected to return at least one row"
@@ -3010,10 +3008,9 @@ mod tests {
             "validate_plan_param should reject duplicate data product IDs"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::BAD_REQUEST,
-            "Duplicate data products should return BadRequest"
+        assert!(
+            matches!(err, Error::Duplicate(id) if id == dp_id),
+            "Duplicate data products should return Duplicate error"
         );
     }
 
@@ -3067,10 +3064,9 @@ mod tests {
             "validate_plan_param should reject duplicate dependencies"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::BAD_REQUEST,
-            "Duplicate dependencies should return BadRequest"
+        assert!(
+            matches!(err, Error::DuplicateDependencies(p_id, c_id) if p_id == dp1_id && c_id == dp2_id),
+            "Duplicate dependencies should return DuplicateDependencies error"
         );
     }
 
@@ -3106,10 +3102,9 @@ mod tests {
             "validate_plan_param should reject missing parent data product"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::NOT_FOUND,
-            "Missing parent should return NotFound"
+        assert!(
+            matches!(err, Error::Missing(id) if id == missing_parent_id),
+            "Missing parent should return Missing error"
         );
     }
 
@@ -3145,10 +3140,9 @@ mod tests {
             "validate_plan_param should reject missing child data product"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::NOT_FOUND,
-            "Missing child should return NotFound"
+        assert!(
+            matches!(err, Error::Missing(id) if id == missing_child_id),
+            "Missing child should return Missing error"
         );
     }
 
@@ -3218,10 +3212,9 @@ mod tests {
             "state_update should fail for missing data product"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::NOT_FOUND,
-            "Missing data product should return NotFound"
+        assert!(
+            matches!(err, Error::Missing(id) if id == missing_id),
+            "Missing data product should return Missing error"
         );
     }
 
@@ -3252,10 +3245,9 @@ mod tests {
             "state_update should fail for disabled data product"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::FORBIDDEN,
-            "Disabled data product should return Forbidden"
+        assert!(
+            matches!(err, Error::Disabled(id) if id == data_product_id),
+            "Disabled data product should return Disabled error"
         );
     }
 
