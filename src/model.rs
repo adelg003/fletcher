@@ -421,7 +421,7 @@ pub struct SearchReturn {
 mod tests {
     use super::*;
     use crate::{db::tests::trim_to_microseconds, error::Error};
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::json;
     use sqlx::PgPool;
 

@@ -56,7 +56,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Add the plan to the DB
-        let plan: Plan = plan_add(&mut tx, &plan, auth.get_service())
+        let plan: Plan = plan_add(&mut tx, &plan, auth.service())
             .await
             .map_err(into_poem_error)?;
 
@@ -123,7 +123,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Pause a Plan
-        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, auth.get_service())
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, auth.service())
             .await
             .map_err(into_poem_error)?;
 
@@ -147,7 +147,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Unpause a Plan
-        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, auth.get_service())
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, auth.service())
             .await
             .map_err(into_poem_error)?;
 
@@ -194,7 +194,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Update data product states and return the updated plan
-        let plan: Plan = states_edit(&mut tx, dataset_id, &states, auth.get_service())
+        let plan: Plan = states_edit(&mut tx, dataset_id, &states, auth.service())
             .await
             .map_err(into_poem_error)?;
 
@@ -219,7 +219,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Clear Data Products and clear all downsteam data products.
-        let plan: Plan = clear_edit(&mut tx, dataset_id, &data_product_ids, auth.get_service())
+        let plan: Plan = clear_edit(&mut tx, dataset_id, &data_product_ids, auth.service())
             .await
             .map_err(into_poem_error)?;
 
@@ -244,7 +244,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Mark Data Products as disabled.
-        let plan: Plan = disable_drop(&mut tx, dataset_id, &data_product_ids, auth.get_service())
+        let plan: Plan = disable_drop(&mut tx, dataset_id, &data_product_ids, auth.service())
             .await
             .map_err(into_poem_error)?;
 
@@ -258,11 +258,13 @@ impl Api {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::load_config;
     use poem::{
         http::StatusCode,
         test::{TestClient, TestJsonValue, TestResponse},
     };
     use poem_openapi::OpenApiService;
+    use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use sqlx::PgPool;
     use uuid::Uuid;
@@ -320,7 +322,7 @@ mod tests {
             .object()
             .get("test")
             .assert_string("dataset");
-        dataset.get("modified_by").assert_string("placeholder_user");
+        dataset.get("modified_by").assert_string("local");
 
         // Test response from API for Data Products
         let data_products = json_value.object().get("data_products").object_array();
@@ -351,7 +353,7 @@ mod tests {
             .object()
             .get("test")
             .assert_string("extra1");
-        dp1.get("modified_by").assert_string("placeholder_user");
+        dp1.get("modified_by").assert_string("local");
 
         let dp2 = data_products
             .iter()
@@ -374,7 +376,7 @@ mod tests {
             .object()
             .get("test")
             .assert_string("extra2");
-        dp2.get("modified_by").assert_string("placeholder_user");
+        dp2.get("modified_by").assert_string("local");
 
         // Test response from API for Dependencies
         let dependencies = json_value.object().get("dependencies").object_array();
@@ -397,7 +399,42 @@ mod tests {
             .object()
             .get("test")
             .assert_string("dependency");
-        dep.get("modified_by").assert_string("placeholder_user");
+        dep.get("modified_by").assert_string("local");
+    }
+
+    // Helper function to authenticate and get a JWT for a specific service
+    async fn generate_jwt(service: &str) -> String {
+        // Auth Creds
+        let param = json!({
+            "service": service,
+            "key": "abc123",
+        });
+
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // Auth Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Auth Request
+        let response: TestResponse = cli
+            .post("/authenticate")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(config)
+            .send()
+            .await;
+
+        // Check status
+        response.assert_status_is_ok();
+
+        // Pull response json
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        // Pull the JWT from the response
+        json_value.object().get("access_token").string().to_string()
     }
 
     /// Test Plan Post
@@ -410,6 +447,12 @@ mod tests {
         // Payload to send into the API
         let param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         // Test Client
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
@@ -417,8 +460,10 @@ mod tests {
         // Test Request
         let response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&param)
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -466,6 +511,12 @@ mod tests {
             ]
         });
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         // Test Client
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
@@ -473,8 +524,10 @@ mod tests {
         // Test Request
         let response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&param)
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -494,6 +547,12 @@ mod tests {
         // First create a plan via POST
         let param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         // Test Client
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
@@ -501,8 +560,10 @@ mod tests {
         // Create the plan first
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&param)
+            .data(config)
             .data(pool.clone())
             .send()
             .await;
@@ -553,6 +614,12 @@ mod tests {
         // First create a plan via POST
         let param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         // Test Client
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
@@ -560,8 +627,10 @@ mod tests {
         // Create the plan first
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&param)
+            .data(config)
             .data(pool.clone())
             .send()
             .await;
@@ -610,7 +679,7 @@ mod tests {
         json_value
             .object()
             .get("modified_by")
-            .assert_string("placeholder_user");
+            .assert_string("local");
     }
 
     /// Test Data Product Get - Not Found Case
@@ -645,13 +714,21 @@ mod tests {
         // Create initial plan
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -683,8 +760,10 @@ mod tests {
 
         let response: TestResponse = cli
             .put(format!("/data_product/update/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -747,12 +826,20 @@ mod tests {
             }
         ]);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
         let response: TestResponse = cli
             .put(format!("/data_product/update/{non_existent_dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -773,12 +860,20 @@ mod tests {
 
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -796,15 +891,17 @@ mod tests {
 
         let response: TestResponse = cli
             .put(format!("/data_product/update/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
 
         response.assert_status(StatusCode::NOT_FOUND);
         response
-            .assert_text(format!("Data product not found for: {missing_dp_id}"))
+            .assert_text(format!("Data product not found for: '{missing_dp_id}'"))
             .await;
     }
 
@@ -817,12 +914,20 @@ mod tests {
             },
         });
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
         let response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&param)
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -847,12 +952,20 @@ mod tests {
             "dependencies": []
         });
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
         let response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&param)
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -911,19 +1024,27 @@ mod tests {
             "dependencies": []
         });
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
         let response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&param)
+            .data(config)
             .data(pool)
             .send()
             .await;
 
         response.assert_status(StatusCode::BAD_REQUEST);
         response
-            .assert_text(format!("Duplicate data-product id in parameter: {dp_id}"))
+            .assert_text(format!("Duplicate data-product id in parameter: '{dp_id}'"))
             .await;
     }
 
@@ -959,19 +1080,510 @@ mod tests {
             ]
         });
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
         let response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&param)
+            .data(config)
             .data(pool)
             .send()
             .await;
         response.assert_status(StatusCode::NOT_FOUND);
         response
-            .assert_text(format!("Data product not found for: {missing_dp_id}"))
+            .assert_text(format!("Data product not found for: '{missing_dp_id}'"))
             .await;
+    }
+
+    // Test authenticate endpoint
+
+    /// Test Authenticate - Success Case
+    #[tokio::test]
+    async fn test_authenticate_success() {
+        // Valid auth credentials
+        let param = json!({
+            "service": "local",
+            "key": "abc123",
+        });
+
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test Request
+        let response: TestResponse = cli
+            .post("/authenticate")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(config)
+            .send()
+            .await;
+
+        // Check status
+        response.assert_status_is_ok();
+
+        // Pull response json
+        let test_json = response.json().await;
+        let json_value = test_json.value();
+
+        // Validate response structure
+        let response_obj = json_value.object();
+        response_obj.get("access_token").assert_not_null();
+        response_obj.get("token_type").assert_string("Bearer");
+
+        // Verify the access_token is a non-empty string
+        let access_token = response_obj.get("access_token").string();
+        assert!(!access_token.is_empty(), "Access token should not be empty");
+    }
+
+    /// Test Authenticate - Invalid Credentials
+    #[tokio::test]
+    async fn test_authenticate_invalid_credentials() {
+        // Invalid auth credentials
+        let param = json!({
+            "service": "local",
+            "key": "invalid_key",
+        });
+
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test Request
+        let response: TestResponse = cli
+            .post("/authenticate")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(config)
+            .send()
+            .await;
+
+        // Check status - should be unauthorized
+        response.assert_status(StatusCode::UNAUTHORIZED);
+    }
+
+    /// Test Authenticate - Invalid Service
+    #[tokio::test]
+    async fn test_authenticate_invalid_service() {
+        // Invalid service name
+        let param = json!({
+            "service": "invalid_service",
+            "key": "abc123",
+        });
+
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test Request
+        let response: TestResponse = cli
+            .post("/authenticate")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(config)
+            .send()
+            .await;
+
+        // Check status - should be unauthorized
+        response.assert_status(StatusCode::UNAUTHORIZED);
+    }
+
+    /// Test Authenticate - Missing Required Fields
+    #[tokio::test]
+    async fn test_authenticate_missing_fields() {
+        // Missing key field
+        let param = json!({
+            "service": "local",
+        });
+
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test Request
+        let response: TestResponse = cli
+            .post("/authenticate")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(config)
+            .send()
+            .await;
+
+        // Check status - should be bad request
+        response.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    /// Test Authenticate - Empty JSON Payload
+    #[tokio::test]
+    async fn test_authenticate_empty_payload() {
+        // Empty JSON object
+        let param = json!({});
+
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test Request
+        let response: TestResponse = cli
+            .post("/authenticate")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(config)
+            .send()
+            .await;
+
+        // Check status - should be bad request
+        response.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    /// Test Authenticate - Invalid JSON
+    #[tokio::test]
+    async fn test_authenticate_invalid_json() {
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test Request with invalid JSON
+        let response: TestResponse = cli
+            .post("/authenticate")
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body("invalid json content")
+            .data(config)
+            .send()
+            .await;
+
+        // Check status - should be bad request
+        response.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    /// Test Authenticate - Missing Content-Type Header
+    #[tokio::test]
+    async fn test_authenticate_missing_content_type() {
+        // Valid auth credentials
+        let param = json!({
+            "service": "local",
+            "key": "abc123",
+        });
+
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test Request without Content-Type header
+        let response: TestResponse = cli
+            .post("/authenticate")
+            .body_json(&param)
+            .data(config)
+            .send()
+            .await;
+
+        // This should still work as poem should infer the content type from body_json
+        response.assert_status_is_ok();
+    }
+
+    // Test role-based access control
+
+    /// Test Plan Post - Readonly User Rejected (No Publish Role)
+    #[sqlx::test]
+    async fn test_plan_post_readonly_rejected(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // Payload to send into the API
+        let param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT for readonly user (no roles)
+        let readonly_jwt = generate_jwt("readonly").await;
+
+        // Test Client
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        // Test Request with readonly JWT
+        let response: TestResponse = cli
+            .post("/plan")
+            .header("Authorization", format!("Bearer {readonly_jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&param)
+            .data(config)
+            .data(pool)
+            .send()
+            .await;
+
+        // Check status - should be forbidden
+        response.assert_status(StatusCode::FORBIDDEN);
+    }
+
+    /// Test Plan Pause - Readonly User Rejected (No Pause Role)
+    #[sqlx::test]
+    async fn test_plan_pause_readonly_rejected(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // First create a plan with proper credentials
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+        let config = load_config().unwrap();
+        let jwt = generate_jwt("local").await;
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(config.clone())
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Now try to pause with readonly JWT
+        let readonly_jwt = generate_jwt("readonly").await;
+
+        let response: TestResponse = cli
+            .put(format!("/plan/pause/{dataset_id}"))
+            .header("Authorization", format!("Bearer {readonly_jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(config)
+            .data(pool)
+            .send()
+            .await;
+
+        // Check status - should be forbidden
+        response.assert_status(StatusCode::FORBIDDEN);
+    }
+
+    /// Test Plan Unpause - Readonly User Rejected (No Pause Role)
+    #[sqlx::test]
+    async fn test_plan_unpause_readonly_rejected(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // First create and pause a plan with proper credentials
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+        let config = load_config().unwrap();
+        let jwt = generate_jwt("local").await;
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(config.clone())
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Pause the plan
+        let pause_response: TestResponse = cli
+            .put(format!("/plan/pause/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(config.clone())
+            .data(pool.clone())
+            .send()
+            .await;
+        pause_response.assert_status_is_ok();
+
+        // Now try to unpause with readonly JWT
+        let readonly_jwt = generate_jwt("readonly").await;
+
+        let response: TestResponse = cli
+            .put(format!("/plan/unpause/{dataset_id}"))
+            .header("Authorization", format!("Bearer {readonly_jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .data(config)
+            .data(pool)
+            .send()
+            .await;
+
+        // Check status - should be forbidden
+        response.assert_status(StatusCode::FORBIDDEN);
+    }
+
+    /// Test State Update - Readonly User Rejected (No Update Role)
+    #[sqlx::test]
+    async fn test_state_update_readonly_rejected(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // First create a plan with proper credentials
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+        let config = load_config().unwrap();
+        let jwt = generate_jwt("local").await;
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(config.clone())
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Now try to update states with readonly JWT
+        let state_param = json!([
+            {
+                "id": dp1_id.to_string(),
+                "state": "success",
+                "run_id": "12345678-1234-1234-1234-123456789abc",
+                "link": "https://example.com/run-123",
+                "passback": {
+                    "status": "finished",
+                    "result": "success",
+                },
+            }
+        ]);
+
+        let readonly_jwt = generate_jwt("readonly").await;
+
+        let response: TestResponse = cli
+            .put(format!("/data_product/update/{dataset_id}"))
+            .header("Authorization", format!("Bearer {readonly_jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&state_param)
+            .data(config)
+            .data(pool)
+            .send()
+            .await;
+
+        // Check status - should be forbidden
+        response.assert_status(StatusCode::FORBIDDEN);
+    }
+
+    /// Test Clear Data Product - Readonly User Rejected (No Update Role)
+    #[sqlx::test]
+    async fn test_clear_readonly_rejected(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // First create a plan with proper credentials
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+        let config = load_config().unwrap();
+        let jwt = generate_jwt("local").await;
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(config.clone())
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Now try to clear data product with readonly JWT
+        let clear_param = json!([dp1_id.to_string()]);
+        let readonly_jwt = generate_jwt("readonly").await;
+
+        let response: TestResponse = cli
+            .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Authorization", format!("Bearer {readonly_jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&clear_param)
+            .data(config)
+            .data(pool)
+            .send()
+            .await;
+
+        // Check status - should be forbidden
+        response.assert_status(StatusCode::FORBIDDEN);
+    }
+
+    /// Test Disable Data Product - Readonly User Rejected (No Disable Role)
+    #[sqlx::test]
+    async fn test_disable_readonly_rejected(pool: PgPool) {
+        let dataset_id = Uuid::new_v4();
+        let dp1_id = Uuid::new_v4();
+        let dp2_id = Uuid::new_v4();
+
+        // First create a plan with proper credentials
+        let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
+        let config = load_config().unwrap();
+        let jwt = generate_jwt("local").await;
+
+        let ep = OpenApiService::new(Api, "test", "1.0");
+        let cli = TestClient::new(ep);
+
+        let create_response: TestResponse = cli
+            .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&create_param)
+            .data(config.clone())
+            .data(pool.clone())
+            .send()
+            .await;
+        create_response.assert_status_is_ok();
+
+        // Now try to disable data product with readonly JWT
+        let disable_param = json!([dp1_id.to_string()]);
+        let readonly_jwt = generate_jwt("readonly").await;
+
+        let response: TestResponse = cli
+            .delete(format!("/data_product/{dataset_id}"))
+            .header("Authorization", format!("Bearer {readonly_jwt}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body_json(&disable_param)
+            .data(config)
+            .data(pool)
+            .send()
+            .await;
+
+        // Check status - should be forbidden
+        response.assert_status(StatusCode::FORBIDDEN);
     }
 
     // Test clear_put
@@ -986,14 +1598,22 @@ mod tests {
         // Create initial plan
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         // Create the plan first
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1015,8 +1635,10 @@ mod tests {
 
         let state_response: TestResponse = cli
             .put(format!("/data_product/update/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1027,8 +1649,10 @@ mod tests {
         let clear_param = json!([dp2_id.to_string()]);
         let response: TestResponse = cli
             .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&clear_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -1105,11 +1729,19 @@ mod tests {
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         // Create the plan
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1118,7 +1750,9 @@ mod tests {
         // Pause the plan
         let pause_response: TestResponse = cli
             .put(format!("/plan/pause/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1150,8 +1784,10 @@ mod tests {
 
         let state_response: TestResponse = cli
             .put(format!("/data_product/update/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1161,8 +1797,10 @@ mod tests {
         let clear_param = json!([dp1_id.to_string()]);
         let response: TestResponse = cli
             .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&clear_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -1206,13 +1844,21 @@ mod tests {
         // Create initial plan
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1222,15 +1868,17 @@ mod tests {
         let clear_param = json!([nonexistent_dp_id.to_string()]);
         let response: TestResponse = cli
             .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&clear_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
 
         response.assert_status(StatusCode::NOT_FOUND);
         response
-            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .assert_text(format!("Data product not found for: '{nonexistent_dp_id}'"))
             .await;
     }
 
@@ -1244,13 +1892,21 @@ mod tests {
         // Create initial plan
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1260,8 +1916,10 @@ mod tests {
         let disable_param = json!([dp1_id.to_string()]);
         let disable_response: TestResponse = cli
             .delete(format!("/data_product/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1271,15 +1929,17 @@ mod tests {
         let clear_param = json!([dp1_id.to_string()]);
         let response: TestResponse = cli
             .put(format!("/data_product/clear/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&clear_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
 
         response.assert_status(StatusCode::FORBIDDEN);
         response
-            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .assert_text(format!("Data product is locked: '{dp1_id}'"))
             .await;
     }
 
@@ -1293,14 +1953,22 @@ mod tests {
         // Create initial plan
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         // Create the plan first
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1310,8 +1978,10 @@ mod tests {
         let disable_param = json!([dp1_id.to_string()]);
         let response: TestResponse = cli
             .delete(format!("/data_product/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -1339,13 +2009,21 @@ mod tests {
         // Create initial plan
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1355,15 +2033,17 @@ mod tests {
         let disable_param = json!([nonexistent_dp_id.to_string()]);
         let response: TestResponse = cli
             .delete(format!("/data_product/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
 
         response.assert_status(StatusCode::NOT_FOUND);
         response
-            .assert_text(format!("Data product not found for: {nonexistent_dp_id}"))
+            .assert_text(format!("Data product not found for: '{nonexistent_dp_id}'"))
             .await;
     }
 
@@ -1377,13 +2057,21 @@ mod tests {
         // Create initial plan
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1393,8 +2081,10 @@ mod tests {
         let disable_param = json!([dp1_id.to_string()]);
         let first_response: TestResponse = cli
             .delete(format!("/data_product/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1403,15 +2093,17 @@ mod tests {
         // Try to disable again
         let second_response: TestResponse = cli
             .delete(format!("/data_product/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&disable_param)
+            .data(config)
             .data(pool)
             .send()
             .await;
 
         second_response.assert_status(StatusCode::FORBIDDEN);
         second_response
-            .assert_text(format!("Data product is locked: {dp1_id}"))
+            .assert_text(format!("Data product is locked: '{dp1_id}'"))
             .await;
     }
 
@@ -1425,14 +2117,22 @@ mod tests {
         // Create initial plan (unpaused by default)
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         // Create the plan first
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1451,7 +2151,9 @@ mod tests {
         // Test pause endpoint
         let pause_response: TestResponse = cli
             .put(format!("/plan/pause/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
+            .data(config)
             .data(pool)
             .send()
             .await;
@@ -1477,14 +2179,22 @@ mod tests {
         // Create initial plan
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         // Create the plan first
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config)
             .data(pool.clone())
             .send()
             .await;
@@ -1557,14 +2267,22 @@ mod tests {
         let create_param_1 = create_test_plan_param(dataset_id_1, dp1_id, dp2_id);
         let create_param_2 = create_test_plan_param(dataset_id_2, dp3_id, dp4_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         // Create first plan
         let create_response_1: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param_1)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1573,8 +2291,10 @@ mod tests {
         // Create second plan
         let create_response_2: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param_2)
+            .data(config)
             .data(pool.clone())
             .send()
             .await;
@@ -1704,14 +2424,22 @@ mod tests {
         // Create initial plan
         let create_param = create_test_plan_param(dataset_id, dp1_id, dp2_id);
 
+        // Pull the local config Environmental Variables
+        let config = load_config().unwrap();
+
+        // JWT we will use
+        let jwt = generate_jwt("local").await;
+
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
 
         // Create the plan first
         let create_response: TestResponse = cli
             .post("/plan")
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&create_param)
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1731,7 +2459,9 @@ mod tests {
         // First pause the plan
         let pause_response: TestResponse = cli
             .put(format!("/plan/pause/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
+            .data(config.clone())
             .data(pool.clone())
             .send()
             .await;
@@ -1750,7 +2480,9 @@ mod tests {
         // Now unpause the plan
         let unpause_response: TestResponse = cli
             .put(format!("/plan/unpause/{dataset_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
+            .data(config)
             .data(pool)
             .send()
             .await;

@@ -81,9 +81,7 @@ fn test_empty_key() {
     let mut cmd = Command::cargo_bin("key_hasher").unwrap();
     cmd.arg("-k").arg("");
 
-    cmd.assert()
-        .success()
-        .stdout(starts_with("Key hash: $2"));
+    cmd.assert().success().stdout(starts_with("Key hash: $2"));
 }
 
 #[test]
@@ -91,9 +89,7 @@ fn test_key_with_special_characters() {
     let mut cmd = Command::cargo_bin("key_hasher").unwrap();
     cmd.arg("-k").arg("p@ssw0rd!#$%^&*()");
 
-    cmd.assert()
-        .success()
-        .stdout(starts_with("Key hash: $2"));
+    cmd.assert().success().stdout(starts_with("Key hash: $2"));
 }
 
 #[test]
@@ -101,9 +97,7 @@ fn test_key_with_unicode_characters() {
     let mut cmd = Command::cargo_bin("key_hasher").unwrap();
     cmd.arg("-k").arg("pãssw🔑rd");
 
-    cmd.assert()
-        .success()
-        .stdout(starts_with("Key hash: $2"));
+    cmd.assert().success().stdout(starts_with("Key hash: $2"));
 }
 
 #[test]
@@ -112,9 +106,7 @@ fn test_very_long_key() {
     let long_key = "a".repeat(1000);
     cmd.arg("-k").arg(&long_key);
 
-    cmd.assert()
-        .success()
-        .stdout(starts_with("Key hash: $2"));
+    cmd.assert().success().stdout(starts_with("Key hash: $2"));
 }
 
 #[test]
@@ -180,7 +172,6 @@ fn test_bcrypt_hash_format() {
 
     let stdout = String::from_utf8(run.get_output().stdout.clone()).unwrap();
 
-    // Extract just the hash part (remove "Key hash: " prefix and newline)
     let hash_line = stdout.strip_prefix("Key hash: ").unwrap();
     let hash = hash_line.trim();
 

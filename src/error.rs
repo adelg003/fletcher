@@ -112,6 +112,7 @@ pub fn into_poem_error(err: Error) -> poem::Error {
 mod tests {
     use super::*;
     use poem::http::StatusCode;
+    use pretty_assertions::assert_eq;
     use uuid::Uuid;
 
     /// Test into_poem_error maps BadState to BadRequest
@@ -226,6 +227,88 @@ mod tests {
             poem_error.status(),
             StatusCode::NOT_FOUND,
             "Sqlx RowNotFound error should map to NotFound"
+        );
+    }
+
+    /// Test into_poem_error maps Bcrypt error to InternalServerError
+    #[test]
+    fn test_into_poem_error_bcrypt() {
+        let bcrypt_error = BcryptError::InvalidCost("5".to_string());
+        let error = Error::Bcrypt(bcrypt_error);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Bcrypt error should map to InternalServerError"
+        );
+    }
+
+    /// Test into_poem_error maps InvalidKey to Unauthorized
+    #[test]
+    fn test_into_poem_error_invalid_key() {
+        let error = Error::InvalidKey;
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::UNAUTHORIZED,
+            "InvalidKey error should map to Unauthorized"
+        );
+    }
+
+    /// Test into_poem_error maps InvalidService to Unauthorized
+    #[test]
+    fn test_into_poem_error_invalid_service() {
+        let error = Error::InvalidService("test_service".to_string());
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::UNAUTHORIZED,
+            "InvalidService error should map to Unauthorized"
+        );
+    }
+
+    /// Test into_poem_error maps Jwt error to Forbidden
+    #[test]
+    fn test_into_poem_error_jwt() {
+        // Create a JWT error by trying to decode an invalid token
+        let config = crate::load_config().unwrap();
+        let jwt_error = jsonwebtoken::decode::<serde_json::Value>(
+            "invalid.jwt.token",
+            &config.decoding_key,
+            &jsonwebtoken::Validation::default(),
+        )
+        .unwrap_err();
+
+        let error = Error::Jwt(jwt_error);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::FORBIDDEN,
+            "Jwt error should map to Forbidden"
+        );
+    }
+
+    /// Test into_poem_error maps Role error to Forbidden
+    #[test]
+    fn test_into_poem_error_role() {
+        let error = Error::Role("test_service".to_string(), Role::Publish);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::FORBIDDEN,
+            "Role error should map to Forbidden"
+        );
+    }
+
+    /// Test into_poem_error maps Unreachable to InternalServerError
+    #[test]
+    fn test_into_poem_error_unreachable() {
+        let error = Error::Unreachable;
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Unreachable error should map to InternalServerError"
         );
     }
 }

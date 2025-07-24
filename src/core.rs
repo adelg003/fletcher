@@ -441,6 +441,7 @@ mod tests {
         Plan, PlanParam, State, StateParam,
     };
     use chrono::Utc;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use sqlx::PgPool;
     use uuid::Uuid;
@@ -600,7 +601,9 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, Error::DuplicateDependencies(p_id, c_id) if p_id == dp1_id && c_id == dp2_id));
+        assert!(
+            matches!(err, Error::DuplicateDependencies(p_id, c_id) if p_id == dp1_id && c_id == dp2_id)
+        );
         assert_eq!(
             format!("{err}"),
             format!("Duplicate dependency in parameter: '{dp1_id}' -> '{dp2_id}'")
@@ -1396,7 +1399,10 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, Error::Disabled(id) if id == dp_id));
-        assert_eq!(format!("{err}"), format!("Data product is locked: '{dp_id}'"));
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product is locked: '{dp_id}'")
+        );
     }
 
     // Tests for clear_downstream_nodes function
@@ -1819,7 +1825,9 @@ mod tests {
 
             assert!(result.is_err());
             let err = result.unwrap_err();
-            assert!(matches!(err, Error::BadState(id, state) if id == dp_id && state == invalid_state));
+            assert!(
+                matches!(err, Error::BadState(id, state) if id == dp_id && state == invalid_state)
+            );
             assert_eq!(
                 format!("{err}"),
                 format!("The requested state for '{dp_id}' is invalid: '{invalid_state}'")
@@ -2098,7 +2106,10 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, Error::Disabled(id) if id == dp_id));
-        assert_eq!(format!("{err}"), format!("Data product is locked: '{dp_id}'"));
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product is locked: '{dp_id}'")
+        );
     }
 
     // Tests for disable_drop function
@@ -2178,7 +2189,10 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, Error::Disabled(id) if id == dp_id));
-        assert_eq!(format!("{err}"), format!("Data product is locked: '{dp_id}'"));
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product is locked: '{dp_id}'")
+        );
     }
 
     /// Test disable_drop - Complex Parent-Child Triggering Scenario
