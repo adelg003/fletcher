@@ -1521,35 +1521,17 @@ mod tests {
     /// Test State Display implementation
     #[test]
     fn test_state_display() {
-        assert_eq!(
-            format!("{}", State::Disabled),
-            "disabled",
-            "State::Disabled should display as 'disabled'"
-        );
-        assert_eq!(
-            format!("{}", State::Failed),
-            "failed",
-            "State::Failed should display as 'failed'"
-        );
-        assert_eq!(
-            format!("{}", State::Queued),
-            "queued",
-            "State::Queued should display as 'queued'"
-        );
-        assert_eq!(
-            format!("{}", State::Running),
-            "running",
-            "State::Running should display as 'running'"
-        );
-        assert_eq!(
-            format!("{}", State::Success),
-            "success",
-            "State::Success should display as 'success'"
-        );
-        assert_eq!(
-            format!("{}", State::Waiting),
-            "waiting",
-            "State::Waiting should display as 'waiting'"
-        );
+        let test_cases = [
+            (State::Disabled, "disabled"),
+            (State::Failed, "failed"),
+            (State::Queued, "queued"),
+            (State::Running, "running"),
+            (State::Success, "success"),
+            (State::Waiting, "waiting"),
+        ];
+
+        for (state, expected) in test_cases {
+            assert_eq!(format!("{}", state), expected);
+        }
     }
 }

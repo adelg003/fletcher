@@ -171,6 +171,8 @@ mod tests {
     use crate::load_config;
     use pretty_assertions::assert_eq;
 
+    // =============== Basic Enum Tests ===============
+
     /// Test Role Display implementation
     #[test]
     fn test_role_display() {
@@ -179,6 +181,8 @@ mod tests {
         assert_eq!(Role::Publish.to_string(), "publish");
         assert_eq!(Role::Update.to_string(), "update");
     }
+
+    // =============== authenticate() Function Tests ===============
 
     /// Test authenticate with valid local service credentials
     #[test]
@@ -275,6 +279,8 @@ mod tests {
         assert!(matches!(result.unwrap_err(), Error::InvalidKey));
     }
 
+    // =============== JwtAuth Struct Tests ===============
+
     /// Test JwtAuth service method
     #[test]
     fn test_jwt_auth_service() {
@@ -341,6 +347,8 @@ mod tests {
             matches!(result.unwrap_err(), Error::Role(ref service, role) if service == "readonly_service" && role == Role::Publish)
         );
     }
+
+    // =============== JWT Integration Tests ===============
 
     /// Test JWT validation logic (integration test with authenticate)
     #[test]
@@ -425,6 +433,8 @@ mod tests {
             }
         }
     }
+
+    // =============== Struct Creation Tests ===============
 
     /// Test RemoteLogin and Authenticated structs can be created
     #[test]

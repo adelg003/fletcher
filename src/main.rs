@@ -96,8 +96,9 @@ pub fn load_config() -> color_eyre::Result<Config> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use poem_openapi::types::Type;
     use pretty_assertions::assert_eq;
+
+    // =============== Configuration Tests ===============
 
     /// Test load_config loads successfully from .env file
     #[test]
@@ -144,7 +145,7 @@ mod tests {
             .expect("Should find local service");
 
         assert!(
-            !local_auth.roles.len().is_empty(),
+            !local_auth.roles.is_empty(),
             "Local service should have roles"
         );
     }
@@ -166,6 +167,8 @@ mod tests {
             "Readonly service should have no roles"
         );
     }
+
+    // =============== Asset Embedding Tests ===============
 
     /// Test that required asset files are embedded correctly
     #[test]

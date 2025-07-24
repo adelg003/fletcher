@@ -351,6 +351,8 @@ mod tests {
         }
     }
 
+    // =============== format_node Function Tests ===============
+
     /// Test format_node with Disabled state
     #[test]
     fn test_format_node_disabled_state() {
@@ -923,6 +925,71 @@ mod tests {
         dataset_ids
     }
 
+    // =============== Index Page Tests ===============
+
+    /// Test index_page endpoint using TestClient
+    #[sqlx::test]
+    async fn test_index_page_endpoint(pool: PgPool) {
+        // Setup test data
+        let mut tx = pool.begin().await.unwrap();
+        setup_test_datasets_for_index(&mut tx, 2).await;
+        tx.commit().await.unwrap();
+
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to index page endpoint
+        let response: TestResponse = cli.get("/").send().await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Verify we get HTML response (should not be empty)
+        assert!(
+            !html_content.is_empty(),
+            "Response should contain HTML content"
+        );
+
+        // Parse HTML and verify basic structure
+        let document = Html::parse_fragment(&html_content);
+
+        // Should contain the title "Fletcher: Search"
+        let title_selector = Selector::parse("title").unwrap();
+        let title = document.select(&title_selector).next();
+        assert!(title.is_some(), "Should have title element");
+        assert_eq!(title.unwrap().inner_html(), "Fletcher");
+
+        // Should contain the search input
+        let input_selector = Selector::parse("input#search_by_input").unwrap();
+        let input = document.select(&input_selector).next();
+        assert!(
+            input.is_some(),
+            "Should have search input element in full page"
+        );
+
+        // Should contain the results table
+        let table_selector = Selector::parse("table").unwrap();
+        let table = document.select(&table_selector).next();
+        assert!(table.is_some(), "Should have results table in full page");
+
+        // Should have navigation with only Search link (no dataset_id)
+        let nav_selector = Selector::parse("nav ul li").unwrap();
+        let nav_items: Vec<_> = document.select(&nav_selector).collect();
+        assert_eq!(
+            nav_items.len(),
+            1,
+            "Should have only 1 nav item (Search only, no Plan link)"
+        );
+
+        let search_link = nav_items[0].select(&Selector::parse("a").unwrap()).next();
+        assert!(search_link.is_some());
+        assert_eq!(search_link.unwrap().inner_html(), "Search");
+    }
+
     /// Test index_page endpoint with detailed HTML structure validation
     #[sqlx::test]
     async fn test_index_page_html_structure_detailed(pool: PgPool) {
@@ -1003,69 +1070,6 @@ mod tests {
         let tr_selector = Selector::parse("tbody#search_results tr").unwrap();
         let rows: Vec<_> = document.select(&tr_selector).collect();
         assert_eq!(rows.len(), 3, "Should have 3 rows from test datasets");
-    }
-
-    /// Test index_page endpoint using TestClient
-    #[sqlx::test]
-    async fn test_index_page_endpoint(pool: PgPool) {
-        // Setup test data
-        let mut tx = pool.begin().await.unwrap();
-        setup_test_datasets_for_index(&mut tx, 2).await;
-        tx.commit().await.unwrap();
-
-        // Create TestClient for UI service
-        let app = user_service().data(pool.clone());
-        let cli = TestClient::new(app);
-
-        // Test GET request to index page endpoint
-        let response: TestResponse = cli.get("/").send().await;
-
-        // Check status is OK
-        response.assert_status_is_ok();
-
-        // Get response text (HTML)
-        let html_content = response.0.into_body().into_string().await.unwrap();
-
-        // Verify we get HTML response (should not be empty)
-        assert!(
-            !html_content.is_empty(),
-            "Response should contain HTML content"
-        );
-
-        // Parse HTML and verify basic structure
-        let document = Html::parse_fragment(&html_content);
-
-        // Should contain the title "Fletcher: Search"
-        let title_selector = Selector::parse("title").unwrap();
-        let title = document.select(&title_selector).next();
-        assert!(title.is_some(), "Should have title element");
-        assert_eq!(title.unwrap().inner_html(), "Fletcher");
-
-        // Should contain the search input
-        let input_selector = Selector::parse("input#search_by_input").unwrap();
-        let input = document.select(&input_selector).next();
-        assert!(
-            input.is_some(),
-            "Should have search input element in full page"
-        );
-
-        // Should contain the results table
-        let table_selector = Selector::parse("table").unwrap();
-        let table = document.select(&table_selector).next();
-        assert!(table.is_some(), "Should have results table in full page");
-
-        // Should have navigation with only Search link (no dataset_id)
-        let nav_selector = Selector::parse("nav ul li").unwrap();
-        let nav_items: Vec<_> = document.select(&nav_selector).collect();
-        assert_eq!(
-            nav_items.len(),
-            1,
-            "Should have only 1 nav item (Search only, no Plan link)"
-        );
-
-        let search_link = nav_items[0].select(&Selector::parse("a").unwrap()).next();
-        assert!(search_link.is_some());
-        assert_eq!(search_link.unwrap().inner_html(), "Search");
     }
 
     /// Test index_page with empty database
@@ -1222,6 +1226,8 @@ mod tests {
         plan_param.upsert(tx, "testuser", Utc::now()).await.unwrap()
     }
 
+    // =============== Plan Page Tests ===============
+
     /// Test plan_page endpoint with valid dataset_id
     #[sqlx::test]
     async fn test_plan_page_success(pool: PgPool) {
@@ -1369,6 +1375,67 @@ mod tests {
         response.assert_status(poem::http::StatusCode::NOT_FOUND);
     }
 
+    /// Test plan_page with plan containing no data products
+    #[sqlx::test]
+    async fn test_plan_page_empty_plan(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+
+        // Setup test data with no data products
+        let dataset_id = Uuid::new_v4();
+        setup_test_plan_with_data_products(&mut tx, dataset_id, 0).await;
+        tx.commit().await.unwrap();
+
+        // Create TestClient for UI service
+        let app = user_service().data(pool.clone());
+        let cli = TestClient::new(app);
+
+        // Test GET request to plan page endpoint
+        let response: TestResponse = cli.get(format!("/plan/{dataset_id}")).send().await;
+
+        // Check status is OK
+        response.assert_status_is_ok();
+
+        // Get response text (HTML)
+        let html_content = response.0.into_body().into_string().await.unwrap();
+
+        // Parse HTML and verify structure handles empty plan
+        let document = Html::parse_fragment(&html_content);
+
+        // Should still have the plan heading
+        let h2_selector = Selector::parse("h2").unwrap();
+        let h2 = document.select(&h2_selector).next();
+        assert!(h2.is_some(), "Should have h2 element even with empty plan");
+
+        // Check for spans within h2
+        let span_selector = Selector::parse("span").unwrap();
+        let spans: Vec<_> = h2.unwrap().select(&span_selector).collect();
+        assert_eq!(spans.len(), 2, "h2 should have exactly 2 span elements");
+        assert_eq!(spans[0].inner_html(), "Plan's Current ");
+        assert_eq!(spans[1].inner_html(), "State:");
+
+        // Should still have the table structure
+        let table_selector = Selector::parse("table").unwrap();
+        let table = document.select(&table_selector).next();
+        assert!(table.is_some(), "Should have table even with empty plan");
+
+        // Should have no data product rows
+        let tr_selector = Selector::parse("tbody tr").unwrap();
+        let rows: Vec<_> = document.select(&tr_selector).collect();
+        assert_eq!(
+            rows.len(),
+            0,
+            "Should have 0 data product rows for empty plan"
+        );
+
+        // Should still have visualization div
+        let graph_div_selector = Selector::parse("div#graph").unwrap();
+        let graph_div = document.select(&graph_div_selector).next();
+        assert!(
+            graph_div.is_some(),
+            "Should have visualization div even with empty plan"
+        );
+    }
+
     /// Test plan_page HTML structure with detailed validation
     #[sqlx::test]
     async fn test_plan_page_html_structure_detailed(pool: PgPool) {
@@ -1444,67 +1511,6 @@ mod tests {
             let cells: Vec<_> = row.select(&td_selector).collect();
             assert_eq!(cells.len(), 9, "Row {} should have 9 cells", i);
         }
-    }
-
-    /// Test plan_page with plan containing no data products
-    #[sqlx::test]
-    async fn test_plan_page_empty_plan(pool: PgPool) {
-        let mut tx = pool.begin().await.unwrap();
-
-        // Setup test data with no data products
-        let dataset_id = Uuid::new_v4();
-        setup_test_plan_with_data_products(&mut tx, dataset_id, 0).await;
-        tx.commit().await.unwrap();
-
-        // Create TestClient for UI service
-        let app = user_service().data(pool.clone());
-        let cli = TestClient::new(app);
-
-        // Test GET request to plan page endpoint
-        let response: TestResponse = cli.get(format!("/plan/{dataset_id}")).send().await;
-
-        // Check status is OK
-        response.assert_status_is_ok();
-
-        // Get response text (HTML)
-        let html_content = response.0.into_body().into_string().await.unwrap();
-
-        // Parse HTML and verify structure handles empty plan
-        let document = Html::parse_fragment(&html_content);
-
-        // Should still have the plan heading
-        let h2_selector = Selector::parse("h2").unwrap();
-        let h2 = document.select(&h2_selector).next();
-        assert!(h2.is_some(), "Should have h2 element even with empty plan");
-
-        // Check for spans within h2
-        let span_selector = Selector::parse("span").unwrap();
-        let spans: Vec<_> = h2.unwrap().select(&span_selector).collect();
-        assert_eq!(spans.len(), 2, "h2 should have exactly 2 span elements");
-        assert_eq!(spans[0].inner_html(), "Plan's Current ");
-        assert_eq!(spans[1].inner_html(), "State:");
-
-        // Should still have the table structure
-        let table_selector = Selector::parse("table").unwrap();
-        let table = document.select(&table_selector).next();
-        assert!(table.is_some(), "Should have table even with empty plan");
-
-        // Should have no data product rows
-        let tr_selector = Selector::parse("tbody tr").unwrap();
-        let rows: Vec<_> = document.select(&tr_selector).collect();
-        assert_eq!(
-            rows.len(),
-            0,
-            "Should have 0 data product rows for empty plan"
-        );
-
-        // Should still have visualization div
-        let graph_div_selector = Selector::parse("div#graph").unwrap();
-        let graph_div = document.select(&graph_div_selector).next();
-        assert!(
-            graph_div.is_some(),
-            "Should have visualization div even with empty plan"
-        );
     }
 
     /// Test plan_page content validation for specific elements
