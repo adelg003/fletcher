@@ -127,6 +127,11 @@ pub fn authenticate(cred: &RemoteLogin, config: &Config) -> Result<Authenticated
 pub struct JwtAuth(RemoteAuth);
 
 impl JwtAuth {
+    /// Provide which service is making the request
+    pub fn get_service(&self) -> &str {
+        &self.0.service
+    }
+
     /// Check to see if the desired role is present
     pub fn check_role(&self, role: Role) -> Result<()> {
         if self.0.roles.contains(&role) {

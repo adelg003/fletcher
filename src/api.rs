@@ -56,7 +56,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Add the plan to the DB
-        let plan: Plan = plan_add(&mut tx, &plan, "placeholder_user")
+        let plan: Plan = plan_add(&mut tx, &plan, auth.get_service())
             .await
             .map_err(into_poem_error)?;
 
@@ -123,7 +123,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Pause a Plan
-        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, "placeholder_user")
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, auth.get_service())
             .await
             .map_err(into_poem_error)?;
 
@@ -147,7 +147,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Unpause a Plan
-        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, "placeholder_user")
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, auth.get_service())
             .await
             .map_err(into_poem_error)?;
 
@@ -194,7 +194,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Update data product states and return the updated plan
-        let plan: Plan = states_edit(&mut tx, dataset_id, &states, "placeholder_user")
+        let plan: Plan = states_edit(&mut tx, dataset_id, &states, auth.get_service())
             .await
             .map_err(into_poem_error)?;
 
@@ -219,7 +219,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Clear Data Products and clear all downsteam data products.
-        let plan: Plan = clear_edit(&mut tx, dataset_id, &data_product_ids, "placeholder_user")
+        let plan: Plan = clear_edit(&mut tx, dataset_id, &data_product_ids, auth.get_service())
             .await
             .map_err(into_poem_error)?;
 
@@ -244,7 +244,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Mark Data Products as disabled.
-        let plan: Plan = disable_drop(&mut tx, dataset_id, &data_product_ids, "placeholder_user")
+        let plan: Plan = disable_drop(&mut tx, dataset_id, &data_product_ids, auth.get_service())
             .await
             .map_err(into_poem_error)?;
 
