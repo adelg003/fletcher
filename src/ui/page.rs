@@ -119,13 +119,14 @@ pub async fn plan_page(
     let mut tx: Transaction<'_, Postgres> = pool.begin().await.map_err(InternalServerError)?;
 
     // Pull the plan from the DB
-    let plan: Plan = plan_read(&mut tx, dataset_id)
-        .await
-        .map_err(|err| match err.status() {
+    let plan: Plan = plan_read(&mut tx, dataset_id).await.map_err(|err| {
+        let error: poem::Error = err.into_poem_error();
+        match error.status() {
             // Map poem's "NotFound" states to "NotFoundError" so the 404 page comes up
             StatusCode::NOT_FOUND => NotFoundError.into(),
-            _ => err,
-        })?;
+            _ => error,
+        }
+    })?;
 
     let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(InternalServerError)?;
 

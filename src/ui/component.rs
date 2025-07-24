@@ -1,4 +1,4 @@
-use crate::{core::plan_search_read, model::SearchReturn};
+use crate::{core::plan_search_read, error::into_poem_error, model::SearchReturn};
 use maud::{Markup, html};
 use poem::{
     Result,
@@ -16,7 +16,9 @@ pub async fn plan_search_component(
     page: u32,
 ) -> Result<Markup> {
     // Search for anything that meets our criteria
-    let search: SearchReturn = plan_search_read(tx, search_by, page).await?;
+    let search: SearchReturn = plan_search_read(tx, search_by, page)
+        .await
+        .map_err(into_poem_error)?;
 
     Ok(html! {
         // One Row per Plan returned

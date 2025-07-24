@@ -1,4 +1,4 @@
-use bcrypt::{DEFAULT_COST, hash};
+use bcrypt::hash;
 use clap::Parser;
 use color_eyre::eyre;
 
@@ -10,6 +10,8 @@ struct CliArg {
     key: String,
 }
 
+const BCRYPT_COST: u32 = 10;
+
 fn main() -> Result<(), eyre::Error> {
     // Lets get pretty error reports
     color_eyre::install()?;
@@ -18,7 +20,7 @@ fn main() -> Result<(), eyre::Error> {
     let arg = CliArg::parse();
 
     // Hash password
-    let hash_str: String = hash(arg.key, DEFAULT_COST)?;
+    let hash_str: String = hash(arg.key, BCRYPT_COST)?;
 
     // Print password_hash to screen
     println!("Key hash: {hash_str}");

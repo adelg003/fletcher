@@ -1,6 +1,13 @@
-use crate::model::{DataProductId, State};
+use crate::{
+    auth::Role,
+    model::{DataProductId, State},
+};
+use bcrypt::BcryptError;
+use jsonwebtoken::errors::Error as JwtError;
 use petgraph::graph::GraphError;
-use poem::error::{BadRequest, Forbidden, InternalServerError, NotFound, UnprocessableEntity};
+use poem::error::{
+    BadRequest, Forbidden, InternalServerError, NotFound, Unauthorized, UnprocessableEntity,
+};
 
 /// Crate-wide result alias.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -9,61 +16,96 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The dependency graph contains a cycle (not a valid DAG)
-    #[error("The requested state for {0} is invalid: {1}")]
+    #[error("The requested state for '{0}' is invalid: '{1}'")]
     BadState(DataProductId, State),
+
+    /// Error from
+    #[error("Bcrypt error: '{0}'")]
+    Bcrypt(#[from] BcryptError),
 
     /// The dependency graph contains a cycle (not a valid DAG)
     #[error("Graph is cyclical")]
     Cyclical,
 
     /// Data Product is locked
-    #[error("Data product is locked: {0}")]
+    #[error("Data product is locked: '{0}'")]
     Disabled(DataProductId),
 
     /// Duplicate data products in parameter
-    #[error("Duplicate data-product id in parameter: {0}")]
+    #[error("Duplicate data-product id in parameter: '{0}'")]
     Duplicate(DataProductId),
 
     /// Duplicate dependencies in parameter
-    #[error("Duplicate dependency in parameter: {0} -> {1}")]
+    #[error("Duplicate dependency in parameter: '{0}' -> '{1}'")]
     DuplicateDependencies(DataProductId, DataProductId),
 
     /// Error from Petgraph::Graph
-    #[error("Petgraph error: {0}")]
+    #[error("Petgraph error: '{0}'")]
     Graph(#[from] GraphError),
 
+    /// Trying to log in with an invalid key
+    #[error("Attepting to log in with an invalid key")]
+    InvalidKey,
+
+    /// Trying to log in as an invalid service
+    #[error("Attepting to log in as a unknown service: '{0}'")]
+    InvalidService(String),
+
+    /// Error from JsonWebToken
+    #[error("JsonWebToken error: '{0}'")]
+    Jwt(#[from] JwtError),
+
     /// Data Product not found
-    #[error("Data product not found for: {0}")]
+    #[error("Data product not found for: '{0}'")]
     Missing(DataProductId),
 
     /// Dataset Pause error
-    #[error("Dataset '{0}' pause state is already set to: {1}")]
+    #[error("Dataset '{0}' pause state is already set to: '{1}'")]
     Pause(DataProductId, bool),
 
+    /// Missing the needed role access
+    #[error("Service account '{0}' is missing the following role: '{1}'")]
+    Role(String, Role),
+
     /// Errors from SQLx
-    #[error("Error from SQLx: {0}")]
+    #[error("SQLx error: '{0}'")]
     Sqlx(#[from] sqlx::Error),
+
+    /// This error should never be reachable
+    #[error("This error should not have been reachable")]
+    Unreachable,
 }
 
 impl Error {
-    /// Map Crate Error to Poem Error
+    /// Convert Fletcher Error to Poem Error
     pub fn into_poem_error(self) -> poem::Error {
         match self {
             Error::BadState(_, _) => BadRequest(self),
+            Error::Bcrypt(err) => InternalServerError(err),
             Error::Disabled(_) => Forbidden(self),
             Error::Duplicate(_) => BadRequest(self),
             Error::DuplicateDependencies(_, _) => BadRequest(self),
             Error::Cyclical => UnprocessableEntity(self),
-            Error::Graph(error) => InternalServerError(error),
+            Error::Graph(err) => InternalServerError(err),
+            Error::InvalidKey => Unauthorized(self),
+            Error::InvalidService(_) => Unauthorized(self),
+            Error::Jwt(err) => Forbidden(err),
             Error::Missing(_) => NotFound(self),
             Error::Pause(_, _) => BadRequest(self),
+            Error::Role(_, _) => Forbidden(self),
             Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
-            Error::Sqlx(sqlx::Error::Database(error)) if error.constraint().is_some() => {
-                BadRequest(error)
+            Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some() => {
+                BadRequest(err)
             }
-            Error::Sqlx(error) => InternalServerError(error),
+            Error::Sqlx(err) => InternalServerError(err),
+            Error::Unreachable => InternalServerError(self),
         }
     }
+}
+
+/// Convert Fletcher Error to Poem Error
+pub fn into_poem_error(err: Error) -> poem::Error {
+    err.into_poem_error()
 }
 
 #[cfg(test)]

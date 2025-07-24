@@ -5,9 +5,11 @@ license = "LicenseRef-PwC-Proprietary"
 edition = "2024"
 
 [dependencies]
+bcrypt = "0.17.0"
 chrono = "0.4.41"
 color-eyre = "0.6.5"
 dotenvy = "0.15.7"
+jsonwebtoken = "9.3.1"
 maud = { version = "0.27.0", features = ["poem"] }
 petgraph = "0.8.2"
 poem = { version = "3.1.11", features = ["embed"] }

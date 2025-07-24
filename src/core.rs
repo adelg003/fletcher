@@ -1,7 +1,7 @@
 use crate::{
     dag::Dag,
     db::search_plans_select,
-    error::Error,
+    error::{Error, Result},
     model::{
         DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, SearchReturn, SearchRow,
         State, StateParam,
@@ -9,7 +9,6 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use petgraph::graph::DiGraph;
-use poem::error::InternalServerError;
 use sqlx::{Postgres, Transaction};
 use std::collections::HashSet;
 use tracing::warn;
@@ -18,15 +17,15 @@ use tracing::warn;
 const PAGE_SIZE: u32 = 50;
 
 /// Validate a PlanParam from the user
-fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<()> {
+fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
     // Does Plan have any dup data products?
     if let Some(data_product_id) = param.has_dup_data_products() {
-        return Err(Error::Duplicate(data_product_id).into_poem_error());
+        return Err(Error::Duplicate(data_product_id));
     }
 
     // Does Plan have any dup dependencies?
     if let Some((parent_id, child_id)) = param.has_dup_dependencies() {
-        return Err(Error::DuplicateDependencies(parent_id, child_id).into_poem_error());
+        return Err(Error::DuplicateDependencies(parent_id, child_id));
     }
 
     // Get a list of all Data Product IDs
@@ -50,7 +49,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&parent_id) {
                 Ok(())
             } else {
-                Err(Error::Missing(parent_id).into_poem_error())
+                Err(Error::Missing(parent_id))
             }
         })?;
 
@@ -62,7 +61,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&child_id) {
                 Ok(())
             } else {
-                Err(Error::Missing(child_id).into_poem_error())
+                Err(Error::Missing(child_id))
             }
         })?;
 
@@ -76,8 +75,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
     }
 
     // If you take all our data products and map them to a graph are they a valid dag?
-    DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges)
-        .map_err(|e| e.into_poem_error())?;
+    DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges)?;
 
     Ok(())
 }
@@ -87,7 +85,7 @@ pub async fn plan_add(
     tx: &mut Transaction<'_, Postgres>,
     param: &PlanParam,
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Pull any prior details
     let wip_plan = Plan::from_db(tx, param.dataset.id).await;
 
@@ -95,7 +93,7 @@ pub async fn plan_add(
     let current_plan: Option<Plan> = match wip_plan {
         Ok(plan) => Some(plan),
         Err(Error::Sqlx(sqlx::Error::RowNotFound)) => None,
-        Err(err) => return Err(err.into_poem_error()),
+        Err(err) => return Err(err),
     };
 
     // Validate to make sure the user submitted valid parameters
@@ -104,10 +102,7 @@ pub async fn plan_add(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Write our Plan to the DB
-    let mut plan: Plan = param
-        .upsert(tx, username, modified_date)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan: Plan = param.upsert(tx, username, modified_date).await?;
 
     // Triger the next batch of data products
     trigger_next_batch(tx, &mut plan, username, modified_date).await?;
@@ -116,8 +111,8 @@ pub async fn plan_add(
 }
 
 /// Read a Plan Dag from the DB
-pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> poem::Result<Plan> {
-    Plan::from_db(tx, id).await.map_err(|e| e.into_poem_error())
+pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> Result<Plan> {
+    Plan::from_db(tx, id).await
 }
 
 /// Set the pause state of a plan
@@ -126,19 +121,15 @@ pub async fn plan_pause_edit(
     id: DatasetId,
     paused: bool,
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Pull the current plan from the DB
-    let mut plan = Plan::from_db(tx, id)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan = Plan::from_db(tx, id).await?;
 
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Set the new pause state
-    plan.paused(tx, paused, username, modified_date)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    plan.paused(tx, paused, username, modified_date).await?;
 
     // If unpaused, lets run the next batch
     if !paused {
@@ -153,10 +144,8 @@ pub async fn data_product_read(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: DatasetId,
     data_product_id: DataProductId,
-) -> poem::Result<DataProduct> {
-    DataProduct::from_db(tx, dataset_id, data_product_id)
-        .await
-        .map_err(|e| e.into_poem_error())
+) -> Result<DataProduct> {
+    DataProduct::from_db(tx, dataset_id, data_product_id).await
 }
 
 /// Update the state of our data product
@@ -166,25 +155,24 @@ async fn state_update(
     state: &StateParam,
     username: &str,
     modified_date: DateTime<Utc>,
-) -> poem::Result<()> {
+) -> Result<()> {
     // Pull before we mutably borrow via plan.data_product()
     let dataset_id: DatasetId = plan.dataset.id;
 
     // Pull our Data Product
     let data_product: &mut DataProduct = plan
         .data_product_mut(state.id)
-        .ok_or(Error::Missing(state.id).into_poem_error())?;
+        .ok_or(Error::Missing(state.id))?;
 
     // Is the data product locked?
     if data_product.state == State::Disabled {
-        return Err(Error::Disabled(data_product.id).into_poem_error());
+        return Err(Error::Disabled(data_product.id));
     }
 
     // Update our Data Product State
     data_product
         .state_update(tx, dataset_id, state, username, modified_date)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+        .await?;
 
     Ok(())
 }
@@ -196,12 +184,12 @@ async fn clear_downstream_nodes(
     nodes: &[DataProductId],
     username: &str,
     modified_date: DateTime<Utc>,
-) -> poem::Result<()> {
+) -> Result<()> {
     // Pull before we mutably borrow via plan.data_product()
     let dataset_id: DatasetId = plan.dataset.id;
 
     // Generate Dag representation of the plan
-    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(|e| e.into_poem_error())?;
+    let dag: DiGraph<DataProductId, u32> = plan.to_dag()?;
 
     // What are all the downstream nodes of our updated states?
     let mut downstream_ids = HashSet::<DataProductId>::new();
@@ -220,9 +208,7 @@ async fn clear_downstream_nodes(
 
     // Get ready to update the state of the data products
     for id in downstream_ids {
-        let data_product: &mut DataProduct = plan
-            .data_product_mut(id)
-            .ok_or(InternalServerError(Error::Missing(id)))?;
+        let data_product: &mut DataProduct = plan.data_product_mut(id).ok_or(Error::Unreachable)?;
 
         // Params for the current and new state. Make our change and dump the current state to fill the rest.
         let current_state: StateParam = data_product.into();
@@ -234,8 +220,7 @@ async fn clear_downstream_nodes(
         // Set non-waiting downstream_nodes to waiting
         data_product
             .state_update(tx, dataset_id, &new_state, username, modified_date)
-            .await
-            .map_err(|e| e.into_poem_error())?;
+            .await?;
     }
 
     Ok(())
@@ -247,7 +232,7 @@ async fn trigger_next_batch(
     plan: &mut Plan,
     username: &str,
     modified_date: DateTime<Utc>,
-) -> poem::Result<()> {
+) -> Result<()> {
     // Is the dataset paused? If so, no need to trigger the next data product.
     if plan.dataset.paused {
         return Ok(());
@@ -270,7 +255,7 @@ async fn trigger_next_batch(
         .collect();
 
     // Generate Dag representation of the plan (Disabled nodes are not part of the dag.)
-    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(|e| e.into_poem_error())?;
+    let dag: DiGraph<DataProductId, u32> = plan.to_dag()?;
 
     // Check each data product's parents to see if any of them are blocking
     for waiting_id in waiting_ids {
@@ -293,7 +278,7 @@ async fn trigger_next_batch(
             // Representation of the current data product
             let data_product: &mut DataProduct = plan
                 .data_product_mut(waiting_id)
-                .ok_or(InternalServerError(Error::Missing(waiting_id)))?;
+                .ok_or(Error::Unreachable)?;
 
             // Params for the current and new state. Make our change and dump the current state to fill the rest.
             let new_state = StateParam {
@@ -304,8 +289,7 @@ async fn trigger_next_batch(
             // Now record what we triggered the data product in the OaaS Wrapper
             data_product
                 .state_update(tx, dataset_id, &new_state, username, modified_date)
-                .await
-                .map_err(|e| e.into_poem_error())?;
+                .await?;
         }
     }
 
@@ -318,7 +302,7 @@ pub async fn states_edit(
     id: DatasetId,
     states: &[StateParam],
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
 
@@ -328,14 +312,12 @@ pub async fn states_edit(
             state.state,
             State::Disabled | State::Queued | State::Waiting
         ) {
-            return Err(Error::BadState(state.id, state.state).into_poem_error());
+            return Err(Error::BadState(state.id, state.state));
         }
     }
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan = Plan::from_db(tx, id).await?;
 
     // Apply our updates to the data products
     for state in states {
@@ -358,21 +340,17 @@ pub async fn clear_edit(
     id: DatasetId,
     data_product_ids: &[DataProductId],
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan = Plan::from_db(tx, id).await?;
 
     // Clear the data products
     for id in data_product_ids {
         // Pull Data Product of interest
-        let data_product: &DataProduct = plan
-            .data_product(*id)
-            .ok_or(Error::Missing(*id).into_poem_error())?;
+        let data_product: &DataProduct = plan.data_product(*id).ok_or(Error::Missing(*id))?;
 
         // Build new cleared state
         let state = StateParam {
@@ -399,20 +377,16 @@ pub async fn disable_drop(
     id: DatasetId,
     data_product_ids: &[DataProductId],
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan = Plan::from_db(tx, id).await?;
 
     for id in data_product_ids {
         // Pull the Data Product we want
-        let data_product: &DataProduct = plan
-            .data_product(*id)
-            .ok_or(Error::Missing(*id).into_poem_error())?;
+        let data_product: &DataProduct = plan.data_product(*id).ok_or(Error::Missing(*id))?;
 
         // Get the new state params for the selected data product by using the old state params.
         let state = StateParam {
@@ -435,7 +409,7 @@ pub async fn plan_search_read(
     tx: &mut Transaction<'_, Postgres>,
     search_by: &str,
     page: u32,
-) -> poem::Result<SearchReturn> {
+) -> Result<SearchReturn> {
     // Compute offset
     let offset: u32 = page.saturating_mul(PAGE_SIZE);
 
@@ -443,10 +417,10 @@ pub async fn plan_search_read(
     let mut rows: Vec<SearchRow> =
         search_plans_select(tx, search_by, PAGE_SIZE.saturating_add(1), offset)
             .await
-            .map_err(|e| e.into_poem_error())?;
+            .map_err(|e| e)?;
 
     // PAGE_SIZE as usize
-    let page_size: usize = PAGE_SIZE.try_into().map_err(InternalServerError)?;
+    let page_size: usize = PAGE_SIZE.try_into().map_err(|_| Error::Unreachable)?;
 
     // Check if we have more than the page size
     let next_page: Option<u32> = if rows.len() > page_size {

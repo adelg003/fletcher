@@ -1,8 +1,11 @@
 use crate::{
+    Config,
+    auth::{Authenticated, JwtAuth, RemoteLogin, Role, authenticate},
     core::{
         clear_edit, data_product_read, disable_drop, plan_add, plan_pause_edit, plan_read,
         plan_search_read, states_edit,
     },
+    error::into_poem_error,
     model::{DataProduct, DataProductId, DatasetId, Plan, PlanParam, SearchReturn, StateParam},
 };
 use poem::{error::InternalServerError, web::Data};
@@ -16,6 +19,7 @@ use sqlx::PgPool;
 /// Tags to show in Swagger Page
 #[derive(Tags)]
 pub enum Tag {
+    Authenticate,
     #[oai(rename = "Data Product")]
     DataProduct,
     Plan,
@@ -26,18 +30,35 @@ pub struct Api;
 
 #[OpenApi]
 impl Api {
+    /// Authenticate a remote service and provide a JWT
+    #[oai(path = "/authenticate", method = "post", tag = Tag::Authenticate)]
+    async fn authenticate(
+        &self,
+        Data(config): Data<&Config>,
+        Json(cred): Json<RemoteLogin>,
+    ) -> poem::Result<Json<Authenticated>> {
+        let auth: Authenticated = authenticate(&cred, config).map_err(into_poem_error)?;
+
+        Ok(Json(auth))
+    }
+
     /// Register a Plan
     #[oai(path = "/plan", method = "post", tag = Tag::Plan)]
     async fn plan_post(
         &self,
+        auth: JwtAuth,
         Data(pool): Data<&PgPool>,
         Json(plan): Json<PlanParam>,
     ) -> poem::Result<Json<Plan>> {
+        auth.check_role(Role::Publish).map_err(into_poem_error)?;
+
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Add the plan to the DB
-        let plan: Plan = plan_add(&mut tx, &plan, "placeholder_user").await?;
+        let plan: Plan = plan_add(&mut tx, &plan, "placeholder_user")
+            .await
+            .map_err(into_poem_error)?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -56,7 +77,9 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Read the plan from the DB
-        let plan: Plan = plan_read(&mut tx, dataset_id).await?;
+        let plan: Plan = plan_read(&mut tx, dataset_id)
+            .await
+            .map_err(into_poem_error)?;
 
         // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
@@ -76,7 +99,9 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Search for plans
-        let search: SearchReturn = plan_search_read(&mut tx, &search_by, page).await?;
+        let search: SearchReturn = plan_search_read(&mut tx, &search_by, page)
+            .await
+            .map_err(into_poem_error)?;
 
         // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
@@ -88,14 +113,19 @@ impl Api {
     #[oai(path = "/plan/pause/:dataset_id", method = "put", tag = Tag::Plan)]
     async fn plan_pause_put(
         &self,
+        auth: JwtAuth,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
     ) -> poem::Result<Json<Plan>> {
+        auth.check_role(Role::Pause).map_err(into_poem_error)?;
+
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Pause a Plan
-        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, "placeholder_user").await?;
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, "placeholder_user")
+            .await
+            .map_err(into_poem_error)?;
 
         // Commit transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -107,14 +137,19 @@ impl Api {
     #[oai(path = "/plan/unpause/:dataset_id", method = "put", tag = Tag::Plan)]
     async fn plan_unpause_put(
         &self,
+        auth: JwtAuth,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
     ) -> poem::Result<Json<Plan>> {
+        auth.check_role(Role::Pause).map_err(into_poem_error)?;
+
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Unpause a Plan
-        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, "placeholder_user").await?;
+        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, "placeholder_user")
+            .await
+            .map_err(into_poem_error)?;
 
         // Commit transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -134,8 +169,9 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Read the data product from the DB
-        let data_product: DataProduct =
-            data_product_read(&mut tx, dataset_id, data_product_id).await?;
+        let data_product: DataProduct = data_product_read(&mut tx, dataset_id, data_product_id)
+            .await
+            .map_err(into_poem_error)?;
 
         // Rollback transaction (read-only operation)
         tx.rollback().await.map_err(InternalServerError)?;
@@ -147,15 +183,20 @@ impl Api {
     #[oai(path = "/data_product/update/:dataset_id", method = "put", tag = Tag::DataProduct)]
     async fn state_put(
         &self,
+        auth: JwtAuth,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
         Json(states): Json<Vec<StateParam>>,
     ) -> poem::Result<Json<Plan>> {
+        auth.check_role(Role::Update).map_err(into_poem_error)?;
+
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Update data product states and return the updated plan
-        let plan: Plan = states_edit(&mut tx, dataset_id, &states, "placeholder_user").await?;
+        let plan: Plan = states_edit(&mut tx, dataset_id, &states, "placeholder_user")
+            .await
+            .map_err(into_poem_error)?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -167,16 +208,20 @@ impl Api {
     #[oai(path = "/data_product/clear/:dataset_id", method = "put", tag = Tag::DataProduct)]
     async fn clear_put(
         &self,
+        auth: JwtAuth,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
         Json(data_product_ids): Json<Vec<DataProductId>>,
     ) -> poem::Result<Json<Plan>> {
+        auth.check_role(Role::Update).map_err(into_poem_error)?;
+
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Clear Data Products and clear all downsteam data products.
-        let plan: Plan =
-            clear_edit(&mut tx, dataset_id, &data_product_ids, "placeholder_user").await?;
+        let plan: Plan = clear_edit(&mut tx, dataset_id, &data_product_ids, "placeholder_user")
+            .await
+            .map_err(into_poem_error)?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -188,16 +233,20 @@ impl Api {
     #[oai(path = "/data_product/:dataset_id", method = "delete", tag = Tag::DataProduct)]
     async fn disable_delete(
         &self,
+        auth: JwtAuth,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
         Json(data_product_ids): Json<Vec<DataProductId>>,
     ) -> poem::Result<Json<Plan>> {
+        auth.check_role(Role::Disable).map_err(into_poem_error)?;
+
         // Start Transaction
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Mark Data Products as disabled.
-        let plan: Plan =
-            disable_drop(&mut tx, dataset_id, &data_product_ids, "placeholder_user").await?;
+        let plan: Plan = disable_drop(&mut tx, dataset_id, &data_product_ids, "placeholder_user")
+            .await
+            .map_err(into_poem_error)?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;

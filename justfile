@@ -14,11 +14,11 @@ build-release:
 
 # Build and Run a Develop Binay
 run:
-  cargo run
+  RUST_BACKTRACE=full cargo run
 
 # Build and Run a Release Binary
 run-release:
-  cargo run --release
+  RUST_BACKTRACE=full cargo run --release
 
 # Check Rust Code
 check:
@@ -86,7 +86,7 @@ deny:
 
 # Hash a given key (or any value realy)
 hash key:
-  cargo run --package key_hasher -- --key {{ key }}
+  RUST_BACKTRACE=full cargo run --package key_hasher -- --key {{ key }}
 
 
 ################

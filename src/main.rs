@@ -1,4 +1,5 @@
 mod api;
+mod auth;
 mod core;
 mod dag;
 mod db;
@@ -8,15 +9,26 @@ mod ui;
 
 use crate::{
     api::Api,
+    auth::RemoteAuth,
     ui::{not_found_404, user_service},
 };
+use jsonwebtoken::{DecodingKey, EncodingKey};
 use poem::{
     EndpointExt, Route, Server, endpoint::EmbeddedFilesEndpoint, listener::TcpListener,
     middleware::Tracing,
 };
 use poem_openapi::OpenApiService;
 use rust_embed::Embed;
-use sqlx::PgPool;
+use sqlx::{PgPool, migrate};
+
+/// Struct we will put all our configs to run Fletcher into
+#[derive(Clone)]
+struct Config {
+    database_url: String,
+    decoding_key: DecodingKey,
+    encoding_key: EncodingKey,
+    remote_auths: Vec<RemoteAuth>,
+}
 
 /// Static files hosted via webserver
 #[derive(Embed)]
@@ -31,6 +43,9 @@ async fn main() -> color_eyre::Result<()> {
     // Enable Poem's logging
     tracing_subscriber::fmt::init();
 
+    // Read in configs
+    let config: Config = load_config()?;
+
     // Setup our OpenAPI Service
     let api_service =
         OpenApiService::new(Api, "Fletcher", "0.1.0").server("http://0.0.0.0:3000/api");
@@ -38,7 +53,8 @@ async fn main() -> color_eyre::Result<()> {
     let swagger = api_service.swagger_ui();
 
     // Connect to PostgreSQL
-    let pool = PgPool::connect(&dotenvy::var("DATABASE_URL")?).await?;
+    let pool = PgPool::connect(&config.database_url).await?;
+    migrate!().run(&pool).await?;
 
     // Route inbound traffic
     let app = Route::new()
@@ -51,6 +67,7 @@ async fn main() -> color_eyre::Result<()> {
         .nest("/", user_service())
         .catch_error(not_found_404)
         // Global context to be shared
+        .data(config)
         .data(pool)
         // Utilites being added to our services
         .with(Tracing);
@@ -61,6 +78,19 @@ async fn main() -> color_eyre::Result<()> {
         .await?;
 
     Ok(())
+}
+
+/// Load in Fletcher's configs
+fn load_config() -> color_eyre::Result<Config> {
+    let secret_key: String = dotenvy::var("SECRET_KEY")?;
+    let secret_key: &[u8] = secret_key.as_bytes();
+
+    Ok(Config {
+        database_url: dotenvy::var("DATABASE_URL")?,
+        encoding_key: EncodingKey::from_secret(secret_key),
+        decoding_key: DecodingKey::from_secret(secret_key),
+        remote_auths: serde_json::from_str(&dotenvy::var("REMOTE_APIS")?)?,
+    })
 }
 
 #[cfg(test)]
