@@ -416,8 +416,7 @@ pub async fn plan_search_read(
     // Fetch one extra item to check if there's a next page
     let mut rows: Vec<SearchRow> =
         search_plans_select(tx, search_by, PAGE_SIZE.saturating_add(1), offset)
-            .await
-            .map_err(|e| e)?;
+            .await?;
 
     // PAGE_SIZE as usize
     let page_size: usize = PAGE_SIZE.try_into().map_err(|_| Error::Unreachable)?;

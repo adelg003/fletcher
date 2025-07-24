@@ -20,7 +20,7 @@ pub enum Error {
     BadState(DataProductId, State),
 
     /// Error from
-    #[error("Bcrypt error: '{0}'")]
+    #[error(transparent)]
     Bcrypt(#[from] BcryptError),
 
     /// The dependency graph contains a cycle (not a valid DAG)
@@ -40,7 +40,7 @@ pub enum Error {
     DuplicateDependencies(DataProductId, DataProductId),
 
     /// Error from Petgraph::Graph
-    #[error("Petgraph error: '{0}'")]
+    #[error(transparent)]
     Graph(#[from] GraphError),
 
     /// Trying to log in with an invalid key
@@ -52,7 +52,7 @@ pub enum Error {
     InvalidService(String),
 
     /// Error from JsonWebToken
-    #[error("JsonWebToken error: '{0}'")]
+    #[error(transparent)]
     Jwt(#[from] JwtError),
 
     /// Data Product not found
@@ -68,7 +68,7 @@ pub enum Error {
     Role(String, Role),
 
     /// Errors from SQLx
-    #[error("SQLx error: '{0}'")]
+    #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 
     /// This error should never be reachable
