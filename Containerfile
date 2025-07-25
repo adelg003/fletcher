@@ -21,6 +21,9 @@ COPY ./.sqlx ./.sqlx
 COPY ./src ./src
 COPY ./tailwind.css ./tailwind.css
 
+# Copy file for workspace to funtions as intended
+COPY ./key_hasher/Cargo.toml ./key_hasher/Cargo.toml
+
 # Accept compile mode as an argument (default: release)
 ARG BUILD_MODE=release
 
