@@ -222,3 +222,143 @@ fn test_hash_verification() {
         "Generated hash '{hash}' should NOT verify against wrong password 'wrong_password'"
     );
 }
+
+#[test]
+fn test_cost_flag_short() {
+    let mut cmd = Command::cargo_bin("key_hasher").unwrap();
+    cmd.arg("-k").arg("test_password").arg("-c").arg("10");
+
+    cmd.assert()
+        .success()
+        .stdout(starts_with("Key hash: $2"))
+        .stdout(contains("$10$"))
+        .stdout(ends_with("\n"));
+}
+
+#[test]
+fn test_cost_flag_long() {
+    let mut cmd = Command::cargo_bin("key_hasher").unwrap();
+    cmd.arg("--key").arg("test_password").arg("--cost").arg("8");
+
+    cmd.assert()
+        .success()
+        .stdout(starts_with("Key hash: $2"))
+        .stdout(contains("$08$"))
+        .stdout(ends_with("\n"));
+}
+
+#[test]
+fn test_cost_flag_minimum_value() {
+    let mut cmd = Command::cargo_bin("key_hasher").unwrap();
+    cmd.arg("-k").arg("test_password").arg("-c").arg("4");
+
+    cmd.assert()
+        .success()
+        .stdout(starts_with("Key hash: $2"))
+        .stdout(contains("$04$"))
+        .stdout(ends_with("\n"));
+}
+
+#[test]
+fn test_cost_flag_maximum_reasonable_value() {
+    let mut cmd = Command::cargo_bin("key_hasher").unwrap();
+    cmd.arg("-k").arg("test_password").arg("-c").arg("15");
+
+    cmd.assert()
+        .success()
+        .stdout(starts_with("Key hash: $2"))
+        .stdout(contains("$15$"))
+        .stdout(ends_with("\n"));
+}
+
+#[test]
+fn test_cost_flag_default_when_not_specified() {
+    let mut cmd = Command::cargo_bin("key_hasher").unwrap();
+    cmd.arg("-k").arg("test_password");
+
+    cmd.assert()
+        .success()
+        .stdout(starts_with("Key hash: $2"))
+        .stdout(contains("$12$")) // DEFAULT_COST is 12
+        .stdout(ends_with("\n"));
+}
+
+#[test]
+fn test_cost_flag_invalid_value_too_low() {
+    let mut cmd = Command::cargo_bin("key_hasher").unwrap();
+    cmd.arg("-k").arg("test_password").arg("-c").arg("3");
+
+    // bcrypt should reject cost values below 4
+    cmd.assert().failure();
+}
+
+#[test]
+fn test_cost_flag_invalid_non_numeric() {
+    let mut cmd = Command::cargo_bin("key_hasher").unwrap();
+    cmd.arg("-k").arg("test_password").arg("-c").arg("abc");
+
+    cmd.assert().failure().stderr(contains("invalid value"));
+}
+
+#[test]
+fn test_cost_flag_hash_verification() {
+    let test_password = "cost_verification_test";
+    let mut cmd = Command::cargo_bin("key_hasher").unwrap();
+    cmd.arg("-k").arg(test_password).arg("-c").arg("6");
+
+    let run = cmd.assert().success().stdout(starts_with("Key hash: $2"));
+
+    let stdout = String::from_utf8(run.get_output().stdout.clone()).unwrap();
+
+    // Extract the hash
+    let hash_line = stdout.strip_prefix("Key hash: ").unwrap();
+    let hash = hash_line.trim();
+
+    // Verify that the hash contains the correct cost
+    assert!(
+        hash.contains("$06$"),
+        "Hash should contain cost '06', got: '{hash}'"
+    );
+
+    // Verify that the hash actually matches the original password
+    assert!(
+        verify(test_password, hash).unwrap(),
+        "Generated hash with custom cost should verify against original password"
+    );
+}
+
+#[test]
+fn test_different_cost_values_produce_different_hashes() {
+    let test_password = "same_password_different_costs";
+
+    let mut cmd1 = Command::cargo_bin("key_hasher").unwrap();
+    cmd1.arg("-k").arg(test_password).arg("-c").arg("6");
+
+    let mut cmd2 = Command::cargo_bin("key_hasher").unwrap();
+    cmd2.arg("-k").arg(test_password).arg("-c").arg("8");
+
+    let run1 = cmd1.assert().success().stdout(starts_with("Key hash: $2"));
+    let run2 = cmd2.assert().success().stdout(starts_with("Key hash: $2"));
+
+    let hash1 = String::from_utf8(run1.get_output().stdout.clone()).unwrap();
+    let hash2 = String::from_utf8(run2.get_output().stdout.clone()).unwrap();
+
+    // Hashes should be different due to different costs (and salts)
+    assert_ne!(
+        hash1, hash2,
+        "Same password with different costs should produce different hashes"
+    );
+
+    // Extract the actual hash parts to verify costs
+    let hash1_part = hash1.strip_prefix("Key hash: ").unwrap().trim();
+    let hash2_part = hash2.strip_prefix("Key hash: ").unwrap().trim();
+
+    assert!(
+        hash1_part.contains("$06$"),
+        "First hash should contain cost '06', got: '{hash1_part}'"
+    );
+    assert!(
+        hash2_part.contains("$08$"),
+        "Second hash should contain cost '08', got: '{hash2_part}'"
+    );
+}

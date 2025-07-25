@@ -85,9 +85,9 @@ deny:
 ## Key Hasher ##
 ################
 
-# Hash a given key (or any value realy)
-hash key:
-  RUST_BACKTRACE=full cargo run --package key_hasher -- --key {{ key }}
+# Hash a given key (or any value really) with optional cost factor
+hash key cost="12":
+  RUST_BACKTRACE=full cargo run --package key_hasher -- --key {{ key }} --cost {{ cost }}
 
 
 ##############
