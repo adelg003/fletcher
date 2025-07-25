@@ -109,7 +109,7 @@ pub fn authenticate(cred: &RemoteLogin, config: &Config) -> Result<Authenticated
     })
 }
 
-/// Bearer JWT Authentication/// Token Authentication
+/// Bearer JWT Authentication
 #[derive(SecurityScheme)]
 #[oai(ty = "bearer", checker = "jwt_checker")]
 pub struct JwtAuth(RemoteAuth);
