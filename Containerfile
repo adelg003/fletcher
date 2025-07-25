@@ -22,7 +22,7 @@ COPY ./.sqlx ./.sqlx
 COPY ./src ./src
 COPY ./tailwind.css ./tailwind.css
 
-# Copy files for workspace sub packages
+# Copy files for workspace subpackages
 COPY ./key_hasher/Cargo.toml ./key_hasher/Cargo.toml
 COPY ./key_hasher/src ./key_hasher/src
 
