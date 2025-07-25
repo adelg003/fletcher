@@ -14,7 +14,8 @@ WORKDIR /opt/fletcher
 COPY ./build.rs ./build.rs
 COPY ./Cargo.toml ./Cargo.toml
 COPY ./Cargo.lock ./Cargo.lock
-COPY ./images/* ./images/*
+COPY ./images ./images
+COPY ./migrations ./migrations
 COPY ./package.json ./package.json
 COPY ./package-lock.json ./package-lock.json
 COPY ./.sqlx ./.sqlx
