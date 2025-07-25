@@ -1,22 +1,33 @@
 # Fletcher
 
-Fletcher is a data orchestration platform that uses in-memory directed acyclic graphs (DAGs) to orchestrate the triggering of compute jobs. With its precise orchestration, your data products won't rush or drag — no one can say "Not quite my tempo."
+Fletcher is a data orchestration platform that uses in-memory directed acyclic
+graphs (DAGs) to orchestrate the triggering of compute jobs. With its precise
+orchestration, your data products won't rush or drag — no one can say "Not
+quite my tempo."
 
 ## What is Fletcher?
 
-Fletcher manages **Plans** - collections of **Data Products** organized into **Datasets** with **Dependencies** that form a DAG. When data products succeed, Fletcher automatically triggers downstream jobs that are ready to run, ensuring efficient and reliable data pipeline execution.
+Fletcher manages **Plans** - collections of **Data Products** organized into
+**Datasets** with **Dependencies** that form a DAG. When data products succeed,
+Fletcher automatically triggers downstream jobs that are ready to run, ensuring
+efficient and reliable data pipeline execution.
 
 ### Key Concepts
 
 - **Dataset**: A container for a plan that can be paused/unpaused
-- **Data Product**: An individual compute job with states (waiting, queued, running, success, failed, disabled)
-- **Dependencies**: Parent-child relationships between data products that form the execution DAG
-- **Plan**: The complete specification of data products and their dependencies for a dataset
+- **Data Product**: An individual compute job with states (waiting, queued,
+  running, success, failed, disabled)
+- **Dependencies**: Parent-child relationships between data products that form
+  the execution DAG
+- **Plan**: The complete specification of data products and their dependencies
+  for a dataset
 
 ## Features
 
-- 🎯 **DAG-based Orchestration**: Automatically resolves dependencies and triggers ready jobs
-- 🔄 **Real-time State Management**: Track and update data product states with automatic downstream triggering
+- 🎯 **DAG-based Orchestration**: Automatically resolves dependencies and
+  triggers ready jobs
+- 🔄 **Real-time State Management**: Track and update data product states with
+  automatic downstream triggering
 - 🌐 **REST API**: Full OpenAPI/Swagger documented REST interface
 - 🖥️ **Web UI**: Search, visualize, and manage your data pipelines
 - 🐘 **PostgreSQL Backend**: Reliable data persistence with migrations
@@ -37,12 +48,14 @@ Fletcher manages **Plans** - collections of **Data Products** organized into **D
 ### Installation
 
 1. **Clone the repository**
+
    ```bash
    git clone <repository-url>
    cd fletcher
    ```
 
 2. **Set up PostgreSQL**
+
    ```bash
    # Using Just (recommended)
    just pg-start
@@ -59,6 +72,7 @@ Fletcher manages **Plans** - collections of **Data Products** organized into **D
 3. **Configure environment**
 
    **Option A: Using .env file (Recommended for development)**
+
    ```bash
    # Create a .env file in the project root
    cat > .env << 'EOF'
@@ -79,13 +93,14 @@ Fletcher manages **Plans** - collections of **Data Products** organized into **D
    RUST_BACKTRACE=1
    EOF
    ```
-   
+
    **Note**: The above configuration includes:
    - `local` service with password `abc123` (full access)
    - `readonly` service with password `abc123` (read-only access)
    - Generate new password hashes with: `just hash "your-password"`
 
    **Option B: Manual export**
+
    ```bash
    export DATABASE_URL="postgres://fletcher_user:password@localhost/fletcher_db"
    export SECRET_KEY="your-secret-key-for-jwt-signing-make-it-long-and-random"
@@ -93,12 +108,14 @@ Fletcher manages **Plans** - collections of **Data Products** organized into **D
    ```
 
 4. **Run database migrations**
+
    ```bash
    just sqlx-migrate
    # Or: sqlx migrate run
    ```
 
 5. **Build and run**
+
    ```bash
    just run
    # Or: cargo run
@@ -108,9 +125,10 @@ The application will be available at `http://localhost:3000`
 
 ## Web User Interface
 
-Fletcher provides a modern, responsive web interface for managing and visualizing your data orchestration pipelines.
+Fletcher provides a modern, responsive web interface for managing and
+visualizing your data orchestration pipelines.
 
-### Features
+### UI Features
 
 - **🔍 Live Search**: Real-time search for plans with instant results
 - **📊 DAG Visualization**: Interactive GraphViz diagrams showing data product dependencies
@@ -121,6 +139,7 @@ Fletcher provides a modern, responsive web interface for managing and visualizin
 ### Pages
 
 #### Search Page (`/`)
+
 The main landing page provides plan discovery functionality:
 
 - **Live Search**: Type-ahead search with 500ms debounce for finding plans
@@ -129,9 +148,10 @@ The main landing page provides plan discovery functionality:
 - **Quick Navigation**: Click any result to instantly jump to the plan details
 
 #### Plan Page (`/plan/{dataset_id}`)
+
 Comprehensive plan visualization and management:
 
-- **Dataset Overview**: 
+- **Dataset Overview**:
   - Dataset ID and current status (Active/Paused)
   - Last modified information
   - Quick status indicators with colored badges
@@ -161,7 +181,8 @@ Comprehensive plan visualization and management:
 ### Technology Stack
 
 - **🎨 TailwindCSS**: Modern utility-first CSS framework for responsive design
-- **⚡ HTMX**: Progressive enhancement for dynamic interactions without complex JavaScript
+- **⚡ HTMX**: Progressive enhancement for dynamic interactions without
+  complex JavaScript
 - **📈 GraphViz**: Professional dependency graph visualization with Viz.js
 - **🌈 Prism.js**: Beautiful syntax highlighting for JSON payloads
 - **🖼️ Maud**: Type-safe HTML templating in Rust
@@ -182,6 +203,7 @@ Comprehensive plan visualization and management:
 ### Browser Support
 
 Fletcher's UI works in all modern browsers with:
+
 - ES6+ JavaScript support
 - SVG rendering capabilities
 - CSS Grid and Flexbox support
@@ -195,11 +217,13 @@ Fletcher's UI works in all modern browsers with:
 
 ## Authentication
 
-Fletcher uses **JWT (JSON Web Token) authentication** with **role-based access control (RBAC)** to secure API endpoints.
+Fletcher uses **JWT (JSON Web Token) authentication** with **role-based
+access control (RBAC)** to secure API endpoints.
 
 ### Authentication Flow
 
 1. **Get JWT Token**
+
    ```bash
    curl -X POST http://localhost:3000/api/authenticate \
      -H "Content-Type: application/json" \
@@ -210,6 +234,7 @@ Fletcher uses **JWT (JSON Web Token) authentication** with **role-based access c
    ```
 
 2. **Response**
+
    ```json
    {
      "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
@@ -224,6 +249,7 @@ Fletcher uses **JWT (JSON Web Token) authentication** with **role-based access c
    ```
 
 3. **Use Bearer Token**
+
    ```bash
    curl -X POST http://localhost:3000/api/plan \
      -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..." \
@@ -235,12 +261,16 @@ Fletcher uses **JWT (JSON Web Token) authentication** with **role-based access c
 
 Fletcher implements four distinct roles that control access to different operations:
 
-| Role | Description | Endpoints |
-|------|-------------|-----------|
-| **`publish`** | Create and submit new plans | `POST /api/plan` |
-| **`update`** | Modify data product states and clear dependencies | `PUT /api/data_product/update/*`<br/>`PUT /api/data_product/clear/*` |
-| **`pause`** | Pause and unpause dataset execution | `PUT /api/plan/pause/*`<br/>`PUT /api/plan/unpause/*` |
-| **`disable`** | Permanently disable data products | `DELETE /api/data_product/*` |
+<!-- markdownlint-disable MD013 -->
+| Role          | Description                 | Endpoints                        |
+|---------------|-----------------------------|----------------------------------|
+| **`publish`** | Create and submit new plans | `POST /api/plan`                 |
+| **`update`**  | Modify data product states  | `PUT /api/data_product/update/*` |
+|               |                             | `PUT /api/data_product/clear/*`  |
+| **`pause`**   | Pause and unpause datasets  | `PUT /api/plan/pause/*`          |
+|               |                             | `PUT /api/plan/unpause/*`        |
+| **`disable`** | Disable data products       | `DELETE /api/data_product/*`     |
+<!-- markdownlint-enable MD013 -->
 
 ### Service Configuration
 
@@ -263,14 +293,17 @@ Services are configured via the `REMOTE_APIS` environment variable:
 
 - **`local`** - Full access service with all roles
 - **`readonly`** - Limited access service with no modification roles
-- **`hash`** - bcrypt hash of the service's password (use `just hash "password"` to generate)
+- **`hash`** - bcrypt hash of the service's password (use
+  `just hash "password"` to generate)
 
 ## API Endpoints
 
-### Authentication
+### Authentication Endpoints
+
 - `POST /api/authenticate` - Get JWT token (no auth required)
 
 ### Plans
+
 - `POST /api/plan` - Create or update a plan **[Requires: `publish` role]**
 - `GET /api/plan/{dataset_id}` - Get a plan by dataset ID
 - `GET /api/plan/search` - Search plans  
@@ -278,12 +311,17 @@ Services are configured via the `REMOTE_APIS` environment variable:
 - `PUT /api/plan/unpause/{dataset_id}` - Unpause a dataset **[Requires: `pause` role]**
 
 ### Data Products
+
 - `GET /api/data_product/{dataset_id}/{data_product_id}` - Get a data product
-- `PUT /api/data_product/update/{dataset_id}` - Update data product states **[Requires: `update` role]**
-- `PUT /api/data_product/clear/{dataset_id}` - Clear data products and downstream dependencies **[Requires: `update` role]**
-- `DELETE /api/data_product/{dataset_id}` - Disable data products **[Requires: `disable` role]**
+- `PUT /api/data_product/update/{dataset_id}` - Update data product states
+  **[Requires: `update` role]**
+- `PUT /api/data_product/clear/{dataset_id}` - Clear data products and
+  downstream dependencies **[Requires: `update` role]**
+- `DELETE /api/data_product/{dataset_id}` - Disable data products
+  **[Requires: `disable` role]**
 
 ### Documentation
+
 - `/swagger` - Interactive API documentation
 - `/spec` - OpenAPI specification
 
@@ -292,6 +330,7 @@ Services are configured via the `REMOTE_APIS` environment variable:
 ### Authentication Workflow
 
 1. **Authenticate and get JWT**
+
    ```bash
    # Get JWT token
    curl -X POST http://localhost:3000/api/authenticate \
@@ -303,6 +342,7 @@ Services are configured via the `REMOTE_APIS` environment variable:
    ```
 
 2. **Extract token from response**
+
    ```json
    {
      "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
@@ -313,6 +353,7 @@ Services are configured via the `REMOTE_APIS` environment variable:
    ```
 
 3. **Use token for authenticated requests**
+
    ```bash
    # Store token in variable
    TOKEN="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
@@ -365,6 +406,7 @@ Services are configured via the `REMOTE_APIS` environment variable:
 ### Data Product States
 
 Fletcher manages the following states:
+
 - `waiting` - Waiting on dependencies to complete
 - `queued` - Job submitted but not started
 - `running` - Compute reports job is running
@@ -374,9 +416,10 @@ Fletcher manages the following states:
 
 ## Development
 
-### Prerequisites
+### Development Prerequisites
 
 Install development dependencies:
+
 ```bash
 # Install Just command runner
 cargo install just
@@ -390,7 +433,8 @@ just deny-install
 
 ### Environment Configuration
 
-Fletcher uses environment variables for configuration. For local development, create a `.env` file in the project root:
+Fletcher uses environment variables for configuration. For local development,
+create a `.env` file in the project root:
 
 ```bash
 # .env file for local development
@@ -415,13 +459,16 @@ RUST_LOG=debug
 ```
 
 **Available Environment Variables:**
+
 - `DATABASE_URL` - PostgreSQL connection string (required)
 - `SECRET_KEY` - Secret key for JWT token signing (required)
-- `REMOTE_APIS` - JSON array of service configurations with roles (required)
+- `REMOTE_APIS` - JSON array of service configurations with roles
+  (required)
 - `RUST_BACKTRACE` - Set to `1` or `full` for detailed error traces
 - `RUST_LOG` - Log level (`error`, `warn`, `info`, `debug`, `trace`)
 
-**Note:** The `.env` file is automatically loaded by Fletcher using the `dotenvy` crate.
+**Note:** The `.env` file is automatically loaded by Fletcher using the
+`dotenvy` crate.
 
 ### Development Commands
 
@@ -470,7 +517,7 @@ just hash "password"         # Generate bcrypt hash
 
 ### Project Structure
 
-```
+```text
 fletcher/
 ├── src/
 │   ├── api.rs              # REST API endpoints
@@ -491,6 +538,7 @@ fletcher/
 ### Testing
 
 Run the comprehensive test suite:
+
 ```bash
 # All tests
 just test
@@ -531,18 +579,23 @@ just docker-healthcheck
 ### Environment Variables
 
 **Required:**
+
 - `DATABASE_URL` - PostgreSQL connection string
 - `SECRET_KEY` - Secret key for JWT token signing (generate a long, random string)
 - `REMOTE_APIS` - JSON array of service configurations with authentication and roles
 
 **Optional:**
+
 - `RUST_BACKTRACE` - Set to `1` or `full` for detailed error traces  
 - `RUST_LOG` - Log level (`error`, `warn`, `info`, `debug`, `trace`)
 
-**For Development:** Use a `.env` file (see Environment Configuration section above)  
-**For Production:** Set environment variables directly in your deployment system
+**For Development:** Use a `.env` file (see Environment Configuration
+section above)  
+**For Production:** Set environment variables directly in your deployment
+system
 
 **Security Notes:**
+
 - Use a strong, randomly generated `SECRET_KEY` in production
 - Store bcrypt password hashes in `REMOTE_APIS`, never plain text passwords
 - Use `just hash "your-password"` to generate secure password hashes
@@ -550,6 +603,7 @@ just docker-healthcheck
 ## Configuration
 
 Fletcher supports compute types:
+
 - `cams` - C-AMS compute platform
 - `dbxaas` - DBXaaS compute platform
 
@@ -574,6 +628,7 @@ Plans can include custom JSON metadata in `extra` fields for extensibility.
 ### Code Quality
 
 The project maintains high code quality standards:
+
 - Comprehensive test coverage
 - Strict linting with Clippy
 - Security scanning with cargo-deny and Trivy
@@ -581,7 +636,11 @@ The project maintains high code quality standards:
 
 ## Why is this repo called Fletcher?
 
-This repo is named after Terence Fletcher, who was the world ~~infamous~~ famous conductor of the Shaffer Studio Jazz Band at the Shaffer Conservatory in New York City. Just as Fletcher demanded perfect timing and precision from his musicians, this orchestration platform ensures your data products execute with perfect timing and precision.
+This repo is named after Terence Fletcher, who was the world ~~infamous~~
+famous conductor of the Shaffer Studio Jazz Band at the Shaffer Conservatory
+in New York City. Just as Fletcher demanded perfect timing and precision from
+his musicians, this orchestration platform ensures your data products execute
+with perfect timing and precision.
 
 ## License
 
