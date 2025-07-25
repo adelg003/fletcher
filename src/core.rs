@@ -1,7 +1,7 @@
 use crate::{
     dag::Dag,
     db::search_plans_select,
-    error::Error,
+    error::{Error, Result},
     model::{
         DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, SearchReturn, SearchRow,
         State, StateParam,
@@ -9,7 +9,6 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use petgraph::graph::DiGraph;
-use poem::error::InternalServerError;
 use sqlx::{Postgres, Transaction};
 use std::collections::HashSet;
 use tracing::warn;
@@ -18,15 +17,15 @@ use tracing::warn;
 const PAGE_SIZE: u32 = 50;
 
 /// Validate a PlanParam from the user
-fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<()> {
+fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
     // Does Plan have any dup data products?
     if let Some(data_product_id) = param.has_dup_data_products() {
-        return Err(Error::Duplicate(data_product_id).into_poem_error());
+        return Err(Error::Duplicate(data_product_id));
     }
 
     // Does Plan have any dup dependencies?
     if let Some((parent_id, child_id)) = param.has_dup_dependencies() {
-        return Err(Error::DuplicateDependencies(parent_id, child_id).into_poem_error());
+        return Err(Error::DuplicateDependencies(parent_id, child_id));
     }
 
     // Get a list of all Data Product IDs
@@ -50,7 +49,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&parent_id) {
                 Ok(())
             } else {
-                Err(Error::Missing(parent_id).into_poem_error())
+                Err(Error::Missing(parent_id))
             }
         })?;
 
@@ -62,7 +61,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
             if data_product_ids.contains(&child_id) {
                 Ok(())
             } else {
-                Err(Error::Missing(child_id).into_poem_error())
+                Err(Error::Missing(child_id))
             }
         })?;
 
@@ -76,8 +75,7 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> poem::Result<(
     }
 
     // If you take all our data products and map them to a graph are they a valid dag?
-    DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges)
-        .map_err(|e| e.into_poem_error())?;
+    DiGraph::<DataProductId, u32>::build_dag(data_product_ids, edges)?;
 
     Ok(())
 }
@@ -87,7 +85,7 @@ pub async fn plan_add(
     tx: &mut Transaction<'_, Postgres>,
     param: &PlanParam,
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Pull any prior details
     let wip_plan = Plan::from_db(tx, param.dataset.id).await;
 
@@ -95,7 +93,7 @@ pub async fn plan_add(
     let current_plan: Option<Plan> = match wip_plan {
         Ok(plan) => Some(plan),
         Err(Error::Sqlx(sqlx::Error::RowNotFound)) => None,
-        Err(err) => return Err(err.into_poem_error()),
+        Err(err) => return Err(err),
     };
 
     // Validate to make sure the user submitted valid parameters
@@ -104,10 +102,7 @@ pub async fn plan_add(
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Write our Plan to the DB
-    let mut plan: Plan = param
-        .upsert(tx, username, modified_date)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan: Plan = param.upsert(tx, username, modified_date).await?;
 
     // Triger the next batch of data products
     trigger_next_batch(tx, &mut plan, username, modified_date).await?;
@@ -116,8 +111,8 @@ pub async fn plan_add(
 }
 
 /// Read a Plan Dag from the DB
-pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> poem::Result<Plan> {
-    Plan::from_db(tx, id).await.map_err(|e| e.into_poem_error())
+pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> Result<Plan> {
+    Plan::from_db(tx, id).await
 }
 
 /// Set the pause state of a plan
@@ -126,19 +121,15 @@ pub async fn plan_pause_edit(
     id: DatasetId,
     paused: bool,
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Pull the current plan from the DB
-    let mut plan = Plan::from_db(tx, id)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan = Plan::from_db(tx, id).await?;
 
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Set the new pause state
-    plan.paused(tx, paused, username, modified_date)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    plan.paused(tx, paused, username, modified_date).await?;
 
     // If unpaused, lets run the next batch
     if !paused {
@@ -153,10 +144,8 @@ pub async fn data_product_read(
     tx: &mut Transaction<'_, Postgres>,
     dataset_id: DatasetId,
     data_product_id: DataProductId,
-) -> poem::Result<DataProduct> {
-    DataProduct::from_db(tx, dataset_id, data_product_id)
-        .await
-        .map_err(|e| e.into_poem_error())
+) -> Result<DataProduct> {
+    DataProduct::from_db(tx, dataset_id, data_product_id).await
 }
 
 /// Update the state of our data product
@@ -166,25 +155,24 @@ async fn state_update(
     state: &StateParam,
     username: &str,
     modified_date: DateTime<Utc>,
-) -> poem::Result<()> {
+) -> Result<()> {
     // Pull before we mutably borrow via plan.data_product()
     let dataset_id: DatasetId = plan.dataset.id;
 
     // Pull our Data Product
     let data_product: &mut DataProduct = plan
         .data_product_mut(state.id)
-        .ok_or(Error::Missing(state.id).into_poem_error())?;
+        .ok_or(Error::Missing(state.id))?;
 
     // Is the data product locked?
     if data_product.state == State::Disabled {
-        return Err(Error::Disabled(data_product.id).into_poem_error());
+        return Err(Error::Disabled(data_product.id));
     }
 
     // Update our Data Product State
     data_product
         .state_update(tx, dataset_id, state, username, modified_date)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+        .await?;
 
     Ok(())
 }
@@ -196,12 +184,12 @@ async fn clear_downstream_nodes(
     nodes: &[DataProductId],
     username: &str,
     modified_date: DateTime<Utc>,
-) -> poem::Result<()> {
+) -> Result<()> {
     // Pull before we mutably borrow via plan.data_product()
     let dataset_id: DatasetId = plan.dataset.id;
 
     // Generate Dag representation of the plan
-    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(|e| e.into_poem_error())?;
+    let dag: DiGraph<DataProductId, u32> = plan.to_dag()?;
 
     // What are all the downstream nodes of our updated states?
     let mut downstream_ids = HashSet::<DataProductId>::new();
@@ -220,9 +208,7 @@ async fn clear_downstream_nodes(
 
     // Get ready to update the state of the data products
     for id in downstream_ids {
-        let data_product: &mut DataProduct = plan
-            .data_product_mut(id)
-            .ok_or(InternalServerError(Error::Missing(id)))?;
+        let data_product: &mut DataProduct = plan.data_product_mut(id).ok_or(Error::Unreachable)?;
 
         // Params for the current and new state. Make our change and dump the current state to fill the rest.
         let current_state: StateParam = data_product.into();
@@ -234,8 +220,7 @@ async fn clear_downstream_nodes(
         // Set non-waiting downstream_nodes to waiting
         data_product
             .state_update(tx, dataset_id, &new_state, username, modified_date)
-            .await
-            .map_err(|e| e.into_poem_error())?;
+            .await?;
     }
 
     Ok(())
@@ -247,7 +232,7 @@ async fn trigger_next_batch(
     plan: &mut Plan,
     username: &str,
     modified_date: DateTime<Utc>,
-) -> poem::Result<()> {
+) -> Result<()> {
     // Is the dataset paused? If so, no need to trigger the next data product.
     if plan.dataset.paused {
         return Ok(());
@@ -270,7 +255,7 @@ async fn trigger_next_batch(
         .collect();
 
     // Generate Dag representation of the plan (Disabled nodes are not part of the dag.)
-    let dag: DiGraph<DataProductId, u32> = plan.to_dag().map_err(|e| e.into_poem_error())?;
+    let dag: DiGraph<DataProductId, u32> = plan.to_dag()?;
 
     // Check each data product's parents to see if any of them are blocking
     for waiting_id in waiting_ids {
@@ -293,7 +278,7 @@ async fn trigger_next_batch(
             // Representation of the current data product
             let data_product: &mut DataProduct = plan
                 .data_product_mut(waiting_id)
-                .ok_or(InternalServerError(Error::Missing(waiting_id)))?;
+                .ok_or(Error::Unreachable)?;
 
             // Params for the current and new state. Make our change and dump the current state to fill the rest.
             let new_state = StateParam {
@@ -304,8 +289,7 @@ async fn trigger_next_batch(
             // Now record what we triggered the data product in the OaaS Wrapper
             data_product
                 .state_update(tx, dataset_id, &new_state, username, modified_date)
-                .await
-                .map_err(|e| e.into_poem_error())?;
+                .await?;
         }
     }
 
@@ -318,7 +302,7 @@ pub async fn states_edit(
     id: DatasetId,
     states: &[StateParam],
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
 
@@ -328,14 +312,12 @@ pub async fn states_edit(
             state.state,
             State::Disabled | State::Queued | State::Waiting
         ) {
-            return Err(Error::BadState(state.id, state.state).into_poem_error());
+            return Err(Error::BadState(state.id, state.state));
         }
     }
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan = Plan::from_db(tx, id).await?;
 
     // Apply our updates to the data products
     for state in states {
@@ -358,21 +340,17 @@ pub async fn clear_edit(
     id: DatasetId,
     data_product_ids: &[DataProductId],
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan = Plan::from_db(tx, id).await?;
 
     // Clear the data products
     for id in data_product_ids {
         // Pull Data Product of interest
-        let data_product: &DataProduct = plan
-            .data_product(*id)
-            .ok_or(Error::Missing(*id).into_poem_error())?;
+        let data_product: &DataProduct = plan.data_product(*id).ok_or(Error::Missing(*id))?;
 
         // Build new cleared state
         let state = StateParam {
@@ -399,20 +377,16 @@ pub async fn disable_drop(
     id: DatasetId,
     data_product_ids: &[DataProductId],
     username: &str,
-) -> poem::Result<Plan> {
+) -> Result<Plan> {
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
 
     // Pull the Plan so we know what we are working with
-    let mut plan = Plan::from_db(tx, id)
-        .await
-        .map_err(|e| e.into_poem_error())?;
+    let mut plan = Plan::from_db(tx, id).await?;
 
     for id in data_product_ids {
         // Pull the Data Product we want
-        let data_product: &DataProduct = plan
-            .data_product(*id)
-            .ok_or(Error::Missing(*id).into_poem_error())?;
+        let data_product: &DataProduct = plan.data_product(*id).ok_or(Error::Missing(*id))?;
 
         // Get the new state params for the selected data product by using the old state params.
         let state = StateParam {
@@ -435,18 +409,16 @@ pub async fn plan_search_read(
     tx: &mut Transaction<'_, Postgres>,
     search_by: &str,
     page: u32,
-) -> poem::Result<SearchReturn> {
+) -> Result<SearchReturn> {
     // Compute offset
     let offset: u32 = page.saturating_mul(PAGE_SIZE);
 
     // Fetch one extra item to check if there's a next page
     let mut rows: Vec<SearchRow> =
-        search_plans_select(tx, search_by, PAGE_SIZE.saturating_add(1), offset)
-            .await
-            .map_err(|e| e.into_poem_error())?;
+        search_plans_select(tx, search_by, PAGE_SIZE.saturating_add(1), offset).await?;
 
     // PAGE_SIZE as usize
-    let page_size: usize = PAGE_SIZE.try_into().map_err(InternalServerError)?;
+    let page_size: usize = PAGE_SIZE.try_into().map_err(|_| Error::Unreachable)?;
 
     // Check if we have more than the page size
     let next_page: Option<u32> = if rows.len() > page_size {
@@ -469,7 +441,7 @@ mod tests {
         Plan, PlanParam, State, StateParam,
     };
     use chrono::Utc;
-    use poem::http::StatusCode;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use sqlx::PgPool;
     use uuid::Uuid;
@@ -574,10 +546,10 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err, Error::Duplicate(id) if id == duplicate_id));
         assert_eq!(
             format!("{err}"),
-            format!("Duplicate data-product id in parameter: {duplicate_id}"),
+            format!("Duplicate data-product id in parameter: '{duplicate_id}'"),
         );
     }
 
@@ -629,10 +601,12 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            matches!(err, Error::DuplicateDependencies(p_id, c_id) if p_id == dp1_id && c_id == dp2_id)
+        );
         assert_eq!(
             format!("{err}"),
-            format!("Duplicate dependency in parameter: {dp1_id} -> {dp2_id}")
+            format!("Duplicate dependency in parameter: '{dp1_id}' -> '{dp2_id}'")
         );
     }
 
@@ -665,7 +639,7 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(matches!(err, Error::Cyclical));
         assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
@@ -699,10 +673,10 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == missing_parent_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {missing_parent_id}")
+            format!("Data product not found for: '{missing_parent_id}'")
         );
     }
 
@@ -736,10 +710,10 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == missing_child_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {missing_child_id}")
+            format!("Data product not found for: '{missing_child_id}'")
         );
     }
 
@@ -806,7 +780,7 @@ mod tests {
         let result = validate_plan_param(&param, &None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(matches!(err, Error::Cyclical));
         assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
@@ -881,7 +855,7 @@ mod tests {
         let result = validate_plan_param(&param, &Some(existing_plan));
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(matches!(err, Error::Cyclical));
         assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
@@ -1097,7 +1071,7 @@ mod tests {
             "DAG should be cyclical when no nodes are disabled"
         );
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(matches!(err, Error::Cyclical));
         assert_eq!(format!("{err}"), "Graph is cyclical");
     }
 
@@ -1342,7 +1316,7 @@ mod tests {
         let result = plan_read(&mut tx, nonexistent_id).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Sqlx(sqlx::Error::RowNotFound)));
         assert_eq!(
             format!("{err}"),
             "no rows returned by a query that expected to return at least one row"
@@ -1394,10 +1368,10 @@ mod tests {
         let result = state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == nonexistent_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {nonexistent_id}")
+            format!("Data product not found for: '{nonexistent_id}'")
         );
     }
 
@@ -1424,8 +1398,11 @@ mod tests {
         let result = state_update(&mut tx, &mut plan, &state_param, username, modified_date).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::FORBIDDEN);
-        assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
+        assert!(matches!(err, Error::Disabled(id) if id == dp_id));
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product is locked: '{dp_id}'")
+        );
     }
 
     // Tests for clear_downstream_nodes function
@@ -1848,10 +1825,12 @@ mod tests {
 
             assert!(result.is_err());
             let err = result.unwrap_err();
-            assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+            assert!(
+                matches!(err, Error::BadState(id, state) if id == dp_id && state == invalid_state)
+            );
             assert_eq!(
                 format!("{err}"),
-                format!("The requested state for {dp_id} is invalid: {invalid_state}")
+                format!("The requested state for '{dp_id}' is invalid: '{invalid_state}'")
             );
         }
     }
@@ -2086,10 +2065,10 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == nonexistent_dp_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {nonexistent_dp_id}")
+            format!("Data product not found for: '{nonexistent_dp_id}'")
         );
     }
 
@@ -2126,8 +2105,11 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::FORBIDDEN);
-        assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
+        assert!(matches!(err, Error::Disabled(id) if id == dp_id));
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product is locked: '{dp_id}'")
+        );
     }
 
     // Tests for disable_drop function
@@ -2174,10 +2156,10 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Missing(id) if id == nonexistent_dp_id));
         assert_eq!(
             format!("{err}"),
-            format!("Data product not found for: {nonexistent_dp_id}")
+            format!("Data product not found for: '{nonexistent_dp_id}'")
         );
     }
 
@@ -2206,8 +2188,11 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::FORBIDDEN);
-        assert_eq!(format!("{err}"), format!("Data product is locked: {dp_id}"));
+        assert!(matches!(err, Error::Disabled(id) if id == dp_id));
+        assert_eq!(
+            format!("{err}"),
+            format!("Data product is locked: '{dp_id}'")
+        );
     }
 
     /// Test disable_drop - Complex Parent-Child Triggering Scenario
@@ -2382,10 +2367,10 @@ mod tests {
         let result = plan_pause_edit(&mut tx, dataset_id, false, username).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err, Error::Pause(id, paused) if id == dataset_id && !paused));
         assert_eq!(
             format!("{err}"),
-            format!("Dataset '{dataset_id}' pause state is already set to: false")
+            format!("Dataset '{dataset_id}' pause state is already set to: 'false'")
         );
 
         // First pause the plan
@@ -2401,10 +2386,10 @@ mod tests {
         let result = plan_pause_edit(&mut tx, dataset_id, true, username).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err, Error::Pause(id, paused) if id == dataset_id && paused));
         assert_eq!(
             format!("{err}"),
-            format!("Dataset '{dataset_id}' pause state is already set to: true")
+            format!("Dataset '{dataset_id}' pause state is already set to: 'true'")
         );
     }
 
@@ -2613,7 +2598,7 @@ mod tests {
         let result = plan_pause_edit(&mut tx, nonexistent_id, true, username).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Sqlx(sqlx::Error::RowNotFound)));
         assert_eq!(
             format!("{err}"),
             "no rows returned by a query that expected to return at least one row"
@@ -2990,7 +2975,7 @@ mod tests {
         let result = data_product_read(&mut tx, dataset_id, nonexistent_data_product_id).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(err, Error::Sqlx(sqlx::Error::RowNotFound)));
         assert_eq!(
             format!("{err}"),
             "no rows returned by a query that expected to return at least one row"
@@ -3037,10 +3022,9 @@ mod tests {
             "validate_plan_param should reject duplicate data product IDs"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::BAD_REQUEST,
-            "Duplicate data products should return BadRequest"
+        assert!(
+            matches!(err, Error::Duplicate(id) if id == dp_id),
+            "Duplicate data products should return Duplicate error"
         );
     }
 
@@ -3094,10 +3078,9 @@ mod tests {
             "validate_plan_param should reject duplicate dependencies"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::BAD_REQUEST,
-            "Duplicate dependencies should return BadRequest"
+        assert!(
+            matches!(err, Error::DuplicateDependencies(p_id, c_id) if p_id == dp1_id && c_id == dp2_id),
+            "Duplicate dependencies should return DuplicateDependencies error"
         );
     }
 
@@ -3133,10 +3116,9 @@ mod tests {
             "validate_plan_param should reject missing parent data product"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::NOT_FOUND,
-            "Missing parent should return NotFound"
+        assert!(
+            matches!(err, Error::Missing(id) if id == missing_parent_id),
+            "Missing parent should return Missing error"
         );
     }
 
@@ -3172,10 +3154,9 @@ mod tests {
             "validate_plan_param should reject missing child data product"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::NOT_FOUND,
-            "Missing child should return NotFound"
+        assert!(
+            matches!(err, Error::Missing(id) if id == missing_child_id),
+            "Missing child should return Missing error"
         );
     }
 
@@ -3245,10 +3226,9 @@ mod tests {
             "state_update should fail for missing data product"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::NOT_FOUND,
-            "Missing data product should return NotFound"
+        assert!(
+            matches!(err, Error::Missing(id) if id == missing_id),
+            "Missing data product should return Missing error"
         );
     }
 
@@ -3279,10 +3259,9 @@ mod tests {
             "state_update should fail for disabled data product"
         );
         let err = result.unwrap_err();
-        assert_eq!(
-            err.status(),
-            StatusCode::FORBIDDEN,
-            "Disabled data product should return Forbidden"
+        assert!(
+            matches!(err, Error::Disabled(id) if id == data_product_id),
+            "Disabled data product should return Disabled error"
         );
     }
 

@@ -1,6 +1,13 @@
-use crate::model::{DataProductId, State};
+use crate::{
+    auth::Role,
+    model::{DataProductId, State},
+};
+use bcrypt::BcryptError;
+use jsonwebtoken::errors::Error as JwtError;
 use petgraph::graph::GraphError;
-use poem::error::{BadRequest, Forbidden, InternalServerError, NotFound, UnprocessableEntity};
+use poem::error::{
+    BadRequest, Forbidden, InternalServerError, NotFound, Unauthorized, UnprocessableEntity,
+};
 
 /// Crate-wide result alias.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -9,67 +16,114 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The dependency graph contains a cycle (not a valid DAG)
-    #[error("The requested state for {0} is invalid: {1}")]
+    #[error("The requested state for '{0}' is invalid: '{1}'")]
     BadState(DataProductId, State),
+
+    /// Error from bcrypt operations
+    #[error(transparent)]
+    Bcrypt(#[from] BcryptError),
 
     /// The dependency graph contains a cycle (not a valid DAG)
     #[error("Graph is cyclical")]
     Cyclical,
 
     /// Data Product is locked
-    #[error("Data product is locked: {0}")]
+    #[error("Data product is locked: '{0}'")]
     Disabled(DataProductId),
 
+    /// Error from DotEnvy
+    #[error(transparent)]
+    DotEnvy(#[from] dotenvy::Error),
+
     /// Duplicate data products in parameter
-    #[error("Duplicate data-product id in parameter: {0}")]
+    #[error("Duplicate data-product id in parameter: '{0}'")]
     Duplicate(DataProductId),
 
     /// Duplicate dependencies in parameter
-    #[error("Duplicate dependency in parameter: {0} -> {1}")]
+    #[error("Duplicate dependency in parameter: '{0}' -> '{1}'")]
     DuplicateDependencies(DataProductId, DataProductId),
 
     /// Error from Petgraph::Graph
-    #[error("Petgraph error: {0}")]
+    #[error(transparent)]
     Graph(#[from] GraphError),
 
+    /// Trying to log in with an invalid key
+    #[error("Attempting to log in with an invalid key")]
+    InvalidKey,
+
+    /// Trying to log in as an invalid service
+    #[error("Attempting to log in as an unknown service: '{0}'")]
+    InvalidService(String),
+
+    /// Error from JsonWebToken
+    #[error(transparent)]
+    Jwt(#[from] JwtError),
+
     /// Data Product not found
-    #[error("Data product not found for: {0}")]
+    #[error("Data product not found for: '{0}'")]
     Missing(DataProductId),
 
     /// Dataset Pause error
-    #[error("Dataset '{0}' pause state is already set to: {1}")]
+    #[error("Dataset '{0}' pause state is already set to: '{1}'")]
     Pause(DataProductId, bool),
 
+    /// Missing the needed role access
+    #[error("Service account '{0}' is missing the following role: '{1}'")]
+    Role(String, Role),
+
+    /// Error from serder_json
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
+
     /// Errors from SQLx
-    #[error("Error from SQLx: {0}")]
+    #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
+
+    /// This error should never be reachable
+    #[error("This error should not have been reachable")]
+    Unreachable,
 }
 
 impl Error {
-    /// Map Crate Error to Poem Error
+    /// Convert Fletcher Error to Poem Error
     pub fn into_poem_error(self) -> poem::Error {
         match self {
             Error::BadState(_, _) => BadRequest(self),
+            Error::Bcrypt(err) => InternalServerError(err),
             Error::Disabled(_) => Forbidden(self),
+            Error::DotEnvy(err) => InternalServerError(err),
             Error::Duplicate(_) => BadRequest(self),
             Error::DuplicateDependencies(_, _) => BadRequest(self),
             Error::Cyclical => UnprocessableEntity(self),
-            Error::Graph(error) => InternalServerError(error),
+            Error::Graph(err) => InternalServerError(err),
+            Error::InvalidKey => Unauthorized(self),
+            Error::InvalidService(_) => Unauthorized(self),
+            Error::Jwt(err) => Forbidden(err),
             Error::Missing(_) => NotFound(self),
             Error::Pause(_, _) => BadRequest(self),
+            Error::Role(_, _) => Forbidden(self),
+            Error::SerdeJson(err) => InternalServerError(err),
             Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
-            Error::Sqlx(sqlx::Error::Database(error)) if error.constraint().is_some() => {
-                BadRequest(error)
+            Error::Sqlx(sqlx::Error::Database(err)) if err.constraint().is_some() => {
+                BadRequest(err)
             }
-            Error::Sqlx(error) => InternalServerError(error),
+            Error::Sqlx(err) => InternalServerError(err),
+            Error::Unreachable => InternalServerError(self),
         }
     }
+}
+
+/// Convert Fletcher Error to Poem Error
+pub fn into_poem_error(err: Error) -> poem::Error {
+    err.into_poem_error()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonwebtoken::{DecodingKey, Validation};
     use poem::http::StatusCode;
+    use pretty_assertions::assert_eq;
     use uuid::Uuid;
 
     /// Test into_poem_error maps BadState to BadRequest
@@ -184,6 +238,118 @@ mod tests {
             poem_error.status(),
             StatusCode::NOT_FOUND,
             "Sqlx RowNotFound error should map to NotFound"
+        );
+    }
+
+    /// Test into_poem_error maps Bcrypt error to InternalServerError
+    #[test]
+    fn test_into_poem_error_bcrypt() {
+        let bcrypt_error = BcryptError::InvalidCost("5".to_string());
+        let error = Error::Bcrypt(bcrypt_error);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Bcrypt error should map to InternalServerError"
+        );
+    }
+
+    /// Test into_poem_error maps InvalidKey to Unauthorized
+    #[test]
+    fn test_into_poem_error_invalid_key() {
+        let error = Error::InvalidKey;
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::UNAUTHORIZED,
+            "InvalidKey error should map to Unauthorized"
+        );
+    }
+
+    /// Test into_poem_error maps InvalidService to Unauthorized
+    #[test]
+    fn test_into_poem_error_invalid_service() {
+        let error = Error::InvalidService("test_service".to_string());
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::UNAUTHORIZED,
+            "InvalidService error should map to Unauthorized"
+        );
+    }
+
+    /// Test into_poem_error maps Jwt error to Forbidden
+    #[test]
+    fn test_into_poem_error_jwt() {
+        // Create a test decoding key directly
+        let test_key = DecodingKey::from_secret(b"test-secret");
+
+        // Try to decode an invalid token
+        let jwt_error = jsonwebtoken::decode::<serde_json::Value>(
+            "invalid.jwt.token",
+            &test_key,
+            &Validation::default(),
+        )
+        .unwrap_err();
+
+        let error = Error::Jwt(jwt_error);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::FORBIDDEN,
+            "Jwt error should map to Forbidden"
+        );
+    }
+
+    /// Test into_poem_error maps Role error to Forbidden
+    #[test]
+    fn test_into_poem_error_role() {
+        let error = Error::Role("test_service".to_string(), Role::Publish);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::FORBIDDEN,
+            "Role error should map to Forbidden"
+        );
+    }
+
+    /// Test into_poem_error maps Unreachable to InternalServerError
+    #[test]
+    fn test_into_poem_error_unreachable() {
+        let error = Error::Unreachable;
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Unreachable error should map to InternalServerError"
+        );
+    }
+
+    /// Test into_poem_error maps DotEnvy error to InternalServerError
+    #[test]
+    fn test_into_poem_error_dotenvy() {
+        // Create a dotenvy error by trying to read from a non-existent file
+        let dotenvy_error = dotenvy::from_path("/non/existent/file.env").unwrap_err();
+        let error = Error::DotEnvy(dotenvy_error);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DotEnvy error should map to InternalServerError"
+        );
+    }
+
+    /// Test into_poem_error maps SerdeJson error to InternalServerError
+    #[test]
+    fn test_into_poem_error_serde_json() {
+        // Create a serde_json error by trying to parse invalid JSON
+        let json_error = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
+        let error = Error::SerdeJson(json_error);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "SerdeJson error should map to InternalServerError"
         );
     }
 }

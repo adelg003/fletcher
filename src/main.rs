@@ -1,4 +1,5 @@
 mod api;
+mod auth;
 mod core;
 mod dag;
 mod db;
@@ -8,15 +9,27 @@ mod ui;
 
 use crate::{
     api::Api,
+    auth::RemoteAuth,
+    error::Result,
     ui::{not_found_404, user_service},
 };
+use jsonwebtoken::{DecodingKey, EncodingKey};
 use poem::{
     EndpointExt, Route, Server, endpoint::EmbeddedFilesEndpoint, listener::TcpListener,
     middleware::Tracing,
 };
 use poem_openapi::OpenApiService;
 use rust_embed::Embed;
-use sqlx::PgPool;
+use sqlx::{PgPool, migrate};
+
+/// Struct we will put all our configs to run Fletcher into
+#[derive(Clone)]
+pub struct Config {
+    database_url: String,
+    decoding_key: DecodingKey,
+    encoding_key: EncodingKey,
+    remote_auths: Vec<RemoteAuth>,
+}
 
 /// Static files hosted via webserver
 #[derive(Embed)]
@@ -31,6 +44,9 @@ async fn main() -> color_eyre::Result<()> {
     // Enable Poem's logging
     tracing_subscriber::fmt::init();
 
+    // Read in configs
+    let config: Config = load_config()?;
+
     // Setup our OpenAPI Service
     let api_service =
         OpenApiService::new(Api, "Fletcher", "0.1.0").server("http://0.0.0.0:3000/api");
@@ -38,7 +54,8 @@ async fn main() -> color_eyre::Result<()> {
     let swagger = api_service.swagger_ui();
 
     // Connect to PostgreSQL
-    let pool = PgPool::connect(&dotenvy::var("DATABASE_URL")?).await?;
+    let pool = PgPool::connect(&config.database_url).await?;
+    migrate!().run(&pool).await?;
 
     // Route inbound traffic
     let app = Route::new()
@@ -51,6 +68,7 @@ async fn main() -> color_eyre::Result<()> {
         .nest("/", user_service())
         .catch_error(not_found_404)
         // Global context to be shared
+        .data(config)
         .data(pool)
         // Utilites being added to our services
         .with(Tracing);
@@ -63,9 +81,95 @@ async fn main() -> color_eyre::Result<()> {
     Ok(())
 }
 
+/// Load in Fletcher's configs
+pub fn load_config() -> Result<Config> {
+    let secret_key: String = dotenvy::var("SECRET_KEY")?;
+    let secret_key_bytes: &[u8] = secret_key.as_bytes();
+
+    Ok(Config {
+        database_url: dotenvy::var("DATABASE_URL")?,
+        encoding_key: EncodingKey::from_secret(secret_key_bytes),
+        decoding_key: DecodingKey::from_secret(secret_key_bytes),
+        remote_auths: serde_json::from_str(&dotenvy::var("REMOTE_APIS")?)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
+
+    // =============== Configuration Tests ===============
+
+    /// Test load_config loads successfully from .env file
+    #[test]
+    fn test_load_config_success() {
+        let result = load_config();
+        assert!(result.is_ok(), "load_config should succeed with .env file");
+
+        let config = result.unwrap();
+        assert_eq!(
+            config.database_url,
+            "postgres://fletcher_user:password@localhost/fletcher_db"
+        );
+        assert_eq!(config.remote_auths.len(), 2);
+    }
+
+    /// Test load_config loads correct remote auth services
+    #[test]
+    fn test_load_config_remote_auth_services() {
+        let config = load_config().unwrap();
+
+        // The .env file should contain local and readonly services
+        let services: Vec<&str> = config
+            .remote_auths
+            .iter()
+            .map(|auth| auth.service.as_str())
+            .collect();
+
+        assert!(services.contains(&"local"), "Should contain local service");
+        assert!(
+            services.contains(&"readonly"),
+            "Should contain readonly service"
+        );
+    }
+
+    /// Test load_config loads correct roles for local service
+    #[test]
+    fn test_load_config_local_service_roles() {
+        let config = load_config().unwrap();
+
+        let local_auth = config
+            .remote_auths
+            .iter()
+            .find(|auth| auth.service == "local")
+            .expect("Should find local service");
+
+        assert!(
+            !local_auth.roles.is_empty(),
+            "Local service should have roles"
+        );
+    }
+
+    /// Test load_config loads correct roles for readonly service
+    #[test]
+    fn test_load_config_readonly_service_roles() {
+        let config = load_config().unwrap();
+
+        let readonly_auth = config
+            .remote_auths
+            .iter()
+            .find(|auth| auth.service == "readonly")
+            .expect("Should find readonly service");
+
+        assert_eq!(
+            readonly_auth.roles.len(),
+            0,
+            "Readonly service should have no roles"
+        );
+    }
+
+    // =============== Asset Embedding Tests ===============
 
     /// Test that required asset files are embedded correctly
     #[test]

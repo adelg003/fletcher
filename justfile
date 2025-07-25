@@ -14,15 +14,15 @@ build-release:
 
 # Build and Run a Develop Binay
 run:
-  cargo run
+  RUST_BACKTRACE=full cargo run
 
 # Build and Run a Release Binary
 run-release:
-  cargo run --release
+  RUST_BACKTRACE=full cargo run --release
 
 # Check Rust Code
 check:
-  cargo check --locked
+  cargo check --workspace --locked
 
 # Check Rust Code using the SQLx Cache
 check_w_sqlx_cache:
@@ -30,11 +30,11 @@ check_w_sqlx_cache:
 
 # Check Rust Linting
 clippy:
-  cargo clippy --locked --all-targets -- --deny warnings
+  cargo clippy --workspace --locked --all-targets -- --deny warnings
 
 # Check Rust Linting using SQLx Cache
 clippy_w_sqlx_cache:
-  SQLX_OFFLINE=true cargo clippy --locked -- --deny warnings
+  SQLX_OFFLINE=true cargo clippy --workspace --locked -- --deny warnings
 
 # Apply Rust Formating
 fmt:
@@ -46,7 +46,7 @@ fmt-check:
 
 # Check Rust Unittest
 test:
-  cargo test --locked
+  cargo test --workspace --locked
 
 # Install SQLx-CLI
 sqlx-install:
@@ -79,6 +79,28 @@ deny-install:
 # Check Rust advisories, bans, licenses, sources
 deny:
   cargo deny check
+
+
+################
+## Key Hasher ##
+################
+
+# Hash a given key (or any value really) with optional cost factor
+hash key cost="12":
+  RUST_BACKTRACE=full cargo run --package key_hasher -- --key {{ key }} --cost {{ cost }}
+
+
+##############
+## Markdown ##
+##############
+
+# Lint all Markdown files
+markdownlint:
+  markdownlint-cli2 "**/*.md" "#node_modules"
+
+# Fix lints for Markdown files
+markdownlint-fix:
+  markdownlint-cli2 --fix "**/*.md" "#node_modules"
 
 
 ################
@@ -157,7 +179,9 @@ docker-run client="docker" mode="release":
     --rm \
     --network=pg_network \
     --publish=3000:3000 \
-    --env DATABASE_URL=postgres://fletcher_user:password@fletcher_postgresql/fletcher_db \
+    --env DATABASE_URL='postgres://fletcher_user:password@fletcher_postgresql/fletcher_db' \
+    --env SECRET_KEY='GRNr3wdyenBu9BJW3TNQLene6b2xij1avk4UmPnrBkFbOKM5883EZUncLgeSdwLs63Wg21tbBV2WqanwTAXtqloXHkmLLiecDsxH' \
+    --env REMOTE_APIS='[{"service": "remote", "hash": "$2b$10$4i5iCctUtWc5szV6M8CJNur1ng2md/gT372tlOv6BemwLryOw5ZGu", "roles": ["publish", "pause", "update", "disable"]}]' \
     localhost/fletcher:{{ mode }}
 
 # Run the Docker debug container in Detached mode
@@ -218,6 +242,9 @@ trivy-image-debug: (trivy-image "debug")
 # Run all Github Rust Checks
 github-rust-checks: sqlx-check check_w_sqlx_cache clippy_w_sqlx_cache fmt-check test deny
 
+# Run all Github Markdown Checks
+github-markdown-checks: markdownlint
+
 # Run all Github Docker Checks
 github-docker-checks mode="debug": (docker-build "docker" mode) (docker-run "docker" mode) docker-healthcheck (docker-kill "docker")
 
@@ -231,7 +258,7 @@ github-trivy-checks client="docker": trivy-repo (docker-build client "debug") (t
 github-trivy-checks-podman: (github-trivy-checks "podman")
 
 # Run all Github Checks
-github-checks: github-rust-checks github-docker-checks (github-trivy-checks "docker")
+github-checks: github-rust-checks github-markdown-checks github-docker-checks (github-trivy-checks "docker")
 
 # Run all Github Checks (with Podman)
-github-checks-podman: github-rust-checks github-podman-checks (github-trivy-checks "podman")
+github-checks-podman: github-rust-checks github-markdown-checks github-podman-checks (github-trivy-checks "podman")

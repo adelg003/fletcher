@@ -76,6 +76,7 @@ pub async fn not_found_404(_: NotFoundError) -> Response {
 mod tests {
     use super::*;
     use poem::error::NotFoundError;
+    use pretty_assertions::assert_eq;
 
     /// Test not_found_404 function returns correct status code
     #[tokio::test]

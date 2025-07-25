@@ -24,6 +24,7 @@ pub fn base_layout(title: &str, dataset_id: &Option<DatasetId>, main: Markup) ->
 mod tests {
     use super::*;
     use maud::html;
+    use pretty_assertions::assert_eq;
     use scraper::{Html, Selector};
     use uuid::Uuid;
 
