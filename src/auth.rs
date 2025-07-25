@@ -7,12 +7,13 @@ use jsonwebtoken::{Header, TokenData, Validation, decode, encode, get_current_ti
 use poem::Request;
 use poem_openapi::{Enum, Object, SecurityScheme, auth::Bearer};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use strum::Display;
 
 /// Roles a service can use
-#[derive(Clone, Debug, Deserialize, Enum, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Debug, Deserialize, Display, Enum, PartialEq, Serialize)]
 #[oai(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum Role {
     Disable,
     Pause,
@@ -20,21 +21,8 @@ pub enum Role {
     Update,
 }
 
-impl fmt::Display for Role {
-    /// How to format Role when presented in errors
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let text: &str = match self {
-            Role::Disable => "disable",
-            Role::Pause => "pause",
-            Role::Publish => "publish",
-            Role::Update => "update",
-        };
-        write!(formatter, "{text}")
-    }
-}
-
 /// Struct to hold API cred configs
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct RemoteAuth {
     pub service: String,
     hash: String,

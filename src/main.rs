@@ -10,6 +10,7 @@ mod ui;
 use crate::{
     api::Api,
     auth::RemoteAuth,
+    error::Result,
     ui::{not_found_404, user_service},
 };
 use jsonwebtoken::{DecodingKey, EncodingKey};
@@ -81,14 +82,14 @@ async fn main() -> color_eyre::Result<()> {
 }
 
 /// Load in Fletcher's configs
-pub fn load_config() -> color_eyre::Result<Config> {
+pub fn load_config() -> Result<Config> {
     let secret_key: String = dotenvy::var("SECRET_KEY")?;
-    let secret_key: &[u8] = secret_key.as_bytes();
+    let secret_key_bytes: &[u8] = secret_key.as_bytes();
 
     Ok(Config {
         database_url: dotenvy::var("DATABASE_URL")?,
-        encoding_key: EncodingKey::from_secret(secret_key),
-        decoding_key: DecodingKey::from_secret(secret_key),
+        encoding_key: EncodingKey::from_secret(secret_key_bytes),
+        decoding_key: DecodingKey::from_secret(secret_key_bytes),
         remote_auths: serde_json::from_str(&dotenvy::var("REMOTE_APIS")?)?,
     })
 }

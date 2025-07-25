@@ -12,7 +12,8 @@ use petgraph::graph::DiGraph;
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction, Type};
-use std::{collections::HashSet, fmt};
+use std::collections::HashSet;
+use strum::Display;
 use uuid::Uuid;
 
 /// Type for Dataset ID
@@ -139,28 +140,20 @@ pub struct Dataset {
 }
 
 /// The Types of compute OaaS can call
-#[derive(Clone, Copy, Debug, Enum, PartialEq, Type)]
+#[derive(Clone, Copy, Debug, Display, Enum, PartialEq, Type)]
 #[oai(rename_all = "lowercase")]
 #[sqlx(type_name = "compute", rename_all = "lowercase")]
 pub enum Compute {
+    #[strum(serialize = "C-AMS")] // How to format the Compute for HTML rendering
     Cams,
+    #[strum(serialize = "DBXaaS")]
     Dbxaas,
 }
 
-impl fmt::Display for Compute {
-    /// How to format the Compute for HTML rendering
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let text: &str = match self {
-            Compute::Cams => "C-AMS",
-            Compute::Dbxaas => "DBXaaS",
-        };
-        write!(formatter, "{text}")
-    }
-}
-
 /// States a Data Product can be in
-#[derive(Clone, Copy, Debug, Enum, PartialEq, Type)]
+#[derive(Clone, Copy, Debug, Display, Enum, PartialEq, Type)]
 #[oai(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 #[sqlx(type_name = "state", rename_all = "lowercase")]
 pub enum State {
     Disabled,
@@ -169,20 +162,6 @@ pub enum State {
     Running,
     Success,
     Waiting,
-}
-
-impl fmt::Display for State {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let text: &str = match self {
-            State::Disabled => "disabled",
-            State::Failed => "failed",
-            State::Queued => "queued",
-            State::Running => "running",
-            State::Success => "success",
-            State::Waiting => "waiting",
-        };
-        write!(formatter, "{text}")
-    }
 }
 
 /// Data Product details
