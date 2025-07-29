@@ -36,3 +36,6 @@ node_modules/
 
 # Podman Build
 podman-build-secret*
+
+# PyCache
+__pycache__/

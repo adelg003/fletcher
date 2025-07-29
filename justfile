@@ -150,6 +150,23 @@ pg-cli:
     --driver=postgres
 
 
+############
+## Python ##
+############
+
+# Pyright check
+py-right-check:
+  uvx pyright locust/
+
+# Ruff Linting check
+py-ruff-check:
+  uvx ruff check --select ALL locust/
+
+# Ruff Formating check
+py-ruff-fmt-check:
+  uvx ruff format --check locust/
+
+
 #####################
 ## Docker / Podman ##
 #####################
@@ -245,6 +262,9 @@ github-rust-checks: sqlx-check check_w_sqlx_cache clippy_w_sqlx_cache fmt-check 
 # Run all Github Markdown Checks
 github-markdown-checks: markdownlint
 
+# Run all Github Python Checks
+github-py-checks: py-right-check py-ruff-check py-ruff-fmt-check
+
 # Run all Github Docker Checks
 github-docker-checks mode="debug": (docker-build "docker" mode) (docker-run "docker" mode) docker-healthcheck (docker-kill "docker")
 
@@ -258,7 +278,7 @@ github-trivy-checks client="docker": trivy-repo (docker-build client "debug") (t
 github-trivy-checks-podman: (github-trivy-checks "podman")
 
 # Run all Github Checks
-github-checks: github-rust-checks github-markdown-checks github-docker-checks (github-trivy-checks "docker")
+github-checks: github-rust-checks github-markdown-checks github-py-checks github-docker-checks (github-trivy-checks "docker")
 
 # Run all Github Checks (with Podman)
-github-checks-podman: github-rust-checks github-markdown-checks github-podman-checks (github-trivy-checks "podman")
+github-checks-podman: github-rust-checks github-markdown-checks github-py-checks github-podman-checks (github-trivy-checks "podman")
