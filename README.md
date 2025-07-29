@@ -262,14 +262,14 @@ access control (RBAC)** to secure API endpoints.
 Fletcher implements four distinct roles that control access to different operations:
 
 <!-- markdownlint-disable MD013 -->
-| Role          | Description                 | Endpoints                        |
-|---------------|-----------------------------|----------------------------------|
-| **`publish`** | Create and submit new plans | `POST /api/plan`                 |
-| **`update`**  | Modify data product states  | `PUT /api/data_product/update/*` |
-|               |                             | `PUT /api/data_product/clear/*`  |
-| **`pause`**   | Pause and unpause datasets  | `PUT /api/plan/pause/*`          |
-|               |                             | `PUT /api/plan/unpause/*`        |
-| **`disable`** | Disable data products       | `DELETE /api/data_product/*`     |
+| Role          | Description                 | Endpoints                                   |
+|---------------|-----------------------------|---------------------------------------------|
+| **`publish`** | Create and submit new plans | `POST /api/plan`                            |
+| **`update`**  | Modify data product states  | `PUT /api/data_product/{dataset_id}/update` |
+|               |                             | `PUT /api/data_product/{dataset_id}/clear`  |
+| **`pause`**   | Pause and unpause datasets  | `PUT /api/plan/{dataset_id}/pause`          |
+|               |                             | `PUT /api/plan/{dataset_id}/unpause`        |
+| **`disable`** | Disable data products       | `DELETE /api/data_product/{dataset_id}`     |
 <!-- markdownlint-enable MD013 -->
 
 ### Service Configuration
@@ -307,15 +307,15 @@ Services are configured via the `REMOTE_APIS` environment variable:
 - `POST /api/plan` - Create or update a plan **[Requires: `publish` role]**
 - `GET /api/plan/{dataset_id}` - Get a plan by dataset ID
 - `GET /api/plan/search` - Search plans  
-- `PUT /api/plan/pause/{dataset_id}` - Pause a dataset **[Requires: `pause` role]**
-- `PUT /api/plan/unpause/{dataset_id}` - Unpause a dataset **[Requires: `pause` role]**
+- `PUT /api/plan/{dataset_id}/pause` - Pause a dataset **[Requires: `pause` role]**
+- `PUT /api/plan/{dataset_id}/unpause` - Unpause a dataset **[Requires: `pause` role]**
 
 ### Data Products
 
 - `GET /api/data_product/{dataset_id}/{data_product_id}` - Get a data product
-- `PUT /api/data_product/update/{dataset_id}` - Update data product states
+- `PUT /api/data_product/{dataset_id}/update` - Update data product states
   **[Requires: `update` role]**
-- `PUT /api/data_product/clear/{dataset_id}` - Clear data products and
+- `PUT /api/data_product/{dataset_id}/clear` - Clear data products and
   downstream dependencies **[Requires: `update` role]**
 - `DELETE /api/data_product/{dataset_id}` - Disable data products
   **[Requires: `disable` role]**

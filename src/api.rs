@@ -110,7 +110,7 @@ impl Api {
     }
 
     /// Pause a plan
-    #[oai(path = "/plan/pause/:dataset_id", method = "put", tag = Tag::Plan)]
+    #[oai(path = "/plan/:dataset_id/pause", method = "put", tag = Tag::Plan)]
     async fn plan_pause_put(
         &self,
         auth: JwtAuth,
@@ -134,7 +134,7 @@ impl Api {
     }
 
     /// Unpause a plan
-    #[oai(path = "/plan/unpause/:dataset_id", method = "put", tag = Tag::Plan)]
+    #[oai(path = "/plan/:dataset_id/unpause", method = "put", tag = Tag::Plan)]
     async fn plan_unpause_put(
         &self,
         auth: JwtAuth,
@@ -180,7 +180,7 @@ impl Api {
     }
 
     /// Update one or multiple data product states
-    #[oai(path = "/data_product/update/:dataset_id", method = "put", tag = Tag::DataProduct)]
+    #[oai(path = "/data_product/:dataset_id/update", method = "put", tag = Tag::DataProduct)]
     async fn state_put(
         &self,
         auth: JwtAuth,
@@ -205,7 +205,7 @@ impl Api {
     }
 
     /// Clear one or multiple data products and clear all their downsteam data products.
-    #[oai(path = "/data_product/clear/:dataset_id", method = "put", tag = Tag::DataProduct)]
+    #[oai(path = "/data_product/:dataset_id/clear", method = "put", tag = Tag::DataProduct)]
     async fn clear_put(
         &self,
         auth: JwtAuth,
@@ -759,7 +759,7 @@ mod tests {
         ]);
 
         let response: TestResponse = cli
-            .put(format!("/data_product/update/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/update"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
@@ -835,7 +835,7 @@ mod tests {
         let ep = OpenApiService::new(Api, "test", "1.0");
         let cli = TestClient::new(ep);
         let response: TestResponse = cli
-            .put(format!("/data_product/update/{non_existent_dataset_id}"))
+            .put(format!("/data_product/{non_existent_dataset_id}/update"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
@@ -890,7 +890,7 @@ mod tests {
         ]);
 
         let response: TestResponse = cli
-            .put(format!("/data_product/update/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/update"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
@@ -1377,7 +1377,7 @@ mod tests {
         let readonly_jwt = generate_jwt("readonly").await;
 
         let response: TestResponse = cli
-            .put(format!("/plan/pause/{dataset_id}"))
+            .put(format!("/plan/{dataset_id}/pause"))
             .header("Authorization", format!("Bearer {readonly_jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .data(config)
@@ -1417,7 +1417,7 @@ mod tests {
 
         // Pause the plan
         let pause_response: TestResponse = cli
-            .put(format!("/plan/pause/{dataset_id}"))
+            .put(format!("/plan/{dataset_id}/pause"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .data(config.clone())
@@ -1430,7 +1430,7 @@ mod tests {
         let readonly_jwt = generate_jwt("readonly").await;
 
         let response: TestResponse = cli
-            .put(format!("/plan/unpause/{dataset_id}"))
+            .put(format!("/plan/{dataset_id}/unpause"))
             .header("Authorization", format!("Bearer {readonly_jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .data(config)
@@ -1485,7 +1485,7 @@ mod tests {
         let readonly_jwt = generate_jwt("readonly").await;
 
         let response: TestResponse = cli
-            .put(format!("/data_product/update/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/update"))
             .header("Authorization", format!("Bearer {readonly_jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
@@ -1529,7 +1529,7 @@ mod tests {
         let readonly_jwt = generate_jwt("readonly").await;
 
         let response: TestResponse = cli
-            .put(format!("/data_product/clear/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/clear"))
             .header("Authorization", format!("Bearer {readonly_jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&clear_param)
@@ -1634,7 +1634,7 @@ mod tests {
         ]);
 
         let state_response: TestResponse = cli
-            .put(format!("/data_product/update/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/update"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
@@ -1648,7 +1648,7 @@ mod tests {
         // Now clear dp2 (should go to queued since dp1 is success)
         let clear_param = json!([dp2_id.to_string()]);
         let response: TestResponse = cli
-            .put(format!("/data_product/clear/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/clear"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&clear_param)
@@ -1749,7 +1749,7 @@ mod tests {
 
         // Pause the plan
         let pause_response: TestResponse = cli
-            .put(format!("/plan/pause/{dataset_id}"))
+            .put(format!("/plan/{dataset_id}/pause"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .data(config.clone())
@@ -1783,7 +1783,7 @@ mod tests {
         ]);
 
         let state_response: TestResponse = cli
-            .put(format!("/data_product/update/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/update"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&state_param)
@@ -1796,7 +1796,7 @@ mod tests {
         // Clear dp1 (should reset dp2 and dp3 to waiting)
         let clear_param = json!([dp1_id.to_string()]);
         let response: TestResponse = cli
-            .put(format!("/data_product/clear/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/clear"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&clear_param)
@@ -1867,7 +1867,7 @@ mod tests {
         // Try to clear non-existent data product
         let clear_param = json!([nonexistent_dp_id.to_string()]);
         let response: TestResponse = cli
-            .put(format!("/data_product/clear/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/clear"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&clear_param)
@@ -1928,7 +1928,7 @@ mod tests {
         // Try to clear disabled data product
         let clear_param = json!([dp1_id.to_string()]);
         let response: TestResponse = cli
-            .put(format!("/data_product/clear/{dataset_id}"))
+            .put(format!("/data_product/{dataset_id}/clear"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .body_json(&clear_param)
@@ -2150,7 +2150,7 @@ mod tests {
 
         // Test pause endpoint
         let pause_response: TestResponse = cli
-            .put(format!("/plan/pause/{dataset_id}"))
+            .put(format!("/plan/{dataset_id}/pause"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .data(config)
@@ -2458,7 +2458,7 @@ mod tests {
 
         // First pause the plan
         let pause_response: TestResponse = cli
-            .put(format!("/plan/pause/{dataset_id}"))
+            .put(format!("/plan/{dataset_id}/pause"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .data(config.clone())
@@ -2479,7 +2479,7 @@ mod tests {
 
         // Now unpause the plan
         let unpause_response: TestResponse = cli
-            .put(format!("/plan/unpause/{dataset_id}"))
+            .put(format!("/plan/{dataset_id}/unpause"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json; charset=utf-8")
             .data(config)
