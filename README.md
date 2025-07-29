@@ -644,4 +644,4 @@ with perfect timing and precision.
 
 ## License
 
-See the license field in `Cargo.toml` for licensing information.
+This project is licensed under the AGPL (Affero General Public License). View the [LICENSE](LICENSE) file for more details.
