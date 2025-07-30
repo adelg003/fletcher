@@ -11,7 +11,12 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "ipdb>=0.13.13",
     "ipython>=9.4.0",
     "pyright>=1.1.403",
     "ruff>=0.12.5",
 ]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["COM812", "D203", "D213"]

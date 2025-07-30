@@ -96,11 +96,12 @@ hash key cost="12":
 
 # Lint all Markdown files
 markdownlint:
-  markdownlint-cli2 "**/*.md" "#node_modules"
+  markdownlint-cli2 --config .markdownlint-cli2.jsonc
+
 
 # Fix lints for Markdown files
 markdownlint-fix:
-  markdownlint-cli2 --fix "**/*.md" "#node_modules"
+  markdownlint-cli2 --fix --config .markdownlint-cli2.jsonc
 
 
 ################
@@ -156,15 +157,27 @@ pg-cli:
 
 # Pyright check
 py-right-check:
-  uvx pyright locust/
+  uv --directory locust/ run pyright
+
+# Pyright file watcher
+py-right-check-watch:
+  uv --directory locust/ run pyright --watch
 
 # Ruff Linting check
 py-ruff-check:
-  uvx ruff check --select ALL locust/
+  uv --directory locust/ run ruff check
+
+# Ruff Linting file watcher
+py-ruff-check-watch:
+  uv --directory locust/ run ruff check --watch
 
 # Ruff Formating check
 py-ruff-fmt-check:
-  uvx ruff format --check locust/
+  uv --directory locust/ run ruff format --check
+
+# Run Locust Server
+py-locust:
+  uv --directory locust/ run locust
 
 
 #####################

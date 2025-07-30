@@ -644,4 +644,5 @@ with perfect timing and precision.
 
 ## License
 
-This project is licensed under the AGPL (Affero General Public License). View the [LICENSE](LICENSE) file for more details.
+This project is licensed under the AGPL (Affero General Public License). View
+the [LICENSE](LICENSE) file for more details.
