@@ -167,9 +167,17 @@ py-right-check-watch:
 py-ruff-check:
   uv --directory locust/ run ruff check
 
+# Ruff Linting fix
+py-ruff-fix:
+  uv --directory locust/ run ruff check --fix
+
 # Ruff Linting file watcher
 py-ruff-check-watch:
   uv --directory locust/ run ruff check --watch
+
+# Ruff Formating
+py-ruff-fmt:
+  uv --directory locust/ run ruff format
 
 # Ruff Formating check
 py-ruff-fmt-check:
@@ -177,7 +185,8 @@ py-ruff-fmt-check:
 
 # Run Locust Server
 py-locust:
-  uv --directory locust/ run locust
+  uv --directory locust/ run locust --locustfile src/locustfile.py
+
 
 
 #####################
