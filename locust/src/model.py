@@ -13,6 +13,13 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
+class RunMode(StrEnum):
+    """Execution modes for running operations."""
+
+    ONCE = "once"
+    LOOP = "loop"
+
+
 class Role(StrEnum):
     """Available roles for Fletcher API authentication."""
 

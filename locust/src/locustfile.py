@@ -5,31 +5,47 @@ platform using Locust. It simulates realistic user workflows including plan
 creation, authentication, and data product state updates.
 """
 
+from argparse import ArgumentParser
 from collections.abc import Callable
 from random import choice
 from time import sleep
 from typing import Any
 from uuid import UUID
 
-from locust import HttpUser, between, task
+from locust import HttpUser, between, events, task
 
-from model import Auth, AuthLogin, DataProductPut, Plan, PlanPost, State
+from model import Auth, AuthLogin, DataProductPut, Plan, PlanPost, RunMode, State
 from setup import generate_plan_payload
 
-HOST: str = "http://0.0.0.0:3000"
-SERVICE: str = "local"
-KEY: str = "abc123"
+
+@events.init_command_line_parser.add_listener
+def add_custom_arguments(parser: ArgumentParser) -> None:
+    """Add custom command line arguments for Fletcher load testing."""
+    parser.add_argument(
+        "--service", type=str, default="local", help="Service name for authentication"
+    )
+    parser.add_argument(
+        "--key", type=str, default="abc123", help="Authentication key for the service"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=[mode.value for mode in RunMode],
+        default=RunMode.ONCE.value,
+        help="Execution mode: 'once' runs operations once, 'loop' runs continuously",
+    )
 
 
 class FletcherUser(HttpUser):
     """Locust user class for load testing Fletcher API."""
 
-    host: str | None = HOST
     wait_time: Callable = between(1, 3)
 
     def on_start(self) -> None:
         """Initialize the user by authenticating and creating a test plan."""
-        auth_payload: AuthLogin = AuthLogin(service=SERVICE, key=KEY)
+        auth_payload: AuthLogin = AuthLogin(
+            service=self.environment.parsed_options.service,
+            key=self.environment.parsed_options.key,
+        )
 
         # Authenticate against the API
         auth_response: dict[str, Any] = self.client.post(
@@ -127,18 +143,27 @@ class FletcherUser(HttpUser):
             case State.RUNNING:
                 self.update_data_product(dp_id=dp_id, state=State.SUCCESS)
 
-                # Are we done?
-                all_done: bool = all(
-                    dp.state == State.SUCCESS for dp in self.plan.data_products
-                )
-
-                if all_done:
-                    self.stop()
-
             # Well, we should not end up here
             case _:
                 error_msg = f"Somehow got Data Product ID: {dp_id}, State: {state}"
                 raise RuntimeError(error_msg)
+
+        # Are we done?
+        all_done: bool = all(
+            dp.state == State.SUCCESS for dp in self.plan.data_products
+        )
+
+        if all_done:
+            match self.environment.parsed_options.mode:
+                # Only run once
+                case RunMode.ONCE:
+                    self.stop()
+
+                # Loop and run forever (or untill your JWT expires)
+                case RunMode.LOOP:
+                    # Give a minute where all data products are done
+                    sleep(60)
+                    self.clear()
 
     def update_data_product(self, dp_id: UUID, state: State) -> None:
         """Update the state of a data product via Fletcher API.
@@ -154,6 +179,18 @@ class FletcherUser(HttpUser):
 
         response: dict[str, Any] = self.client.put(
             url=f"/api/data_product/{self.plan.dataset.id}/update",
+            json=update_payload,
+            headers={"Authorization": f"Bearer {self.auth.access_token}"},
+        ).json()
+
+        self.plan = Plan.model_validate(response)
+
+    def clear(self) -> None:
+        """Clear all data products from the current plan's dataset."""
+        update_payload: list[str] = [str(dp.id) for dp in self.plan.data_products]
+
+        response: dict[str, Any] = self.client.put(
+            url=f"/api/data_product/{self.plan.dataset.id}/clear",
             json=update_payload,
             headers={"Authorization": f"Bearer {self.auth.access_token}"},
         ).json()
