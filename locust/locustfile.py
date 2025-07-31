@@ -388,7 +388,7 @@ def generate_plan_payload() -> PlanPost:
                 id=journals_2000_id,
                 compute=Compute.CAMS,
                 name="Journals",
-                version="1.0.0",
+                version="2.0.0",
                 eager=False,
                 passthrough={"comp_code": 2000},
             ),
