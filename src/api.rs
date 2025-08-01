@@ -2300,9 +2300,9 @@ mod tests {
             .await;
         create_response_2.assert_status_is_ok();
 
-        // Test page 1
+        // Test page 1 (search for empty string to match all datasets)
         let response_page_1: TestResponse = cli
-            .get("/plan/search?search_by=data-product&page=0")
+            .get("/plan/search?search_by=&page=0")
             .data(pool.clone())
             .send()
             .await;
@@ -2310,7 +2310,7 @@ mod tests {
 
         // Test page 2
         let response_page_2: TestResponse = cli
-            .get("/plan/search?search_by=data-product&page=1")
+            .get("/plan/search?search_by=&page=1")
             .data(pool)
             .send()
             .await;

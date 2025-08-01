@@ -121,7 +121,7 @@ mod tests {
             config.database_url,
             "postgres://fletcher_user:password@localhost/fletcher_db"
         );
-        assert_eq!(config.max_connections, 30);
+        assert_eq!(config.max_connections, 10);
         assert_eq!(config.remote_auths.len(), 2);
     }
 

@@ -1058,9 +1058,10 @@ mod tests {
         // Should contain table headers
         let th_selector = Selector::parse("th").unwrap();
         let headers: Vec<_> = document.select(&th_selector).collect();
-        assert_eq!(headers.len(), 2, "Should have 2 table headers");
+        assert_eq!(headers.len(), 3, "Should have 3 table headers");
         assert_eq!(headers[0].inner_html(), "Dataset ID");
         assert_eq!(headers[1].inner_html(), "Modified Date");
+        assert_eq!(headers[2].inner_html(), "Extra");
 
         // Should contain search results tbody
         let tbody_selector = Selector::parse("tbody#search_results").unwrap();
