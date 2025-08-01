@@ -198,7 +198,6 @@ py-locust-busiest-day:
     --spawn-rate 2 \
     --mode once \
     --autostart
-# Run time 7m32s
 
 # Run Locust Server for stress testing
 py-locust-stress:
