@@ -1,0 +1,21 @@
+[project]
+name = "fletcher"
+version = "0.1.0"
+description = "Stress test for the Fletcher Webservice"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "locust>=2.37.14",
+    "pydantic>=2.11.7",
+]
+
+[dependency-groups]
+dev = [
+    "pip-audit>=2.9.0",
+    "pyright>=1.1.403",
+    "ruff>=0.12.7",
+]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["COM812", "CPY001", "D203", "D213"]

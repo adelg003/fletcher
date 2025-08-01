@@ -35,6 +35,7 @@ efficient and reliable data pipeline execution.
 - ⏸️ **Pause/Resume**: Control dataset execution flow
 - 🧪 **Multiple Compute Types**: Support for CAMS and DBXaaS compute platforms
 - 📊 **GraphViz Visualization**: Visual representation of your DAG execution plans
+- 🚀 **Load Testing**: Built-in Locust-based performance testing with realistic scenarios
 
 ## Quick Start
 
@@ -44,6 +45,14 @@ efficient and reliable data pipeline execution.
 - PostgreSQL
 - Docker/Podman (optional)
 - Just command runner (optional but recommended)
+
+### Development Prerequisites
+
+Additional tools for development and testing:
+
+- Node.js and npm (for frontend CSS build)
+- Python 3.13+ and uv (for load testing)
+- SQLx CLI (for database operations)
 
 ### Installation
 
@@ -215,6 +224,37 @@ Fletcher's UI works in all modern browsers with:
 - `/component/plan_search` - HTMX search component
 - `/assets/*` - Static assets (CSS, JS, images)
 
+### Frontend Build Process
+
+Fletcher's UI uses modern frontend tools for styling and interactivity:
+
+#### CSS Framework
+
+- **TailwindCSS 4.x** - Utility-first CSS framework with modern features
+- **DaisyUI** - Component library built on TailwindCSS
+- **TailwindCSS Animated** - Animation utilities
+
+#### JavaScript Libraries
+
+- **HTMX** - Progressive enhancement for dynamic interactions
+- **Viz.js** - GraphViz rendering for dependency graphs
+- **Prism.js** - Syntax highlighting for JSON payloads
+
+#### Development Workflow
+
+The CSS is built using TailwindCSS CLI and bundled with the Rust application:
+
+```bash
+# Install Node.js dependencies
+npm install
+
+# Build CSS (automatically handled during Rust build)
+# See build.rs for integration details
+```
+
+The `build.rs` script automatically handles CSS compilation during the Rust
+build process, ensuring the latest styles are always included in the binary.
+
 ## Authentication
 
 Fletcher uses **JWT (JSON Web Token) authentication** with **role-based
@@ -262,14 +302,14 @@ access control (RBAC)** to secure API endpoints.
 Fletcher implements four distinct roles that control access to different operations:
 
 <!-- markdownlint-disable MD013 -->
-| Role          | Description                 | Endpoints                        |
-|---------------|-----------------------------|----------------------------------|
-| **`publish`** | Create and submit new plans | `POST /api/plan`                 |
-| **`update`**  | Modify data product states  | `PUT /api/data_product/update/*` |
-|               |                             | `PUT /api/data_product/clear/*`  |
-| **`pause`**   | Pause and unpause datasets  | `PUT /api/plan/pause/*`          |
-|               |                             | `PUT /api/plan/unpause/*`        |
-| **`disable`** | Disable data products       | `DELETE /api/data_product/*`     |
+| Role          | Description                 | Endpoints                                   |
+|---------------|-----------------------------|---------------------------------------------|
+| **`publish`** | Create and submit new plans | `POST /api/plan`                            |
+| **`update`**  | Modify data product states  | `PUT /api/data_product/{dataset_id}/update` |
+|               |                             | `PUT /api/data_product/{dataset_id}/clear`  |
+| **`pause`**   | Pause and unpause datasets  | `PUT /api/plan/{dataset_id}/pause`          |
+|               |                             | `PUT /api/plan/{dataset_id}/unpause`        |
+| **`disable`** | Disable data products       | `DELETE /api/data_product/{dataset_id}`     |
 <!-- markdownlint-enable MD013 -->
 
 ### Service Configuration
@@ -307,15 +347,15 @@ Services are configured via the `REMOTE_APIS` environment variable:
 - `POST /api/plan` - Create or update a plan **[Requires: `publish` role]**
 - `GET /api/plan/{dataset_id}` - Get a plan by dataset ID
 - `GET /api/plan/search` - Search plans  
-- `PUT /api/plan/pause/{dataset_id}` - Pause a dataset **[Requires: `pause` role]**
-- `PUT /api/plan/unpause/{dataset_id}` - Unpause a dataset **[Requires: `pause` role]**
+- `PUT /api/plan/{dataset_id}/pause` - Pause a dataset **[Requires: `pause` role]**
+- `PUT /api/plan/{dataset_id}/unpause` - Unpause a dataset **[Requires: `pause` role]**
 
 ### Data Products
 
 - `GET /api/data_product/{dataset_id}/{data_product_id}` - Get a data product
-- `PUT /api/data_product/update/{dataset_id}` - Update data product states
+- `PUT /api/data_product/{dataset_id}/update` - Update data product states
   **[Requires: `update` role]**
-- `PUT /api/data_product/clear/{dataset_id}` - Clear data products and
+- `PUT /api/data_product/{dataset_id}/clear` - Clear data products and
   downstream dependencies **[Requires: `update` role]**
 - `DELETE /api/data_product/{dataset_id}` - Disable data products
   **[Requires: `disable` role]**
@@ -416,7 +456,7 @@ Fletcher manages the following states:
 
 ## Development
 
-### Development Prerequisites
+### Installation and Setup
 
 Install development dependencies:
 
@@ -461,6 +501,8 @@ RUST_LOG=debug
 **Available Environment Variables:**
 
 - `DATABASE_URL` - PostgreSQL connection string (required)
+- `MAX_CONNECTIONS` - Number of PostgreSQL connections in the pool
+  (default is 10)
 - `SECRET_KEY` - Secret key for JWT token signing (required)
 - `REMOTE_APIS` - JSON array of service configurations with roles
   (required)
@@ -495,6 +537,22 @@ just sqlx-reset              # Reset database
 just sqlx-prepare            # Update SQLx cache
 just sqlx-check              # Verify SQLx cache
 
+# Load Testing & Stress Testing
+just run-stress              # Run Fletcher with stress test settings (30 connections)
+just locust                  # Run basic load test
+just locust-stress           # Run stress test (2000 users, continuous loop)
+just locust-busiest-day      # Run busiest day test (300 users, single run)
+
+# Python Development
+just py-right-check          # Type checking with pyright
+just py-right-check-watch    # Watch mode type checking
+just py-ruff-check           # Linting with ruff
+just py-ruff-fix             # Auto-fix with ruff
+just py-ruff-fmt             # Format with ruff
+just py-ruff-fmt-check       # Check formatting with ruff
+just py-ruff-check-watch     # Watch mode linting
+just py-audit                # Scan for vulnerable dependencies
+
 # Security
 just deny                    # Check dependencies for security issues
 just trivy-repo              # Scan repository
@@ -528,10 +586,18 @@ fletcher/
 │   ├── model.rs            # Data models
 │   ├── main.rs             # Application entry point
 │   └── ui/                 # Web UI components
+├── locust/                 # Load testing framework
+│   ├── src/
+│   │   ├── locustfile.py   # Main load testing scenarios
+│   │   ├── model.py        # Pydantic models for API data
+│   │   └── setup.py        # Test data generation utilities
+│   ├── pyproject.toml      # Python project configuration
+│   └── README.md           # Load testing documentation
 ├── migrations/             # Database migrations
 ├── key_hasher/             # Password hashing utility
 ├── scripts/                # Utility scripts
 ├── assets/                 # Static web assets
+├── package.json            # Node.js dependencies (CSS build)
 └── justfile                # Development commands
 ```
 
@@ -586,6 +652,8 @@ just docker-healthcheck
 
 **Optional:**
 
+- `MAX_CONNECTIONS` - Number of PostgreSQL connections in the pool. Each connection
+  uses one core in PostgreSQL (default is 10)
 - `RUST_BACKTRACE` - Set to `1` or `full` for detailed error traces  
 - `RUST_LOG` - Log level (`error`, `warn`, `info`, `debug`, `trace`)
 
@@ -599,6 +667,179 @@ system
 - Use a strong, randomly generated `SECRET_KEY` in production
 - Store bcrypt password hashes in `REMOTE_APIS`, never plain text passwords
 - Use `just hash "your-password"` to generate secure password hashes
+
+## Load Testing
+
+Fletcher includes comprehensive load testing capabilities using **Locust** to simulate
+realistic user workflows and evaluate system performance under various loads.
+
+### Load Testing Features
+
+- **🎯 Realistic Workflows**: Simulates authentic Fletcher API usage patterns
+- **🔄 Plan Lifecycle Testing**: Creates plans, updates data products, and
+  manages states
+- **🌐 UI Testing**: Tests both API endpoints and web interface interactions
+- **📊 Multiple Test Modes**: Support for single-run and continuous loop testing
+- **⚡ Performance Metrics**: Detailed insights into system behavior under load
+- **🔧 Configurable Parameters**: Customizable authentication, hosts, and
+  execution modes
+
+### Load Testing Quick Start
+
+1. **Run basic load test**
+
+   ```bash
+   just locust
+   ```
+
+2. **Run Fletcher in stress test mode**
+
+   ```bash
+   just run-stress
+   ```
+
+3. **Run stress test (2000 users, continuous loop)**
+
+   ```bash
+   just locust-stress
+   ```
+
+4. **Run busiest day simulation (300 users, single run)**
+
+   ```bash
+   just locust-busiest-day
+   ```
+
+### Load Test Configuration
+
+The justfile provides pre-configured load test scenarios:
+
+```bash
+# Basic interactive load test
+just locust
+
+# Stress test: 2000 users, spawn rate 2/sec, continuous loop, autostart
+just locust-stress
+
+# Busiest day test: 300 users, spawn rate 2/sec, single run, autostart  
+just locust-busiest-day
+
+# Run Fletcher server optimized for stress testing (30 DB connections)
+just run-stress
+```
+
+**Pre-configured Test Parameters:**
+
+- **Basic**: Interactive mode, manual user/spawn rate control
+- **Stress Test**: 2000 users, 2 users/sec spawn rate, continuous loop mode, autostart
+- **Busiest Day**: 300 users, 2 users/sec spawn rate, single run mode, autostart
+
+**Custom Configuration:**
+
+For custom test parameters, run locust directly:
+
+```bash
+uv --directory locust/ run locust \
+  --locustfile src/locustfile.py \
+  --host http://0.0.0.0:3000 \
+  --users 100 \
+  --spawn-rate 1 \
+  --service local \
+  --key abc123 \
+  --mode once
+```
+
+**Available Parameters:**
+
+- `--host` - Base URL of the Fletcher API server
+- `--users` - Number of concurrent users to simulate
+- `--spawn-rate` - Users spawned per second
+- `--mode` - Execution mode: `once` or `loop`
+- `--service` - Service name for authentication (default: `local`)
+- `--key` - Authentication key for the service (default: `abc123`)
+- `--autostart` - Start test automatically without web UI interaction
+
+### Test Scenarios
+
+The load tests simulate several realistic Fletcher workflows:
+
+1. **Authentication Flow**: Get JWT tokens and verify role-based access
+2. **Plan Creation**: Submit complex plans with multiple data products and dependencies
+3. **State Management**: Update data product states and trigger downstream jobs
+4. **UI Interaction**: Navigate the web interface, search plans, and view visualizations
+5. **Cleanup Operations**: Clear data products and reset states for continuous testing
+
+### Performance Benchmarks
+
+Based on testing with the included scenarios on a **32 vCPU machine with local
+PostgreSQL and Gen4 NVME SSD**:
+
+- **Optimal Performance**: ~1,000 concurrent users (~150 requests/second)
+- **Stress Test Configuration**: 2,000 users with 30 database connections
+- **Busiest Day Simulation**: 300 users representing peak daily load
+  (completes in 7m32s)
+- **Resource Usage**:
+  - Fletcher: <100MB RAM
+  - PostgreSQL: 3-5GB RAM during stress testing
+- **Authentication Limits**: Auth bottlenecks appear around 2,250+ concurrent users
+
+**Test Environment:**
+
+- **CPU**: 32 vCPU cores
+- **Storage**: Gen4 NVME SSD (2TB)
+- **Database**: PostgreSQL running locally (same machine)
+- **RAM**: 64GB total available
+
+*Note: Performance may vary significantly based on hardware specifications,
+network latency (if using remote PostgreSQL), and system load.*
+
+### Stress Testing Setup
+
+For accurate stress testing, run Fletcher with optimized settings:
+
+```bash
+# Terminal 1: Start Fletcher with stress test configuration
+just run-stress
+
+# Terminal 2: Run stress test
+just locust-stress
+```
+
+The `run-stress` command configures Fletcher with `MAX_CONNECTIONS=30` for
+optimal database performance under high load.
+
+### Load Testing Development
+
+Load testing is built with modern Python tools:
+
+```bash
+# Install dependencies
+uv --directory locust/ sync
+
+# Type checking
+just py-right-check
+
+# Linting and formatting
+just py-ruff-check
+just py-ruff-fix
+just py-ruff-fmt
+
+# Security scanning
+just py-audit
+
+# Interactive development
+just py-ruff-check-watch
+just py-right-check-watch
+```
+
+### Load Test Architecture
+
+The load testing framework includes:
+
+- **`locustfile.py`** - Main test scenarios and user behavior simulation
+- **`model.py`** - Pydantic models for Fletcher API data structures  
+- **`setup.py`** - Test data generation utilities for complex plans
+- **`pyproject.toml`** - Python project configuration with dependencies
 
 ## Configuration
 
@@ -622,15 +863,18 @@ Plans can include custom JSON metadata in `extra` fields for extensibility.
 3. Run tests: `just test`
 4. Run linting: `just clippy`
 5. Check formatting: `just fmt-check`
-6. Run security checks: `just deny`
-7. Submit a pull request
+6. Run Python checks: `just py-right-check py-ruff-check py-ruff-fmt-check py-audit`
+7. Test load performance: `just locust-busiest-day`
+8. Run security checks: `just deny`
+9. Submit a pull request
 
 ### Code Quality
 
 The project maintains high code quality standards:
 
-- Comprehensive test coverage
-- Strict linting with Clippy
+- Comprehensive test coverage (Rust and Python)
+- Strict linting with Clippy (Rust) and Ruff (Python)
+- Type checking with pyright for Python code
 - Security scanning with cargo-deny and Trivy
 - Automated CI/CD with GitHub Actions
 
@@ -644,4 +888,5 @@ with perfect timing and precision.
 
 ## License
 
-See the license field in `Cargo.toml` for licensing information.
+This project is licensed under the AGPL (Affero General Public License). View
+the [LICENSE](LICENSE) file for more details.

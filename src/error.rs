@@ -8,6 +8,7 @@ use petgraph::graph::GraphError;
 use poem::error::{
     BadRequest, Forbidden, InternalServerError, NotFound, Unauthorized, UnprocessableEntity,
 };
+use std::num::ParseIntError;
 
 /// Crate-wide result alias.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -67,6 +68,10 @@ pub enum Error {
     #[error("Dataset '{0}' pause state is already set to: '{1}'")]
     Pause(DataProductId, bool),
 
+    /// Error from ParseInt
+    #[error(transparent)]
+    ParseInt(#[from] ParseIntError),
+
     /// Missing the needed role access
     #[error("Service account '{0}' is missing the following role: '{1}'")]
     Role(String, Role),
@@ -101,6 +106,7 @@ impl Error {
             Error::Jwt(err) => Forbidden(err),
             Error::Missing(_) => NotFound(self),
             Error::Pause(_, _) => BadRequest(self),
+            Error::ParseInt(err) => InternalServerError(err),
             Error::Role(_, _) => Forbidden(self),
             Error::SerdeJson(err) => InternalServerError(err),
             Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),

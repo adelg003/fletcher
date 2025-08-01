@@ -96,11 +96,12 @@ hash key cost="12":
 
 # Lint all Markdown files
 markdownlint:
-  markdownlint-cli2 "**/*.md" "#node_modules"
+  markdownlint-cli2 --config .markdownlint-cli2.jsonc
+
 
 # Fix lints for Markdown files
 markdownlint-fix:
-  markdownlint-cli2 --fix "**/*.md" "#node_modules"
+  markdownlint-cli2 --fix --config .markdownlint-cli2.jsonc
 
 
 ################
@@ -148,6 +149,79 @@ pg-cli:
     --port=5432 \
     --database=fletcher_db \
     --driver=postgres
+
+
+############
+## Python ##
+############
+
+# Pyright check
+py-right-check:
+  uv --directory locust/ run pyright
+
+# Pyright file watcher
+py-right-check-watch:
+  uv --directory locust/ run pyright --watch
+
+# Ruff Linting check
+py-ruff-check:
+  uv --directory locust/ run ruff check
+
+# Ruff Linting fix
+py-ruff-fix:
+  uv --directory locust/ run ruff check --fix
+
+# Ruff Linting file watcher
+py-ruff-check-watch:
+  uv --directory locust/ run ruff check --watch
+
+# Ruff Formatting
+py-ruff-fmt:
+  uv --directory locust/ run ruff format
+
+# Ruff Formatting check
+py-ruff-fmt-check:
+  uv --directory locust/ run ruff format --check
+
+# Scan for vulnerable dependencies
+py-audit:
+  uv --directory locust/ run pip-audit
+
+
+#################
+## Stress Test ##
+#################
+
+
+# Build and Run a Release Binary with settings for stress testing
+run-stress:
+  MAX_CONNECTIONS=30 cargo run --release
+
+# Run Locust Server
+locust:
+  uv --directory locust/ run locust \
+    --locustfile src/locustfile.py \
+    --host "http://0.0.0.0:3000"
+
+# Run Locust Server for busiest day testing
+locust-busiest-day:
+  uv --directory locust/ run locust \
+    --locustfile src/locustfile.py \
+    --host "http://0.0.0.0:3000" \
+    --users 300 \
+    --spawn-rate 2 \
+    --mode once \
+    --autostart
+
+# Run Locust Server for stress testing
+locust-stress:
+  uv --directory locust/ run locust \
+    --locustfile src/locustfile.py \
+    --host "http://0.0.0.0:3000" \
+    --users 2000 \
+    --spawn-rate 2 \
+    --mode loop \
+    --autostart
 
 
 #####################
@@ -245,6 +319,9 @@ github-rust-checks: sqlx-check check_w_sqlx_cache clippy_w_sqlx_cache fmt-check 
 # Run all Github Markdown Checks
 github-markdown-checks: markdownlint
 
+# Run all Github Python Checks
+github-py-checks: py-right-check py-ruff-check py-ruff-fmt-check py-audit
+
 # Run all Github Docker Checks
 github-docker-checks mode="debug": (docker-build "docker" mode) (docker-run "docker" mode) docker-healthcheck (docker-kill "docker")
 
@@ -258,7 +335,7 @@ github-trivy-checks client="docker": trivy-repo (docker-build client "debug") (t
 github-trivy-checks-podman: (github-trivy-checks "podman")
 
 # Run all Github Checks
-github-checks: github-rust-checks github-markdown-checks github-docker-checks (github-trivy-checks "docker")
+github-checks: github-rust-checks github-markdown-checks github-py-checks github-docker-checks (github-trivy-checks "docker")
 
 # Run all Github Checks (with Podman)
-github-checks-podman: github-rust-checks github-markdown-checks github-podman-checks (github-trivy-checks "podman")
+github-checks-podman: github-rust-checks github-markdown-checks github-py-checks github-podman-checks (github-trivy-checks "podman")
