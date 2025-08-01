@@ -252,8 +252,8 @@ npm install
 # See build.rs for integration details
 ```
 
-The `build.rs` script automatically handles CSS compilation during the Rust build process,
-ensuring the latest styles are always included in the binary.
+The `build.rs` script automatically handles CSS compilation during the Rust
+build process, ensuring the latest styles are always included in the binary.
 
 ## Authentication
 
@@ -456,7 +456,7 @@ Fletcher manages the following states:
 
 ## Development
 
-### Development Prerequisites
+### Installation and Setup
 
 Install development dependencies:
 
@@ -675,13 +675,15 @@ realistic user workflows and evaluate system performance under various loads.
 ### Load Testing Features
 
 - **🎯 Realistic Workflows**: Simulates authentic Fletcher API usage patterns
-- **🔄 Plan Lifecycle Testing**: Creates plans, updates data products, and manages states
+- **🔄 Plan Lifecycle Testing**: Creates plans, updates data products, and
+  manages states
 - **🌐 UI Testing**: Tests both API endpoints and web interface interactions
 - **📊 Multiple Test Modes**: Support for single-run and continuous loop testing
 - **⚡ Performance Metrics**: Detailed insights into system behavior under load
-- **🔧 Configurable Parameters**: Customizable authentication, hosts, and execution modes
+- **🔧 Configurable Parameters**: Customizable authentication, hosts, and
+  execution modes
 
-### Quick Start
+### Load Testing Quick Start
 
 1. **Run basic load test**
 
@@ -751,7 +753,7 @@ uv --directory locust/ run locust \
 - `--host` - Base URL of the Fletcher API server
 - `--users` - Number of concurrent users to simulate
 - `--spawn-rate` - Users spawned per second
-- `--mode` - Execution mode: `once` or `loop` 
+- `--mode` - Execution mode: `once` or `loop`
 - `--service` - Service name for authentication (default: `local`)
 - `--key` - Authentication key for the service (default: `abc123`)
 - `--autostart` - Start test automatically without web UI interaction
@@ -768,23 +770,27 @@ The load tests simulate several realistic Fletcher workflows:
 
 ### Performance Benchmarks
 
-Based on testing with the included scenarios on a **32 vCPU machine with local PostgreSQL and Gen4 NVME SSD**:
+Based on testing with the included scenarios on a **32 vCPU machine with local
+PostgreSQL and Gen4 NVME SSD**:
 
 - **Optimal Performance**: ~1,000 concurrent users (~150 requests/second)
 - **Stress Test Configuration**: 2,000 users with 30 database connections
-- **Busiest Day Simulation**: 300 users representing peak daily load (completes in 7m32s)
-- **Resource Usage**: 
+- **Busiest Day Simulation**: 300 users representing peak daily load
+  (completes in 7m32s)
+- **Resource Usage**:
   - Fletcher: <100MB RAM
   - PostgreSQL: 3-5GB RAM during stress testing
 - **Authentication Limits**: Auth bottlenecks appear around 2,250+ concurrent users
 
 **Test Environment:**
+
 - **CPU**: 32 vCPU cores
 - **Storage**: Gen4 NVME SSD (2TB)
 - **Database**: PostgreSQL running locally (same machine)
 - **RAM**: 64GB total available
 
-*Note: Performance may vary significantly based on hardware specifications, network latency (if using remote PostgreSQL), and system load.*
+*Note: Performance may vary significantly based on hardware specifications,
+network latency (if using remote PostgreSQL), and system load.*
 
 ### Stress Testing Setup
 
@@ -798,7 +804,8 @@ just run-stress
 just locust-stress
 ```
 
-The `run-stress` command configures Fletcher with `MAX_CONNECTIONS=30` for optimal database performance under high load.
+The `run-stress` command configures Fletcher with `MAX_CONNECTIONS=30` for
+optimal database performance under high load.
 
 ### Load Testing Development
 
