@@ -183,14 +183,24 @@ py-ruff-fmt:
 py-ruff-fmt-check:
   uv --directory locust/ run ruff format --check
 
+
+#################
+## Stress Test ##
+#################
+
+
+# Build and Run a Release Binary with settings for stress testing
+run-stress:
+  MAX_CONNECTIONS=30 cargo run --release
+
 # Run Locust Server
-py-locust:
+locust:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
     --host "http://0.0.0.0:3000"
 
 # Run Locust Server for busiest day testing
-py-locust-busiest-day:
+locust-busiest-day:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
     --host "http://0.0.0.0:3000" \
@@ -200,7 +210,7 @@ py-locust-busiest-day:
     --autostart
 
 # Run Locust Server for stress testing
-py-locust-stress:
+locust-stress:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
     --host "http://0.0.0.0:3000" \
