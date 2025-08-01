@@ -52,6 +52,7 @@ pub async fn index_page(Data(pool): Data<&PgPool>) -> Result<Markup> {
                     tr {
                         th { "Dataset ID" }
                         th { "Modified Date" }
+                        th { "Extra" }
                     }
                 }
                 tbody id="search_results" {

@@ -118,6 +118,7 @@ class DatasetPost(BaseModel):
 
     id: UUID
     paused: bool
+    extra: Any
 
 
 class DataProductPost(BaseModel):

@@ -33,6 +33,7 @@ pub async fn plan_search_component(
                 onclick={ "window.location='/plan/" (row.dataset_id) "';" } {
                 td { (row.dataset_id) }
                 td { (modified_date) }
+                td { pre { (row.extra) } }
             }
         }
         // Pagination Placeholder

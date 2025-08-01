@@ -31,7 +31,9 @@ def generate_plan_payload() -> PlanPost:
     journals_2000_id: UUID = uuid4()
 
     return PlanPost(
-        dataset=DatasetPost(id=dataset_id, paused=False),
+        dataset=DatasetPost(
+            id=dataset_id, paused=False, extra={"extra1": uuid4(), "extra2": uuid4()}
+        ),
         data_products=[
             DataProductPost(
                 id=bkpf_id,

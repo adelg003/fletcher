@@ -407,10 +407,11 @@ pub async fn search_plans_select(
         SearchRow,
         "SELECT
             ds.dataset_id,
+            ds.extra,
             GREATEST(
                 ds.modified_date,
-                COALESCE(MAX(dp.modified_date), ds.modified_date),
-                COALESCE(MAX(dep.modified_date), ds.modified_date)
+                MAX(dp.modified_date),
+                MAX(dep.modified_date)
             ) AS \"modified_date\"
         FROM
             dataset ds
@@ -429,28 +430,11 @@ pub async fn search_plans_select(
         WHERE
             ds.dataset_id::text ILIKE $1
             OR ds.extra::text ILIKE $1
-            OR ds.modified_by ILIKE $1
-            OR ds.modified_date::text ILIKE $1
-            OR dp.data_product_id::text ILIKE $1
-            OR dp.compute::text ILIKE $1
-            OR dp.name ILIKE $1
-            OR dp.version ILIKE $1
-            OR dp.passthrough::text ILIKE $1
-            OR dp.state::text ILIKE $1
-            OR dp.run_id::text ILIKE $1
-            OR dp.link ILIKE $1
-            OR dp.passback::text ILIKE $1
-            OR dp.extra::text ILIKE $1
-            OR dp.modified_by ILIKE $1
-            OR dp.modified_date::text ILIKE $1
-            OR dep.extra::text ILIKE $1
-            OR dep.modified_by ILIKE $1
-            OR dep.modified_date::text ILIKE $1
         GROUP BY
             ds.dataset_id
         ORDER BY
             GREATEST(
-                MAX(ds.modified_date),
+                ds.modified_date,
                 MAX(dp.modified_date),
                 MAX(dep.modified_date)
             ) DESC

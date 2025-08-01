@@ -194,18 +194,19 @@ py-locust-busiest-day:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
     --host "http://0.0.0.0:3000" \
-    --users 200 \
-    --spawn-rate 1 \
+    --users 300 \
+    --spawn-rate 2 \
     --mode once \
     --autostart
+# Run time 7m32s
 
 # Run Locust Server for stress testing
 py-locust-stress:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
     --host "http://0.0.0.0:3000" \
-    --users 500 \
-    --spawn-rate 1 \
+    --users 2000 \
+    --spawn-rate 2 \
     --mode loop \
     --autostart
 

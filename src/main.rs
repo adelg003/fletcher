@@ -20,7 +20,7 @@ use poem::{
 };
 use poem_openapi::OpenApiService;
 use rust_embed::Embed;
-use sqlx::{PgPool, migrate};
+use sqlx::{PgPool, migrate, postgres::PgPoolOptions};
 
 /// Struct we will put all our configs to run Fletcher into
 #[derive(Clone)]
@@ -28,6 +28,7 @@ pub struct Config {
     database_url: String,
     decoding_key: DecodingKey,
     encoding_key: EncodingKey,
+    max_connections: u32,
     remote_auths: Vec<RemoteAuth>,
 }
 
@@ -54,7 +55,10 @@ async fn main() -> color_eyre::Result<()> {
     let swagger = api_service.swagger_ui();
 
     // Connect to PostgreSQL
-    let pool = PgPool::connect(&config.database_url).await?;
+    let pool: PgPool = PgPoolOptions::new()
+        .max_connections(config.max_connections)
+        .connect(&config.database_url)
+        .await?;
     migrate!().run(&pool).await?;
 
     // Route inbound traffic
@@ -83,13 +87,18 @@ async fn main() -> color_eyre::Result<()> {
 
 /// Load in Fletcher's configs
 pub fn load_config() -> Result<Config> {
+    // If we don't get MAX_CONNECTIONS, just default to 10
+    let max_connections: u32 = dotenvy::var("MAX_CONNECTIONS")
+        .unwrap_or("10".to_string())
+        .parse()?;
     let secret_key: String = dotenvy::var("SECRET_KEY")?;
     let secret_key_bytes: &[u8] = secret_key.as_bytes();
 
     Ok(Config {
         database_url: dotenvy::var("DATABASE_URL")?,
-        encoding_key: EncodingKey::from_secret(secret_key_bytes),
         decoding_key: DecodingKey::from_secret(secret_key_bytes),
+        encoding_key: EncodingKey::from_secret(secret_key_bytes),
+        max_connections,
         remote_auths: serde_json::from_str(&dotenvy::var("REMOTE_APIS")?)?,
     })
 }
@@ -112,6 +121,7 @@ mod tests {
             config.database_url,
             "postgres://fletcher_user:password@localhost/fletcher_db"
         );
+        assert_eq!(config.max_connections, 30);
         assert_eq!(config.remote_auths.len(), 2);
     }
 

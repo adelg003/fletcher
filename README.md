@@ -77,6 +77,7 @@ efficient and reliable data pipeline execution.
    # Create a .env file in the project root
    cat > .env << 'EOF'
    DATABASE_URL=postgres://fletcher_user:password@localhost/fletcher_db
+   MAX_CONNECTIONS=10
    SECRET_KEY=your-secret-key-for-jwt-signing-make-it-long-and-random
    REMOTE_APIS='[
      {
@@ -103,6 +104,7 @@ efficient and reliable data pipeline execution.
 
    ```bash
    export DATABASE_URL="postgres://fletcher_user:password@localhost/fletcher_db"
+   export MAX_CONNECTIONS=10
    export SECRET_KEY="your-secret-key-for-jwt-signing-make-it-long-and-random"
    export REMOTE_APIS='[{"service":"local","hash":"$2b$10$DvqWB.sMjo1XSlgGrOzGAuBTY5E1hkLiDK3BdcK0TiROjCWkgCeaa","roles":["publish","pause","update","disable"]},{"service":"readonly","hash":"$2b$10$46TiUvUaKvp2D/BuoXe8Fu9ktffCBXioF8M0DeeOWvz8X2J0RtpvK","roles":[]}]'
    ```
@@ -439,6 +441,7 @@ create a `.env` file in the project root:
 ```bash
 # .env file for local development
 DATABASE_URL=postgres://fletcher_user:password@localhost/fletcher_db
+MAX_CONNECTIONS=10
 SECRET_KEY=your-secret-key-for-jwt-signing-make-it-long-and-random
 REMOTE_APIS='[
   {
@@ -461,6 +464,8 @@ RUST_LOG=debug
 **Available Environment Variables:**
 
 - `DATABASE_URL` - PostgreSQL connection string (required)
+- `MAX_CONNECTIONS` - Number of PostgreSQL connection in the pool
+  (default is 10)
 - `SECRET_KEY` - Secret key for JWT token signing (required)
 - `REMOTE_APIS` - JSON array of service configurations with roles
   (required)
@@ -586,6 +591,8 @@ just docker-healthcheck
 
 **Optional:**
 
+- `MAX_CONNECTIONS` - Number of PostgreSQL connection in the pool
+  (default is 10)
 - `RUST_BACKTRACE` - Set to `1` or `full` for detailed error traces  
 - `RUST_LOG` - Log level (`error`, `warn`, `info`, `debug`, `trace`)
 

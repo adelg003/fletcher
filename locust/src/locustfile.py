@@ -137,7 +137,7 @@ class FletcherUser(HttpUser):
                 self.update_data_product(dp_id=dp_id, state=State.RUNNING)
 
                 # Simulate the running of content
-                sleep(60)
+                sleep(10)
 
             # Set state to done
             case State.RUNNING:

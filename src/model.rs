@@ -386,6 +386,7 @@ pub struct DependencyParam {
 #[derive(Object)]
 pub struct SearchRow {
     pub dataset_id: DatasetId,
+    pub extra: Value,
     pub modified_date: Option<DateTime<Utc>>,
 }
 
