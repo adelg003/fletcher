@@ -551,6 +551,7 @@ just py-ruff-fix             # Auto-fix with ruff
 just py-ruff-fmt             # Format with ruff
 just py-ruff-fmt-check       # Check formatting with ruff
 just py-ruff-check-watch     # Watch mode linting
+just py-audit                # Scan for vulnerable dependencies
 
 # Security
 just deny                    # Check dependencies for security issues
@@ -823,6 +824,9 @@ just py-ruff-check
 just py-ruff-fix
 just py-ruff-fmt
 
+# Security scanning
+just py-audit
+
 # Interactive development
 just py-ruff-check-watch
 just py-right-check-watch
@@ -859,7 +863,7 @@ Plans can include custom JSON metadata in `extra` fields for extensibility.
 3. Run tests: `just test`
 4. Run linting: `just clippy`
 5. Check formatting: `just fmt-check`
-6. Run Python checks: `just py-right-check py-ruff-check py-ruff-fmt-check`
+6. Run Python checks: `just py-right-check py-ruff-check py-ruff-fmt-check py-audit`
 7. Test load performance: `just locust-busiest-day`
 8. Run security checks: `just deny`
 9. Submit a pull request

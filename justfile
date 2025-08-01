@@ -320,7 +320,7 @@ github-rust-checks: sqlx-check check_w_sqlx_cache clippy_w_sqlx_cache fmt-check 
 github-markdown-checks: markdownlint
 
 # Run all Github Python Checks
-github-py-checks: py-right-check py-ruff-check py-ruff-fmt-check
+github-py-checks: py-right-check py-ruff-check py-ruff-fmt-check py-audit
 
 # Run all Github Docker Checks
 github-docker-checks mode="debug": (docker-build "docker" mode) (docker-run "docker" mode) docker-healthcheck (docker-kill "docker")
