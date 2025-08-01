@@ -175,13 +175,17 @@ py-ruff-fix:
 py-ruff-check-watch:
   uv --directory locust/ run ruff check --watch
 
-# Ruff Formating
+# Ruff Formatting
 py-ruff-fmt:
   uv --directory locust/ run ruff format
 
-# Ruff Formating check
+# Ruff Formatting check
 py-ruff-fmt-check:
   uv --directory locust/ run ruff format --check
+
+# Scan for vulnerable dependencies
+py-audit:
+  uv --directory locust/ run pip-audit
 
 
 #################
