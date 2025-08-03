@@ -12,7 +12,7 @@ from time import sleep
 from typing import Any
 from uuid import UUID
 
-from locust import HttpUser, between, events, task
+from locust import HttpUser, between, events, tag, task
 
 from model import Auth, AuthLogin, DataProductPut, Plan, PlanPost, RunMode, State
 from setup import generate_plan_payload
@@ -68,6 +68,7 @@ class FletcherUser(HttpUser):
         self.plan: Plan = Plan.model_validate(response)
 
     @task
+    @tag("ui")
     def check_ui(self) -> None:
         """Test the Fletcher web UI by accessing various pages."""
         # Pull up the home page
@@ -85,6 +86,7 @@ class FletcherUser(HttpUser):
         self.client.get(f"/plan/{self.plan.dataset.id}")
 
     @task(4)
+    @tag("api")
     def trigger_next_step(self) -> None:
         """Simulate data product state transitions in the Fletcher pipeline.
 
