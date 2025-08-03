@@ -96,12 +96,12 @@ hash key cost="12":
 
 # Lint all Markdown files
 markdownlint:
-  markdownlint-cli2 --config .markdownlint-cli2.jsonc
+  npx markdownlint-cli2 --config .markdownlint-cli2.jsonc
 
 
 # Fix lints for Markdown files
 markdownlint-fix:
-  markdownlint-cli2 --fix --config .markdownlint-cli2.jsonc
+  npx markdownlint-cli2 --fix --config .markdownlint-cli2.jsonc
 
 
 ################
