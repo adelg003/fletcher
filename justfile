@@ -192,7 +192,6 @@ py-audit:
 ## Stress Test ##
 #################
 
-
 # Build and Run a Release Binary with settings for stress testing
 run-stress:
   MAX_CONNECTIONS=30 cargo run --release
