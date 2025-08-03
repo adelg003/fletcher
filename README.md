@@ -579,27 +579,32 @@ just hash "password"         # Generate bcrypt hash
 ```text
 fletcher/
 ├── src/
-│   ├── api.rs              # REST API endpoints
-│   ├── core.rs             # Business logic
-│   ├── dag.rs              # DAG operations and validation
-│   ├── db.rs               # Database operations
-│   ├── error.rs            # Error handling
-│   ├── model.rs            # Data models
-│   ├── main.rs             # Application entry point
-│   └── ui/                 # Web UI components
-├── locust/                 # Load testing framework
+│   ├── api.rs                     # REST API endpoints
+│   ├── core.rs                    # Business logic
+│   ├── dag.rs                     # DAG operations and validation
+│   ├── db.rs                      # Database operations
+│   ├── error.rs                   # Error handling
+│   ├── model.rs                   # Data models
+│   ├── main.rs                    # Application entry point
+│   └── ui/                        # Web UI components
+├── locust/                        # Load testing framework
 │   ├── src/
-│   │   ├── locustfile.py   # Main load testing scenarios
-│   │   ├── model.py        # Pydantic models for API data
-│   │   └── setup.py        # Test data generation utilities
-│   ├── pyproject.toml      # Python project configuration
-│   └── README.md           # Load testing documentation
-├── migrations/             # Database migrations
-├── key_hasher/             # Password hashing utility
-├── scripts/                # Utility scripts
-├── assets/                 # Static web assets
-├── package.json            # Node.js dependencies (CSS build)
-└── justfile                # Development commands
+│   │   ├── locustfile.py          # Main load testing scenarios
+│   │   ├── model.py               # Pydantic models for API data
+│   │   └── setup.py               # Test data generation utilities
+│   ├── results/                   # Load testing results and analysis
+│   │   ├── notes.md               # Comprehensive performance analysis
+│   │   ├── stress_30_connections/ # Optimized configuration test results
+│   │   ├── stress_10_connections/ # Default configuration test results
+│   │   └── busiest_day/           # Production load simulation results
+│   ├── pyproject.toml             # Python project configuration
+│   └── README.md                  # Load testing documentation
+├── migrations/                    # Database migrations
+├── key_hasher/                    # Password hashing utility
+├── scripts/                       # Utility scripts
+├── assets/                        # Static web assets
+├── package.json                   # Node.js dependencies (CSS build)
+└── justfile                       # Development commands
 ```
 
 ### Testing
