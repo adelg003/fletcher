@@ -94,3 +94,35 @@
   state updates)
 - **Measurement**: Response times, error rates, resource utilization
 - **Environment**: Local PostgreSQL instance for maximum performance baseline
+
+## Interactive Reports and Data
+
+### HTML Reports
+
+Comprehensive interactive reports with detailed charts and statistics:
+
+- **[Stress Test (30 Connections)](stress_30_connections/stress_test_30_connections.html)**
+  - Optimized configuration with 1,300 user capacity
+- **[Stress Test (10 Connections)](stress_10_connections/stress_test_10_connections.html)**
+  - Default configuration with 950 user capacity
+- **[Busiest Day Test](busiest_day/busiest_day_test.html)**
+  - Production load simulation (300 users, 8m3s runtime)
+
+### Performance Charts
+
+Request rate visualizations over time:
+
+- **[30 Connections RPS Chart](stress_30_connections/stress_test_30_connections_rps_chart.png)**
+- **[10 Connections RPS Chart](stress_10_connections/stress_test_10_connections_rps_chart.png)**
+- **[Busiest Day RPS Chart](busiest_day/busiest_day_test_rps_chart.png)**
+
+### Raw Data
+
+CSV files with detailed request logs for analysis:
+
+- **[30 Connections Data](stress_30_connections/stress_test_30_connections_requests.csv)**
+  (1.9MB)
+- **[10 Connections Data](stress_10_connections/stress_test_10_connections_requests.csv)**
+  (2.0MB)
+- **[Busiest Day Data](busiest_day/busiest_day_test_requests.csv)**
+  (173KB)

@@ -822,10 +822,18 @@ PostgreSQL and Gen4 NVME SSD**:
 comparisons, and architectural considerations, see
 [`locust/results/notes.md`](locust/results/notes.md).
 
-**HTML Reports**: Full Locust HTML reports with detailed charts, statistics,
-and visualizations are organized by test type in the
-[`locust/results/`](locust/results/) folder (e.g., `stress_30_connections/`,
-`busiest_day/`).
+**Load Test Reports**: Interactive HTML reports with detailed charts, statistics,
+and visualizations:
+
+- [30 Connections Test Report](locust/results/stress_30_connections/stress_test_30_connections.html)
+  (recommended configuration)
+- [10 Connections Test Report](locust/results/stress_10_connections/stress_test_10_connections.html)
+  (default configuration)
+- [Busiest Day Test Report](locust/results/busiest_day/busiest_day_test.html)
+  (production load simulation)
+
+Additional files (CSV data, charts) are organized in the
+[`locust/results/`](locust/results/) folder by test type.
 
 *Note: Performance may vary significantly based on hardware specifications,
 network latency (if using remote PostgreSQL), and system load.*
@@ -869,10 +877,9 @@ just py-ruff-check-watch
 just py-right-check-watch
 ```
 
-**Test Results**: Locust automatically generates HTML reports with detailed
-performance charts and statistics. These reports are organized by test type
-in the [`locust/results/`](locust/results/) folder (e.g.,
-`stress_30_connections/`, `busiest_day/`) for analysis and documentation.
+**Test Results**: Locust automatically generates comprehensive HTML reports.
+See the Performance Benchmarks section above for direct links to interactive
+reports.
 
 ### Load Test Architecture
 
