@@ -112,9 +112,14 @@ Comprehensive interactive reports with detailed charts and statistics:
 
 Request rate visualizations over time:
 
-- **[30 Connections RPS Chart](stress_30_connections/stress_test_30_connections_rps_chart.png)**
-- **[10 Connections RPS Chart](stress_10_connections/stress_test_10_connections_rps_chart.png)**
-- **[Busiest Day RPS Chart](busiest_day/busiest_day_test_rps_chart.png)**
+![30 Connections Stress Test](stress_30_connections/stress_test_30_connections_rps_chart.png)
+*30 Connections: Optimal configuration achieving 180 RPS with 1,300 user capacity*
+
+![10 Connections Stress Test](stress_10_connections/stress_test_10_connections_rps_chart.png)
+*10 Connections: Default configuration achieving 140 RPS with 950 user capacity*
+
+![Busiest Day Simulation](busiest_day/busiest_day_test_rps_chart.png)
+*Busiest Day: 300 users representing peak daily load (8m3s runtime)*
 
 ### Raw Data
 

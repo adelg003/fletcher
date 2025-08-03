@@ -792,8 +792,18 @@ primary limiting factor.
 comparisons, and architectural considerations, see
 [`locust/results/notes.md`](locust/results/notes.md).
 
-**Load Test Reports**: Interactive HTML reports with detailed charts, statistics,
-and visualizations:
+**Performance Charts**:
+
+![30 Connections Test (Recommended)](locust/results/stress_30_connections/stress_test_30_connections_rps_chart.png)
+*30 Connections Test - Optimal configuration achieving 180 RPS*
+
+![10 Connections Test (Default)](locust/results/stress_10_connections/stress_test_10_connections_rps_chart.png)
+*10 Connections Test - Default configuration achieving 140 RPS*
+
+![Busiest Day Simulation](locust/results/busiest_day/busiest_day_test_rps_chart.png)
+*Busiest Day Simulation - 300 users representing peak daily load*
+
+**Load Test Reports**: Interactive HTML reports with detailed statistics:
 
 - [30 Connections Test Report](locust/results/stress_30_connections/stress_test_30_connections.html)
   (recommended configuration)
