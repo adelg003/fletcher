@@ -540,6 +540,7 @@ just sqlx-check              # Verify SQLx cache
 # Load Testing & Stress Testing
 just run-stress              # Run Fletcher with stress test settings (30 connections)
 just locust                  # Run basic load test
+just locust-demo             # Run continuous demo (1 user, API only)
 just locust-stress           # Run stress test (2000 users, continuous loop)
 just locust-busiest-day      # Run busiest day test (300 users, single run)
 
@@ -692,19 +693,25 @@ realistic user workflows and evaluate system performance under various loads.
    just locust
    ```
 
-2. **Run Fletcher in stress test mode**
+2. **Run continuous demo (1 user, API only)**
+
+   ```bash
+   just locust-demo
+   ```
+
+3. **Run Fletcher in stress test mode**
 
    ```bash
    just run-stress
    ```
 
-3. **Run stress test (2000 users, continuous loop)**
+4. **Run stress test (2500 users, continuous loop)**
 
    ```bash
    just locust-stress
    ```
 
-4. **Run busiest day simulation (300 users, single run)**
+5. **Run busiest day simulation (300 users, single run)**
 
    ```bash
    just locust-busiest-day
@@ -718,7 +725,10 @@ The justfile provides pre-configured load test scenarios:
 # Basic interactive load test
 just locust
 
-# Stress test: 2000 users, spawn rate 2/sec, continuous loop, autostart
+# Continuous demo: 1 user, 1 user/sec spawn rate, API only, autostart
+just locust-demo
+
+# Stress test: 2500 users, spawn rate 2/sec, continuous loop, autostart
 just locust-stress
 
 # Busiest day test: 300 users, spawn rate 2/sec, single run, autostart  
@@ -731,7 +741,8 @@ just run-stress
 **Pre-configured Test Parameters:**
 
 - **Basic**: Interactive mode, manual user/spawn rate control
-- **Stress Test**: 2000 users, 2 users/sec spawn rate, continuous loop mode, autostart
+- **Demo**: 1 user, 1 user/sec spawn rate, continuous loop mode, API only, autostart
+- **Stress Test**: 2500 users, 2 users/sec spawn rate, continuous loop mode, autostart
 - **Busiest Day**: 300 users, 2 users/sec spawn rate, single run mode, autostart
 
 **Custom Configuration:**
@@ -771,24 +782,50 @@ The load tests simulate several realistic Fletcher workflows:
 
 ### Performance Benchmarks
 
-Based on testing with the included scenarios on a **32 vCPU machine with local
+Based on comprehensive stress testing on a **32 vCPU machine with local
 PostgreSQL and Gen4 NVME SSD**:
 
-- **Optimal Performance**: ~1,000 concurrent users (~150 requests/second)
-- **Stress Test Configuration**: 2,000 users with 30 database connections
+#### Key Performance Metrics
+
+- **Optimal Performance**: 1,300 concurrent users (180 requests/second)
+- **Configuration**: `MAX_CONNECTIONS=30` (optimized from default 10)
 - **Busiest Day Simulation**: 300 users representing peak daily load
-  (completes in 7m32s)
+  (completes in 8m3s)
 - **Resource Usage**:
-  - Fletcher: <100MB RAM
-  - PostgreSQL: 3-5GB RAM during stress testing
-- **Authentication Limits**: Auth bottlenecks appear around 2,250+ concurrent users
+  - Fletcher: 28-160MB RAM (depending on load)
+  - PostgreSQL: 1.2-5GB RAM during stress testing
+
+#### Stress Test Findings
+
+- **Database-Bound Performance**: PostgreSQL CPU is the primary limiting factor
+- **Connection Pool Impact**: Increasing connections from 10 to 30 provides:
+  - +37% improvement in concurrent user capacity (950 → 1,300 users)
+  - +29% improvement in requests/second (140 → 180 RPS)
+  - -42% reduction in Fletcher memory usage (275MB → 160MB)
+- **Scalability Ceiling**: Performance plateaus around 2,500+ users due to
+  database constraints
+
+#### Production Recommendations
+
+- **Use `MAX_CONNECTIONS=30`** for optimal performance
+- **Plan for ~1,000-1,300 concurrent users** with current architecture
+- **Monitor PostgreSQL CPU and connection utilization** as key metrics
 
 **Test Environment:**
 
-- **CPU**: 32 vCPU cores
-- **Storage**: Gen4 NVME SSD (2TB)
+- **CPU**: AMD Ryzen 9 7950X (32 cores) @ 5.88 GHz
+- **Storage**: 2TB NVMe Gen 4 SSD (Sabrent)
 - **Database**: PostgreSQL running locally (same machine)
 - **RAM**: 64GB total available
+
+**Detailed Results**: For comprehensive stress test analysis, performance
+comparisons, and architectural considerations, see
+[`locust/results/notes.md`](locust/results/notes.md).
+
+**HTML Reports**: Full Locust HTML reports with detailed charts, statistics,
+and visualizations are organized by test type in the
+[`locust/results/`](locust/results/) folder (e.g., `stress_30_connections/`,
+`busiest_day/`).
 
 *Note: Performance may vary significantly based on hardware specifications,
 network latency (if using remote PostgreSQL), and system load.*
@@ -831,6 +868,11 @@ just py-audit
 just py-ruff-check-watch
 just py-right-check-watch
 ```
+
+**Test Results**: Locust automatically generates HTML reports with detailed
+performance charts and statistics. These reports are organized by test type
+in the [`locust/results/`](locust/results/) folder (e.g.,
+`stress_30_connections/`, `busiest_day/`) for analysis and documentation.
 
 ### Load Test Architecture
 
