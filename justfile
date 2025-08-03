@@ -203,6 +203,17 @@ locust:
     --locustfile src/locustfile.py \
     --host "http://0.0.0.0:3000"
 
+# Run Locust Server for stress testing
+locust-demo:
+  uv --directory locust/ run locust \
+    --locustfile src/locustfile.py \
+    --host "http://0.0.0.0:3000" \
+    --users 1 \
+    --spawn-rate 1 \
+    --mode loop \
+    --tags api \
+    --autostart
+
 # Run Locust Server for busiest day testing
 locust-busiest-day:
   uv --directory locust/ run locust \
@@ -218,7 +229,7 @@ locust-stress:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
     --host "http://0.0.0.0:3000" \
-    --users 2000 \
+    --users 2500 \
     --spawn-rate 2 \
     --mode loop \
     --autostart
