@@ -719,45 +719,14 @@ realistic user workflows and evaluate system performance under various loads.
 
 ### Load Test Configuration
 
-The justfile provides pre-configured load test scenarios:
+Pre-configured test scenarios:
 
 ```bash
-# Basic interactive load test
-just locust
-
-# Continuous demo: 1 user, 1 user/sec spawn rate, API only, autostart
-just locust-demo
-
-# Stress test: 2500 users, spawn rate 2/sec, continuous loop, autostart
-just locust-stress
-
-# Busiest day test: 300 users, spawn rate 2/sec, single run, autostart  
-just locust-busiest-day
-
-# Run Fletcher server optimized for stress testing (30 DB connections)
-just run-stress
-```
-
-**Pre-configured Test Parameters:**
-
-- **Basic**: Interactive mode, manual user/spawn rate control
-- **Demo**: 1 user, 1 user/sec spawn rate, continuous loop mode, API only, autostart
-- **Stress Test**: 2500 users, 2 users/sec spawn rate, continuous loop mode, autostart
-- **Busiest Day**: 300 users, 2 users/sec spawn rate, single run mode, autostart
-
-**Custom Configuration:**
-
-For custom test parameters, run locust directly:
-
-```bash
-uv --directory locust/ run locust \
-  --locustfile src/locustfile.py \
-  --host http://0.0.0.0:3000 \
-  --users 100 \
-  --spawn-rate 1 \
-  --service local \
-  --key abc123 \
-  --mode once
+just locust                  # Interactive load test
+just locust-demo             # Continuous demo (1 user)
+just locust-stress           # Stress test (2500 users)
+just locust-busiest-day      # Production simulation (300 users)
+just run-stress              # Run Fletcher with optimized settings
 ```
 
 **Available Parameters:**
@@ -782,8 +751,9 @@ The load tests simulate several realistic Fletcher workflows:
 
 ### Performance Benchmarks
 
-Based on comprehensive stress testing on a **32 vCPU machine with local
-PostgreSQL and Gen4 NVME SSD**:
+**Key Results**: Fletcher achieves optimal performance with `MAX_CONNECTIONS=30`,
+supporting 1,300 concurrent users (180 requests/second). PostgreSQL CPU is the
+primary limiting factor.
 
 #### Key Performance Metrics
 
