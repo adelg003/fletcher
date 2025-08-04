@@ -177,6 +177,9 @@ visualizing your data orchestration pipelines.
 
 The main landing page provides plan discovery functionality:
 
+![Fletcher Search Interface](screenshot/search_page.png)
+*Fletcher's main search interface with live search and paginated results*
+
 - **Live Search**: Type-ahead search with 500ms debounce for finding plans
 - **Real-time Results**: HTMX-powered dynamic updates without page refreshes
 - **Paginated Results**: Efficient loading of large result sets (50 items per page)
@@ -185,6 +188,9 @@ The main landing page provides plan discovery functionality:
 #### Plan Page (`/plan/{dataset_id}`)
 
 Comprehensive plan visualization and management:
+
+![Fletcher Plan Visualization](screenshot/plan_page.png)
+*Plan details page showing DAG visualization, data products table, and JSON payload*
 
 - **Dataset Overview**:
   - Dataset ID and current status (Active/Paused)
@@ -350,7 +356,7 @@ Services are configured via the `REMOTE_APIS` environment variable:
     "roles": ["publish", "pause", "update", "disable"]
   },
   {
-    "service": "readonly", 
+    "service": "readonly",
     "hash": "$2b$10$46TiUvUaKvp2D/BuoXe8Fu9ktffCBXioF8M0DeeOWvz8X2J0RtpvK",
     "roles": []
   }
@@ -387,6 +393,9 @@ Services are configured via the `REMOTE_APIS` environment variable:
   **[Requires: `disable` role]**
 
 ### Documentation
+
+![Fletcher API Documentation](screenshot/swagger.png)
+*Interactive Swagger API documentation with authentication and endpoint testing*
 
 - `/swagger` - Interactive API documentation
 - `/spec` - OpenAPI specification

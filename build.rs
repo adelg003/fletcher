@@ -29,7 +29,7 @@ fn main() {
     fs::create_dir_all("assets/images/").expect("Failed to create assets/images directory");
     copy(
         "images/",
-        "assets/images/",
+        "assets/",
         &CopyOptions {
             overwrite: true,
             ..CopyOptions::default()
