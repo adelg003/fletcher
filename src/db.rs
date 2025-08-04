@@ -407,10 +407,11 @@ pub async fn search_plans_select(
         SearchRow,
         "SELECT
             ds.dataset_id,
+            ds.extra,
             GREATEST(
                 ds.modified_date,
-                COALESCE(MAX(dp.modified_date), ds.modified_date),
-                COALESCE(MAX(dep.modified_date), ds.modified_date)
+                MAX(dp.modified_date),
+                MAX(dep.modified_date)
             ) AS \"modified_date\"
         FROM
             dataset ds
@@ -429,28 +430,11 @@ pub async fn search_plans_select(
         WHERE
             ds.dataset_id::text ILIKE $1
             OR ds.extra::text ILIKE $1
-            OR ds.modified_by ILIKE $1
-            OR ds.modified_date::text ILIKE $1
-            OR dp.data_product_id::text ILIKE $1
-            OR dp.compute::text ILIKE $1
-            OR dp.name ILIKE $1
-            OR dp.version ILIKE $1
-            OR dp.passthrough::text ILIKE $1
-            OR dp.state::text ILIKE $1
-            OR dp.run_id::text ILIKE $1
-            OR dp.link ILIKE $1
-            OR dp.passback::text ILIKE $1
-            OR dp.extra::text ILIKE $1
-            OR dp.modified_by ILIKE $1
-            OR dp.modified_date::text ILIKE $1
-            OR dep.extra::text ILIKE $1
-            OR dep.modified_by ILIKE $1
-            OR dep.modified_date::text ILIKE $1
         GROUP BY
             ds.dataset_id
         ORDER BY
             GREATEST(
-                MAX(ds.modified_date),
+                ds.modified_date,
                 MAX(dp.modified_date),
                 MAX(dep.modified_date)
             ) DESC
@@ -1565,8 +1549,9 @@ pub mod tests {
         .await
         .unwrap();
 
-        // Test search by product name
-        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+        // Test search by dataset_id
+        let search_term = &dataset.id.to_string()[0..8]; // Use first 8 chars of UUID
+        let results = search_plans_select(&mut tx, search_term, 10, 0)
             .await
             .unwrap();
 
@@ -1759,8 +1744,11 @@ pub mod tests {
     async fn test_search_plans_select_case_insensitive(pool: PgPool) {
         let mut tx = pool.begin().await.unwrap();
 
-        // Create test data
-        let dataset_param = DatasetParam::default();
+        // Create test data with uppercase text in extra field
+        let dataset_param = DatasetParam {
+            extra: Some(json!({"description": "CASE-SENSITIVE-TEST-DATA"})),
+            ..Default::default()
+        };
         let username = "TestUser";
         let modified_date = Utc::now();
 
@@ -1768,74 +1756,25 @@ pub mod tests {
             .await
             .unwrap();
 
-        // Create data products with uppercase names
-        let dp1_param = DataProductParam {
-            name: "TEST-PRODUCT".to_string(),
-            ..Default::default()
-        };
-        let dp2_param = DataProductParam {
-            name: "ANOTHER-PRODUCT".to_string(),
-            compute: Compute::Dbxaas,
-            ..Default::default()
-        };
-
-        let dp1 = data_product_upsert(&mut tx, dataset.id, &dp1_param, username, modified_date)
-            .await
-            .unwrap();
-        let dp2 = data_product_upsert(&mut tx, dataset.id, &dp2_param, username, modified_date)
-            .await
-            .unwrap();
-
-        let dependency_param = DependencyParam {
-            parent_id: dp1.id,
-            child_id: dp2.id,
-            ..Default::default()
-        };
-
-        dependency_upsert(
-            &mut tx,
-            dataset.id,
-            &dependency_param,
-            username,
-            modified_date,
-        )
-        .await
-        .unwrap();
-
-        // Test case-insensitive search (lowercase search should match uppercase data)
-        let results = search_plans_select(&mut tx, "test-product", 10, 0)
+        // Test case-insensitive search (search for lowercase in extra field)
+        let results = search_plans_select(&mut tx, "case-sensitive-test", 10, 0)
             .await
             .unwrap();
 
         assert_eq!(
             results.len(),
             1,
-            "Case-insensitive search should return 1 result by product name"
+            "Case-insensitive search should return 1 result by extra field"
         );
         assert_eq!(
             results[0].dataset_id, dataset.id,
-            "Case-insensitive search by product name should return the dataset"
-        );
-
-        // Test search by username (case-insensitive)
-        let results = search_plans_select(&mut tx, "testuser", 10, 0)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            results.len(),
-            1,
-            "Case-insensitive search should return 1 result by username"
-        );
-        assert_eq!(
-            results[0].dataset_id, dataset.id,
-            "Case-insensitive search by username should return the dataset"
+            "Case-insensitive search should return the correct dataset"
         );
     }
 
-    /// Test search_plans_select across different fields
+    /// Test search_plans_select by extra field content
     #[sqlx::test]
-    async fn test_search_plans_select_different_fields(pool: PgPool) {
+    async fn test_search_plans_select_by_extra_field(pool: PgPool) {
         let mut tx = pool.begin().await.unwrap();
 
         // Create test data
@@ -1849,40 +1788,6 @@ pub mod tests {
         let dataset = dataset_upsert(&mut tx, &dataset_param, username, modified_date)
             .await
             .unwrap();
-
-        // Create data products with specific fields
-        let dp1_param = DataProductParam {
-            name: "search-product".to_string(),
-            version: "unique-version-123".to_string(),
-            ..Default::default()
-        };
-        let dp2_param = DataProductParam {
-            compute: Compute::Dbxaas,
-            ..Default::default()
-        };
-
-        let dp1 = data_product_upsert(&mut tx, dataset.id, &dp1_param, username, modified_date)
-            .await
-            .unwrap();
-        let dp2 = data_product_upsert(&mut tx, dataset.id, &dp2_param, username, modified_date)
-            .await
-            .unwrap();
-
-        let dependency_param = DependencyParam {
-            parent_id: dp1.id,
-            child_id: dp2.id,
-            ..Default::default()
-        };
-
-        dependency_upsert(
-            &mut tx,
-            dataset.id,
-            &dependency_param,
-            username,
-            modified_date,
-        )
-        .await
-        .unwrap();
 
         // Test search by dataset extra field
         let results = search_plans_select(&mut tx, "unique-dataset-description", 10, 0)
@@ -1898,44 +1803,19 @@ pub mod tests {
             "Search by dataset extra field should return the dataset"
         );
 
-        // Test search by data product version
-        let results = search_plans_select(&mut tx, "unique-version-123", 10, 0)
+        // Test search by dataset_id (since data product version is no longer searchable)
+        let search_term = &dataset.id.to_string()[0..8]; // Use first 8 chars of UUID
+        let results = search_plans_select(&mut tx, search_term, 10, 0)
             .await
             .unwrap();
         assert_eq!(
             results.len(),
             1,
-            "Search by data product version should return 1 result"
+            "Search by dataset_id should return 1 result"
         );
         assert_eq!(
             results[0].dataset_id, dataset.id,
-            "Search by data product version should return the dataset"
-        );
-
-        // Test search by username
-        let results = search_plans_select(&mut tx, "search_user", 10, 0)
-            .await
-            .unwrap();
-        assert_eq!(
-            results.len(),
-            1,
-            "Search by username should return 1 result"
-        );
-        assert_eq!(
-            results[0].dataset_id, dataset.id,
-            "Search by username should return the dataset"
-        );
-
-        // Test search by compute type
-        let results = search_plans_select(&mut tx, "dbxaas", 10, 0).await.unwrap();
-        assert_eq!(
-            results.len(),
-            1,
-            "Search by compute type should return 1 result"
-        );
-        assert_eq!(
-            results[0].dataset_id, dataset.id,
-            "Search by compute type should return the dataset"
+            "Search by dataset_id should return the dataset"
         );
     }
 }

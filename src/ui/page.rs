@@ -52,6 +52,7 @@ pub async fn index_page(Data(pool): Data<&PgPool>) -> Result<Markup> {
                     tr {
                         th { "Dataset ID" }
                         th { "Modified Date" }
+                        th { "Extra" }
                     }
                 }
                 tbody id="search_results" {
@@ -101,7 +102,7 @@ fn render_dot(dot: &str) -> Markup {
 
     html! {
         div id="graph" {}
-        script src="/assets/viz/viz-standalone.js" {}
+        script src="/assets/viz/viz-global.js" {}
         script { (viz_js_script) }
     }
 }
@@ -573,8 +574,8 @@ mod tests {
         );
         assert_eq!(
             script_tag.unwrap().attr("src"),
-            Some("/assets/viz/viz-standalone.js"),
-            "Script src should point to viz-standalone.js"
+            Some("/assets/viz/viz-global.js"),
+            "Script src should point to viz-global.js"
         );
 
         // Should contain inline script with DOT string
@@ -723,7 +724,7 @@ mod tests {
         let lib_script = &scripts[0];
         assert_eq!(
             lib_script.attr("src"),
-            Some("/assets/viz/viz-standalone.js"),
+            Some("/assets/viz/viz-global.js"),
             "First script should load viz-js library"
         );
         assert!(
@@ -815,7 +816,7 @@ mod tests {
             "Should contain graph id"
         );
         assert!(
-            html_string.contains("/assets/viz/viz-standalone.js"),
+            html_string.contains("/assets/viz/viz-global.js"),
             "Should reference viz library"
         );
 
@@ -1057,9 +1058,10 @@ mod tests {
         // Should contain table headers
         let th_selector = Selector::parse("th").unwrap();
         let headers: Vec<_> = document.select(&th_selector).collect();
-        assert_eq!(headers.len(), 2, "Should have 2 table headers");
+        assert_eq!(headers.len(), 3, "Should have 3 table headers");
         assert_eq!(headers[0].inner_html(), "Dataset ID");
         assert_eq!(headers[1].inner_html(), "Modified Date");
+        assert_eq!(headers[2].inner_html(), "Extra");
 
         // Should contain search results tbody
         let tbody_selector = Selector::parse("tbody#search_results").unwrap();
@@ -1482,7 +1484,7 @@ mod tests {
         let viz_script = scripts.iter().find(|script| {
             script
                 .attr("src")
-                .is_some_and(|src| src.contains("viz-standalone.js"))
+                .is_some_and(|src| src.contains("viz-global.js"))
         });
         assert!(viz_script.is_some(), "Should have viz-js library script");
 
@@ -1586,7 +1588,7 @@ mod tests {
             "Should contain visualization JavaScript"
         );
         assert!(
-            html_content.contains("viz-standalone.js"),
+            html_content.contains("viz-global.js"),
             "Should reference viz-js library"
         );
         assert!(

@@ -8,6 +8,7 @@ use petgraph::graph::GraphError;
 use poem::error::{
     BadRequest, Forbidden, InternalServerError, NotFound, Unauthorized, UnprocessableEntity,
 };
+use std::num::ParseIntError;
 
 /// Crate-wide result alias.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -67,6 +68,10 @@ pub enum Error {
     #[error("Dataset '{0}' pause state is already set to: '{1}'")]
     Pause(DataProductId, bool),
 
+    /// Error from ParseInt
+    #[error(transparent)]
+    ParseInt(#[from] ParseIntError),
+
     /// Missing the needed role access
     #[error("Service account '{0}' is missing the following role: '{1}'")]
     Role(String, Role),
@@ -101,6 +106,7 @@ impl Error {
             Error::Jwt(err) => Forbidden(err),
             Error::Missing(_) => NotFound(self),
             Error::Pause(_, _) => BadRequest(self),
+            Error::ParseInt(err) => InternalServerError(err),
             Error::Role(_, _) => Forbidden(self),
             Error::SerdeJson(err) => InternalServerError(err),
             Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
@@ -350,6 +356,19 @@ mod tests {
             poem_error.status(),
             StatusCode::INTERNAL_SERVER_ERROR,
             "SerdeJson error should map to InternalServerError"
+        );
+    }
+
+    /// Test into_poem_error maps ParseInt error to InternalServerError
+    #[test]
+    fn test_into_poem_error_parse_int() {
+        let parse_error = "invalid".parse::<u32>().unwrap_err();
+        let error = Error::ParseInt(parse_error);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "ParseInt error should map to InternalServerError"
         );
     }
 }

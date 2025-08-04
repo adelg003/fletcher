@@ -20,14 +20,16 @@ use poem::{
 };
 use poem_openapi::OpenApiService;
 use rust_embed::Embed;
-use sqlx::{PgPool, migrate};
+use sqlx::{PgPool, migrate, postgres::PgPoolOptions};
 
 /// Struct we will put all our configs to run Fletcher into
 #[derive(Clone)]
 pub struct Config {
+    base_url: String,
     database_url: String,
     decoding_key: DecodingKey,
     encoding_key: EncodingKey,
+    max_connections: u32,
     remote_auths: Vec<RemoteAuth>,
 }
 
@@ -49,13 +51,25 @@ async fn main() -> color_eyre::Result<()> {
 
     // Setup our OpenAPI Service
     let api_service =
-        OpenApiService::new(Api, "Fletcher", "0.1.0").server("http://0.0.0.0:3000/api");
+        OpenApiService::new(Api, "Fletcher", "0.1.0").server(format!("{}/api", config.base_url));
     let spec = api_service.spec_endpoint();
     let swagger = api_service.swagger_ui();
 
     // Connect to PostgreSQL
-    let pool = PgPool::connect(&config.database_url).await?;
+    let pool: PgPool = PgPoolOptions::new()
+        .max_connections(config.max_connections)
+        .connect(&config.database_url)
+        .await?;
+
+    // Update DB is it is not on the latest schema
     migrate!().run(&pool).await?;
+
+    // Extract host:port from base_url if it contains protocol
+    let bind_addr: String = config
+        .base_url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .to_string();
 
     // Route inbound traffic
     let app = Route::new()
@@ -74,22 +88,26 @@ async fn main() -> color_eyre::Result<()> {
         .with(Tracing);
 
     // Lets run our service
-    Server::new(TcpListener::bind("0.0.0.0:3000"))
-        .run(app)
-        .await?;
+    Server::new(TcpListener::bind(bind_addr)).run(app).await?;
 
     Ok(())
 }
 
 /// Load in Fletcher's configs
 pub fn load_config() -> Result<Config> {
+    // If we don't get MAX_CONNECTIONS, just default to 10
+    let max_connections: u32 = dotenvy::var("MAX_CONNECTIONS")
+        .unwrap_or("10".to_string())
+        .parse()?;
     let secret_key: String = dotenvy::var("SECRET_KEY")?;
     let secret_key_bytes: &[u8] = secret_key.as_bytes();
 
     Ok(Config {
+        base_url: dotenvy::var("BASE_URL")?,
         database_url: dotenvy::var("DATABASE_URL")?,
-        encoding_key: EncodingKey::from_secret(secret_key_bytes),
         decoding_key: DecodingKey::from_secret(secret_key_bytes),
+        encoding_key: EncodingKey::from_secret(secret_key_bytes),
+        max_connections,
         remote_auths: serde_json::from_str(&dotenvy::var("REMOTE_APIS")?)?,
     })
 }
@@ -112,6 +130,7 @@ mod tests {
             config.database_url,
             "postgres://fletcher_user:password@localhost/fletcher_db"
         );
+        assert_eq!(config.max_connections, 10);
         assert_eq!(config.remote_auths.len(), 2);
     }
 
@@ -188,11 +207,11 @@ mod tests {
             "htmx/htmx.min.js should be present in embedded assets",
         );
 
-        // Check that viz-standalone.js exists in the embedded assets
-        let viz_file = Assets::get("viz/viz-standalone.js");
+        // Check that viz-global.js exists in the embedded assets
+        let viz_file = Assets::get("viz/viz-global.js");
         assert!(
             viz_file.is_some(),
-            "viz/viz-standalone.js should be present in embedded assets",
+            "viz/viz-global.js should be present in embedded assets",
         );
 
         // Check that prism.js exists in the embedded assets

@@ -33,6 +33,7 @@ pub async fn plan_search_component(
                 onclick={ "window.location='/plan/" (row.dataset_id) "';" } {
                 td { (row.dataset_id) }
                 td { (modified_date) }
+                td { pre { (row.extra) } }
             }
         }
         // Pagination Placeholder
@@ -71,8 +72,10 @@ pub async fn plan_search_get(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{DatasetId, DatasetParam, PlanParam};
-    use crate::ui::user_service;
+    use crate::{
+        model::{DatasetId, DatasetParam, PlanParam},
+        ui::user_service,
+    };
     use chrono::Utc;
     use maud::PreEscaped;
     use poem::{
@@ -81,6 +84,7 @@ mod tests {
     };
     use pretty_assertions::assert_eq;
     use scraper::{Html, Selector};
+    use serde_json::json;
     use sqlx::PgPool;
     use uuid::Uuid;
 
@@ -91,13 +95,13 @@ mod tests {
     ) -> Vec<DatasetId> {
         let mut dataset_ids = Vec::new();
 
-        for _i in 0..count {
+        for i in 0..count {
             let dataset_id = Uuid::new_v4();
 
             let plan_param = PlanParam {
                 dataset: DatasetParam {
                     id: dataset_id,
-                    extra: None,
+                    extra: Some(json!({"test_category": "ui-component-test", "index": i})),
                 },
                 data_products: vec![],
                 dependencies: vec![],
@@ -120,7 +124,7 @@ mod tests {
         setup_test_datasets(&mut tx, 25).await;
 
         // Call the component function within the same transaction
-        let result = plan_search_component(&mut tx, "", 0).await;
+        let result = plan_search_component(&mut tx, "ui-component-test", 0).await;
         assert!(
             result.is_ok(),
             "Plan search component should execute successfully"
@@ -160,7 +164,7 @@ mod tests {
         setup_test_datasets(&mut tx, 50).await;
 
         // Call the component function within the same transaction
-        let result = plan_search_component(&mut tx, "", 0).await;
+        let result = plan_search_component(&mut tx, "ui-component-test", 0).await;
         assert!(
             result.is_ok(),
             "Plan search component should execute successfully with 50 plans"
@@ -200,7 +204,7 @@ mod tests {
         setup_test_datasets(&mut tx, 75).await;
 
         // Call the component function for page 0 within the same transaction
-        let search_term = "test";
+        let search_term = "ui-component-test"; // Search for our test datasets
         let result = plan_search_component(&mut tx, search_term, 0).await;
         assert!(result.is_ok());
 
@@ -265,7 +269,7 @@ mod tests {
         // Setup test data - create 5 datasets for easy testing within the same transaction
         setup_test_datasets(&mut tx, 5).await;
 
-        let result = plan_search_component(&mut tx, "", 0).await;
+        let result = plan_search_component(&mut tx, "ui-component-test", 0).await;
         assert!(
             result.is_ok(),
             "Plan search component should execute successfully for table row structure test"
@@ -303,13 +307,13 @@ mod tests {
             "Row onclick should contain window.location navigation"
         );
 
-        // Should have exactly 2 td elements (dataset_id and modified_date)
+        // Should have exactly 3 td elements (dataset_id, modified_date, and extra)
         let td_selector = Selector::parse("td").unwrap();
         let td_elements: Vec<_> = first_row.select(&td_selector).collect();
         assert_eq!(
             td_elements.len(),
-            2,
-            "Each row should have exactly 2 td elements"
+            3,
+            "Each row should have exactly 3 td elements"
         );
     }
 
@@ -328,7 +332,7 @@ mod tests {
 
         // Test GET request to plan_search endpoint
         let response: TestResponse = cli
-            .get("/component/plan_search?search_by=&page=0")
+            .get("/component/plan_search?search_by=ui-component-test&page=0")
             .send()
             .await;
 

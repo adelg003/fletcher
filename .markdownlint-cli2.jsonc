@@ -1,0 +1,17 @@
+{
+  // markdownlint-cli2 configuration
+  // See: https://github.com/DavidAnson/markdownlint-cli2#configuration
+
+  // Glob patterns for files to lint
+  "globs": [
+    "**/*.md"
+  ],
+
+  // Glob patterns for files/directories to ignore
+  "ignores": [
+    "node_modules/**",
+    ".venv/**",
+    "**/node_modules/**",
+    "**/.venv/**"
+  ]
+}
