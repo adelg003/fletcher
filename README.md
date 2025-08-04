@@ -5,6 +5,30 @@ graphs (DAGs) to orchestrate the triggering of compute jobs. With its precise
 orchestration, your data products won't rush or drag — no one can say "Not
 quite my tempo."
 
+## Table of Contents
+
+- [What is Fletcher?](#what-is-fletcher)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Web User Interface](#web-user-interface)
+- [Authentication](#authentication)
+- [API Endpoints](#api-endpoints)
+- [Usage Examples](#usage-examples)
+- [Development](#development)
+- [Deployment](#deployment)
+- [Load Testing](#load-testing)
+  - [Load Testing Features](#load-testing-features)
+  - [Load Testing Quick Start](#load-testing-quick-start)
+  - [Load Test Configuration](#load-test-configuration)
+  - [Test Scenarios](#test-scenarios)
+  - [Performance Benchmarks](#performance-benchmarks)
+  - [Stress Testing Setup](#stress-testing-setup)
+- [Configuration](#configuration)
+- [Monitoring](#monitoring)
+- [Contributing](#contributing)
+- [Why is this repo called Fletcher?](#why-is-this-repo-called-fletcher)
+- [License](#license)
+
 ## What is Fletcher?
 
 Fletcher manages **Plans** - collections of **Data Products** organized into
