@@ -1,10 +1,12 @@
 {
   "devDependencies": {
+    "markdownlint-cli2": "^0.18.1"
+  },
+  "dependencies": {
     "@tailwindcss/cli": "^4.1.11",
-    "@viz-js/viz": "^3.14.0",
-    "daisyui": "^5.0.46",
+    "@viz-js/viz": "^3.16.0",
+    "daisyui": "^5.0.50",
     "htmx.org": "^2.0.6",
-    "markdownlint-cli2": "^0.18.1",
     "prism-themes": "^1.9.0",
     "prismjs": "^1.30.0",
     "tailwindcss": "^4.1.11",
