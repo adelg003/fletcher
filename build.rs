@@ -1,9 +1,11 @@
 use fs_extra::dir::{CopyOptions, copy};
-use std::{fs, process::Command};
+use std::{fs, path::Path, process::Command};
 
 fn main() {
     // Clear the Assets directory
-    fs::remove_dir_all("assets/").expect("Failed to remove the assets directory");
+    if Path::new("assets/").exists() {
+        fs::remove_dir_all("assets/").expect("Failed to remove the assets directory");
+    }
 
     // Create Assets directory
     fs::create_dir_all("assets/").expect("Failed to create assets directory");

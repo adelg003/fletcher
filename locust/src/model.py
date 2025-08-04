@@ -25,8 +25,8 @@ class Role(StrEnum):
 
     DISABLE = "disable"  # Can disable data products
     PUBLISH = "publish"  # Can publish new data products
-    PAUSE = "pause"     # Can pause data product execution
-    UPDATE = "update"   # Can update existing data products
+    PAUSE = "pause"  # Can pause data product execution
+    UPDATE = "update"  # Can update existing data products
 
 
 class Auth(BaseModel):

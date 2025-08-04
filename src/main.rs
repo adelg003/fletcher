@@ -50,8 +50,8 @@ async fn main() -> color_eyre::Result<()> {
     let config: Config = load_config()?;
 
     // Setup our OpenAPI Service
-    let api_service = OpenApiService::new(Api, "Fletcher", "0.1.0")
-        .server(format!("http://{}/api", config.base_url));
+    let api_service =
+        OpenApiService::new(Api, "Fletcher", "0.1.0").server(format!("{}/api", config.base_url));
     let spec = api_service.spec_endpoint();
     let swagger = api_service.swagger_ui();
 
@@ -64,6 +64,13 @@ async fn main() -> color_eyre::Result<()> {
     // Update DB is it is not on the latest schema
     migrate!().run(&pool).await?;
 
+    // Extract host:port from base_url if it contains protocol
+    let bind_addr: String = config
+        .base_url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .to_string();
+
     // Route inbound traffic
     let app = Route::new()
         // Developer friendly locations
@@ -75,15 +82,13 @@ async fn main() -> color_eyre::Result<()> {
         .nest("/", user_service())
         .catch_error(not_found_404)
         // Global context to be shared
-        .data(config.clone())
+        .data(config)
         .data(pool)
         // Utilites being added to our services
         .with(Tracing);
 
     // Lets run our service
-    Server::new(TcpListener::bind(config.base_url))
-        .run(app)
-        .await?;
+    Server::new(TcpListener::bind(bind_addr)).run(app).await?;
 
     Ok(())
 }
