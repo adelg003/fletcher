@@ -263,6 +263,7 @@ docker-run client="docker" mode="release":
     --rm \
     --network=pg_network \
     --publish=3000:3000 \
+    --env BASE_URL='0.0.0.0:3000' \
     --env DATABASE_URL='postgres://fletcher_user:password@fletcher_postgresql/fletcher_db' \
     --env SECRET_KEY='GRNr3wdyenBu9BJW3TNQLene6b2xij1avk4UmPnrBkFbOKM5883EZUncLgeSdwLs63Wg21tbBV2WqanwTAXtqloXHkmLLiecDsxH' \
     --env REMOTE_APIS='[{"service": "remote", "hash": "$2b$10$4i5iCctUtWc5szV6M8CJNur1ng2md/gT372tlOv6BemwLryOw5ZGu", "roles": ["publish", "pause", "update", "disable"]}]' \
