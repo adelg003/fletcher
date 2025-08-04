@@ -193,8 +193,8 @@ py-audit:
 #################
 
 # Build and Run a Release Binary with settings for stress testing
-run-stress:
-  MAX_CONNECTIONS=30 cargo run --release
+run-stress max_connections="30":
+  MAX_CONNECTIONS={{ max_connections }} cargo run --release
 
 # Run Locust Server
 locust:

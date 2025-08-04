@@ -33,6 +33,18 @@ def add_custom_arguments(parser: ArgumentParser) -> None:
         default=RunMode.ONCE.value,
         help="Execution mode: 'once' runs operations once, 'loop' runs continuously",
     )
+    parser.add_argument(
+        "--processing_delay",
+        type=float,
+        default=10,
+        help="How long it takes to process data in a running state",
+    )
+    parser.add_argument(
+        "--restart_delay",
+        type=float,
+        default=60,
+        help="If mode is `loop`, how long to wait before dataset is cleared",
+    )
 
 
 class FletcherUser(HttpUser):
@@ -73,14 +85,14 @@ class FletcherUser(HttpUser):
         """Test the Fletcher web UI by accessing various pages."""
         # Pull up the home page
         self.client.get("/")
-        sleep(5)
+        self.wait()
 
         # Search the home page
         self.client.get(
             "/component/plan_search",
             params={"page": 0, "search_by": self.plan.dataset.id},
         )
-        sleep(5)
+        self.wait()
 
         # Load the page for our dataset
         self.client.get(f"/plan/{self.plan.dataset.id}")
@@ -139,7 +151,7 @@ class FletcherUser(HttpUser):
                 self.update_data_product(dp_id=dp_id, state=State.RUNNING)
 
                 # Simulate the running of content
-                sleep(10)
+                sleep(self.environment.parsed_options.processing_delay)
 
             # Set state to done
             case State.RUNNING:
@@ -163,8 +175,8 @@ class FletcherUser(HttpUser):
 
                 # Loop and run forever (or untill your JWT expires)
                 case RunMode.LOOP:
-                    # Give a minute where all data products are done
-                    sleep(60)
+                    # Give a some time where all data products is done before we restart
+                    sleep(self.environment.parsed_options.restart_delay)
                     self.clear()
 
     def update_data_product(self, dp_id: UUID, state: State) -> None:

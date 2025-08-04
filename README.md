@@ -270,7 +270,7 @@ The CSS is built using TailwindCSS CLI and bundled with the Rust application:
 
 ```bash
 # Install Node.js dependencies
-npm install
+npm clean-install
 
 # Build CSS (automatically handled during Rust build)
 # See build.rs for integration details

@@ -25,6 +25,7 @@ use sqlx::{PgPool, migrate, postgres::PgPoolOptions};
 /// Struct we will put all our configs to run Fletcher into
 #[derive(Clone)]
 pub struct Config {
+    base_url: String,
     database_url: String,
     decoding_key: DecodingKey,
     encoding_key: EncodingKey,
@@ -49,8 +50,8 @@ async fn main() -> color_eyre::Result<()> {
     let config: Config = load_config()?;
 
     // Setup our OpenAPI Service
-    let api_service =
-        OpenApiService::new(Api, "Fletcher", "0.1.0").server("http://0.0.0.0:3000/api");
+    let api_service = OpenApiService::new(Api, "Fletcher", "0.1.0")
+        .server(format!("http://{}/api", config.base_url));
     let spec = api_service.spec_endpoint();
     let swagger = api_service.swagger_ui();
 
@@ -59,6 +60,8 @@ async fn main() -> color_eyre::Result<()> {
         .max_connections(config.max_connections)
         .connect(&config.database_url)
         .await?;
+
+    // Update DB is it is not on the latest schema
     migrate!().run(&pool).await?;
 
     // Route inbound traffic
@@ -72,13 +75,13 @@ async fn main() -> color_eyre::Result<()> {
         .nest("/", user_service())
         .catch_error(not_found_404)
         // Global context to be shared
-        .data(config)
+        .data(config.clone())
         .data(pool)
         // Utilites being added to our services
         .with(Tracing);
 
     // Lets run our service
-    Server::new(TcpListener::bind("0.0.0.0:3000"))
+    Server::new(TcpListener::bind(config.base_url))
         .run(app)
         .await?;
 
@@ -95,6 +98,7 @@ pub fn load_config() -> Result<Config> {
     let secret_key_bytes: &[u8] = secret_key.as_bytes();
 
     Ok(Config {
+        base_url: dotenvy::var("BASE_URL")?,
         database_url: dotenvy::var("DATABASE_URL")?,
         decoding_key: DecodingKey::from_secret(secret_key_bytes),
         encoding_key: EncodingKey::from_secret(secret_key_bytes),
@@ -198,11 +202,11 @@ mod tests {
             "htmx/htmx.min.js should be present in embedded assets",
         );
 
-        // Check that viz-standalone.js exists in the embedded assets
-        let viz_file = Assets::get("viz/viz-standalone.js");
+        // Check that viz-global.js exists in the embedded assets
+        let viz_file = Assets::get("viz/viz-global.js");
         assert!(
             viz_file.is_some(),
-            "viz/viz-standalone.js should be present in embedded assets",
+            "viz/viz-global.js should be present in embedded assets",
         );
 
         // Check that prism.js exists in the embedded assets

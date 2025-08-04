@@ -2,6 +2,9 @@ use fs_extra::dir::{CopyOptions, copy};
 use std::{fs, process::Command};
 
 fn main() {
+    // Clear the Assets directory
+    fs::remove_dir_all("assets/").expect("Failed to remove the assets directory");
+
     // Create Assets directory
     fs::create_dir_all("assets/").expect("Failed to create assets directory");
 
@@ -43,10 +46,10 @@ fn main() {
     // Populate Assets directory with Viz-JS
     fs::create_dir_all("assets/viz").expect("Failed to create assets/viz directory");
     fs::copy(
-        "node_modules/@viz-js/viz/lib/viz-standalone.js",
-        "assets/viz/viz-standalone.js",
+        "node_modules/@viz-js/viz/dist/viz-global.js",
+        "assets/viz/viz-global.js",
     )
-    .expect("Failed to copy viz-standalone.js from node_modules");
+    .expect("Failed to copy viz-global.js from node_modules");
 
     // Populate Assets directory with Prism.js
     fs::create_dir_all("assets/prism").expect("Failed to create assets/prism directory");

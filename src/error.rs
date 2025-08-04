@@ -358,4 +358,17 @@ mod tests {
             "SerdeJson error should map to InternalServerError"
         );
     }
+
+    /// Test into_poem_error maps ParseInt error to InternalServerError
+    #[test]
+    fn test_into_poem_error_parse_int() {
+        let parse_error = "invalid".parse::<u32>().unwrap_err();
+        let error = Error::ParseInt(parse_error);
+        let poem_error = error.into_poem_error();
+        assert_eq!(
+            poem_error.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "ParseInt error should map to InternalServerError"
+        );
+    }
 }

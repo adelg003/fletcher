@@ -23,10 +23,10 @@ class RunMode(StrEnum):
 class Role(StrEnum):
     """Available roles for Fletcher API authentication."""
 
-    DISABLE = "disable"
-    PUBLISH = "publish"
-    PAUSE = "pause"
-    UPDATE = "update"
+    DISABLE = "disable"  # Can disable data products
+    PUBLISH = "publish"  # Can publish new data products
+    PAUSE = "pause"     # Can pause data product execution
+    UPDATE = "update"   # Can update existing data products
 
 
 class Auth(BaseModel):

@@ -13,6 +13,6 @@ jobs:
       - name: Install Just
         run: sudo apt install just
       - name: Install markdownlint-cli2
-        run: npm install
+        run: npm clean-install
       - name: MarkdownLint
         run: just markdownlint
