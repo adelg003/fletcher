@@ -200,13 +200,13 @@ run-stress max_connections="30":
 locust:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
-    --host "http://0.0.0.0:3000"
+    --host "http://127.0.0.1:3000"
 
 # Run Locust Server for stress testing
 locust-demo:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
-    --host "http://0.0.0.0:3000" \
+    --host "http://127.0.0.1:3000" \
     --users 1 \
     --spawn-rate 1 \
     --mode loop \
@@ -217,7 +217,7 @@ locust-demo:
 locust-busiest-day:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
-    --host "http://0.0.0.0:3000" \
+    --host "http://127.0.0.1:3000" \
     --users 300 \
     --spawn-rate 2 \
     --mode once \
@@ -227,7 +227,7 @@ locust-busiest-day:
 locust-stress:
   uv --directory locust/ run locust \
     --locustfile src/locustfile.py \
-    --host "http://0.0.0.0:3000" \
+    --host "http://127.0.0.1:3000" \
     --users 2500 \
     --spawn-rate 2 \
     --mode loop \

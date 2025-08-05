@@ -109,7 +109,7 @@ Additional tools for development and testing:
    ```bash
    # Create a .env file in the project root
    cat > .env << 'EOF'
-   BASE_URL=0.0.0.0:3000
+   BASE_URL=127.0.0.1:3000
    DATABASE_URL=postgres://fletcher_user:password@localhost/fletcher_db
    SECRET_KEY=your-secret-key-for-jwt-signing-make-it-long-and-random
    REMOTE_APIS='[
@@ -136,7 +136,7 @@ Additional tools for development and testing:
    **Option B: Manual export**
 
    ```bash
-   export BASE_URL="0.0.0.0:3000"
+   export BASE_URL="127.0.0.1:3000"
    export DATABASE_URL="postgres://fletcher_user:password@localhost/fletcher_db"
    export SECRET_KEY="your-secret-key-for-jwt-signing-make-it-long-and-random"
    export REMOTE_APIS='[{"service":"local","hash":"$2b$10$DvqWB.sMjo1XSlgGrOzGAuBTY5E1hkLiDK3BdcK0TiROjCWkgCeaa","roles":["publish","pause","update","disable"]},{"service":"readonly","hash":"$2b$10$46TiUvUaKvp2D/BuoXe8Fu9ktffCBXioF8M0DeeOWvz8X2J0RtpvK","roles":[]}]'
@@ -233,13 +233,6 @@ Comprehensive plan visualization and management:
 - **Breadcrumb Navigation**: Clear path between Search and Plan pages
 - **Contextual Links**: Smart navigation that adapts based on current context
 - **Direct URLs**: Bookmarkable URLs for all plans and searches
-
-### Accessibility
-
-- **Semantic HTML**: Proper heading hierarchy and ARIA labels
-- **Keyboard Navigation**: Full keyboard accessibility for all interactive elements
-- **Screen Reader Support**: Descriptive text and proper labeling
-- **Color Contrast**: High contrast design for visibility
 
 ### Browser Support
 
@@ -513,7 +506,7 @@ create a `.env` file in the project root:
 
 ```bash
 # .env file for local development
-BASE_URL=0.0.0.0:3000
+BASE_URL=127.0.0.1:3000
 DATABASE_URL=postgres://fletcher_user:password@localhost/fletcher_db
 SECRET_KEY=your-secret-key-for-jwt-signing-make-it-long-and-random
 REMOTE_APIS='[
@@ -536,7 +529,7 @@ RUST_LOG=debug
 
 **Available Environment Variables:**
 
-- `BASE_URL` - Server bind address and port (required, default: `0.0.0.0:3000`)
+- `BASE_URL` - Server bind address and port (required, default: `127.0.0.1:3000`)
 - `DATABASE_URL` - PostgreSQL connection string (required)
 - `MAX_CONNECTIONS` - Number of PostgreSQL connections in the pool
   (default is 10)
@@ -693,7 +686,7 @@ suitable for containerized deployment.
 
 **Required:**
 
-- `BASE_URL` - Server bind address and port (e.g., `0.0.0.0:3000`)
+- `BASE_URL` - Server bind address and port (e.g., `127.0.0.1:3000`)
 - `DATABASE_URL` - PostgreSQL connection string
 - `SECRET_KEY` - Secret key for JWT token signing (generate a long, random string)
 - `REMOTE_APIS` - JSON array of service configurations with authentication and roles
@@ -798,7 +791,7 @@ just run-stress              # Run Fletcher with optimized settings
 ```bash
 uv --directory locust/ run locust \
   --locustfile src/locustfile.py \
-  --host http://0.0.0.0:3000 \
+  --host http://127.0.0.1:3000 \
   --users 50 \
   --spawn-rate 1 \
   --service local \
