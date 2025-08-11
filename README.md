@@ -9,6 +9,7 @@ quite my tempo."
 
 - [What is Fletcher?](#what-is-fletcher)
 - [Features](#features)
+- [Quality Assurance & CI/CD](#quality-assurance--cicd)
 - [Quick Start](#quick-start)
 - [Web User Interface](#web-user-interface)
 - [Authentication](#authentication)
@@ -60,6 +61,52 @@ efficient and reliable data pipeline execution.
 - 🧪 **Multiple Compute Types**: Support for CAMS and DBXaaS compute platforms
 - 📊 **GraphViz Visualization**: Visual representation of your DAG execution plans
 - 🚀 **Load Testing**: Built-in Locust-based performance testing with realistic scenarios
+
+## Quality Assurance & CI/CD
+
+Fletcher maintains high code quality through comprehensive automated testing and
+continuous integration:
+
+### 🔧 Automated Testing Pipeline
+
+- **Rust Quality Checks**: Code formatting, linting (Clippy), compilation, and
+  unit/integration tests
+- **Database Integration**: Full PostgreSQL integration testing with SQLx
+  migrations
+- **Docker Validation**: Multi-stage container builds with health check
+  verification
+- **Security Scanning**: Trivy vulnerability scanning for both codebase and
+  container images
+- **Python Tooling**: Type checking (PyRight), linting (Ruff), and dependency
+  auditing
+- **Documentation**: Markdown linting for consistent documentation quality
+
+### 🚦 CI/CD Workflows
+
+All pull requests automatically trigger workflows located in `.github/workflows/`:
+
+- [`rust.yaml`](.github/workflows/rust.yaml) - Comprehensive Rust code quality
+  and testing
+- [`docker.yaml`](.github/workflows/docker.yaml) - Container build verification
+  and health checks
+- [`trivy.yaml`](.github/workflows/trivy.yaml) - Security vulnerability scanning
+- [`python.yaml`](.github/workflows/python.yaml) - Load testing toolchain
+  validation
+- [`markdown.yaml`](.github/workflows/markdown.yaml) - Documentation quality
+  assurance
+
+### 🛠️ Development Tools
+
+- **Just**: Cross-platform task automation (see `justfile` for all available commands)
+- **SQLx**: Compile-time verified database queries with offline mode
+- **Cargo Deny**: Dependency vulnerability and license auditing
+- **UV**: Fast Python package management for load testing tools
+
+Run the complete CI pipeline locally:
+
+```bash
+just github-checks  # Runs all quality checks
+```
 
 ## Quick Start
 
