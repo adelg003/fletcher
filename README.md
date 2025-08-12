@@ -105,6 +105,7 @@ All pull requests automatically trigger workflows located in `.github/workflows/
   vulnerability and license auditing
 - **[uv](https://docs.astral.sh/uv/)**: Fast Python package management for
   load testing tools
+
 Run the complete CI pipeline locally:
 
 ```bash
