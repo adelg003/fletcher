@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 bcrypt = "0.17.0"
-clap = { version = "4.5.42", features = ["derive"] }
+clap = { version = "4.5.44", features = ["derive"] }
 color-eyre = "0.6.5"
 
 [dev-dependencies]
