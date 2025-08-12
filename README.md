@@ -98,9 +98,8 @@ All pull requests automatically trigger workflows located in `.github/workflows/
 
 - **Just**: Cross-platform task automation (see `justfile` for all available commands)
 - **SQLx**: Compile-time verified database queries with offline mode
-- **Cargo Deny**: Dependency vulnerability and license auditing
-- **UV**: Fast Python package management for load testing tools
-
+- **cargo-deny**: Dependency vulnerability and license auditing
+- **uv**: Fast Python package management for load testing tools
 Run the complete CI pipeline locally:
 
 ```bash
