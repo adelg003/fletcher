@@ -1,4 +1,6 @@
 name: Docker
+permissions:
+  contents: read
 
 permissions:
   contents: read
