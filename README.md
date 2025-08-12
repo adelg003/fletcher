@@ -99,10 +99,10 @@ All pull requests automatically trigger workflows located in `.github/workflows/
 
 - **[Just](https://github.com/casey/just)**: Cross-platform task automation
   (see `justfile` for all available commands)
-- **[SQLx](https://github.com/launchbadge/sqlx)**: Compile-time verified database queries
-  with offline mode
-- **[cargo-deny](https://github.com/EmbarkStudios/cargo-deny)**: Dependency vulnerability and
-  license auditing
+- **[SQLx](https://github.com/launchbadge/sqlx)**: Compile-time verified database
+  queries with offline mode
+- **[cargo-deny](https://github.com/EmbarkStudios/cargo-deny)**: Dependency
+  vulnerability and license auditing
 - **[uv](https://docs.astral.sh/uv/)**: Fast Python package management for
   load testing tools
 Run the complete CI pipeline locally:
