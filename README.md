@@ -80,6 +80,7 @@ continuous integration:
 - **Python Tooling**: Type checking (pyright), linting (Ruff), and dependency
   auditing
 - **Documentation**: Markdown linting for consistent documentation quality
+
 ### 🚦 CI/CD Workflows
 
 All pull requests automatically trigger workflows located in `.github/workflows/`:
