@@ -1,6 +1,6 @@
 {
   "devDependencies": {
-    "markdownlint-cli2": "^0.18.1"
+    "markdownlint-cli2": "^0.19.0"
   },
   "dependencies": {
     "@tailwindcss/cli": "^4.1.11",
