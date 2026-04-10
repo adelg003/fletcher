@@ -6,13 +6,16 @@ mod db;
 mod error;
 mod model;
 mod ui;
+mod worker;
 
 use crate::{
     api::Api,
     auth::RemoteAuth,
     error::Result,
     ui::{not_found_404, user_service},
+    worker::{Cli, CliCommand, run_worker},
 };
+use clap::Parser;
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use poem::{
     EndpointExt, Route, Server, endpoint::EmbeddedFilesEndpoint, listener::TcpListener,
@@ -25,12 +28,14 @@ use sqlx::{PgPool, migrate, postgres::PgPoolOptions};
 /// Struct we will put all our configs to run Fletcher into
 #[derive(Clone)]
 pub struct Config {
-    base_url: String,
-    database_url: String,
-    decoding_key: DecodingKey,
-    encoding_key: EncodingKey,
-    max_connections: u32,
-    remote_auths: Vec<RemoteAuth>,
+    pub(crate) base_url: String,
+    pub(crate) database_url: String,
+    pub(crate) decoding_key: DecodingKey,
+    pub(crate) encoding_key: EncodingKey,
+    pub(crate) max_connections: u32,
+    pub(crate) remote_auths: Vec<RemoteAuth>,
+    pub(crate) worker_service: String,
+    pub(crate) worker_key: String,
 }
 
 /// Static files hosted via webserver
@@ -46,6 +51,17 @@ async fn main() -> color_eyre::Result<()> {
     // Enable Poem's logging
     tracing_subscriber::fmt::init();
 
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(CliCommand::Worker(args)) => run_worker(args).await?,
+        None => run_server().await?,
+    }
+
+    Ok(())
+}
+
+async fn run_server() -> color_eyre::Result<()> {
     // Read in configs
     let config: Config = load_config()?;
 
@@ -109,6 +125,8 @@ pub fn load_config() -> Result<Config> {
         encoding_key: EncodingKey::from_secret(secret_key_bytes),
         max_connections,
         remote_auths: serde_json::from_str(&dotenvy::var("REMOTE_APIS")?)?,
+        worker_service: dotenvy::var("WORKER_SERVICE").unwrap_or("local".to_string()),
+        worker_key: dotenvy::var("WORKER_KEY").unwrap_or("abc123".to_string()),
     })
 }
 
@@ -128,7 +146,7 @@ mod tests {
         let config = result.unwrap();
         assert_eq!(
             config.database_url,
-            "postgres://fletcher_user:password@localhost/fletcher_db"
+            "postgres://fletcher_user:password@127.0.0.1:5432/fletcher_db"
         );
         assert_eq!(config.max_connections, 10);
         assert_eq!(config.remote_auths.len(), 2);
@@ -212,6 +230,20 @@ mod tests {
         assert!(
             viz_file.is_some(),
             "viz/viz-global.js should be present in embedded assets",
+        );
+
+        // Check that nice-dag-core.js exists in the embedded assets
+        let nice_dag_file = Assets::get("nice-dag/nice-dag-core.js");
+        assert!(
+            nice_dag_file.is_some(),
+            "nice-dag/nice-dag-core.js should be present in embedded assets",
+        );
+
+        // Check that plan-dag.js exists in the embedded assets
+        let plan_dag_file = Assets::get("js/plan-dag.js");
+        assert!(
+            plan_dag_file.is_some(),
+            "js/plan-dag.js should be present in embedded assets",
         );
 
         // Check that prism.js exists in the embedded assets

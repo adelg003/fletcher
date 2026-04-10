@@ -207,6 +207,75 @@ impl DataProduct {
     }
 }
 
+/// Persisted worker log entry for a data product run
+#[derive(Clone, Debug, Object, PartialEq)]
+pub struct ExecutionLog {
+    pub id: i64,
+    pub data_product_id: DataProductId,
+    pub run_id: Uuid,
+    pub stream: String,
+    pub message: String,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Input for appending worker logs
+#[derive(Clone, Object)]
+pub struct ExecutionLogParam {
+    pub run_id: Uuid,
+    pub stream: String,
+    pub message: String,
+}
+
+/// Historical execution run for a plan
+#[derive(Clone, Debug, Object, PartialEq)]
+pub struct PlanRun {
+    pub id: Uuid,
+    pub dataset_id: DatasetId,
+    pub status: State,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+    pub modified_by: String,
+    pub modified_date: DateTime<Utc>,
+}
+
+impl PlanRun {
+    pub fn is_active(&self) -> bool {
+        matches!(self.status, State::Queued | State::Running)
+    }
+}
+
+/// Snapshot of a data product inside a historical plan run
+#[derive(Clone, Debug, Object, PartialEq)]
+pub struct PlanRunDataProduct {
+    pub data_product_id: DataProductId,
+    pub compute: Compute,
+    pub name: String,
+    pub version: String,
+    pub eager: bool,
+    pub state: State,
+    pub step_run_id: Option<Uuid>,
+    pub link: Option<String>,
+    pub passback: Option<Value>,
+    pub modified_by: String,
+    pub modified_date: DateTime<Utc>,
+}
+
+/// Snapshot of a dependency inside a historical plan run
+#[derive(Clone, Debug, Object, PartialEq)]
+pub struct PlanRunDependency {
+    pub parent_id: DataProductId,
+    pub child_id: DataProductId,
+}
+
+/// Historical run view of a plan
+#[derive(Clone, Debug, Object, PartialEq)]
+pub struct RunPlan {
+    pub run: PlanRun,
+    pub data_products: Vec<PlanRunDataProduct>,
+    pub dependencies: Vec<PlanRunDependency>,
+}
+
 /// Dependency from one Data Product to another Data Product
 #[derive(Clone, Debug, Object, PartialEq)]
 pub struct Dependency {

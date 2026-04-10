@@ -1,17 +1,27 @@
 use crate::{
+    Config,
     dag::Dag,
-    db::search_plans_select,
+    db::{
+        dataset_lock, execution_log_insert, execution_logs_by_run_data_product_select,
+        plan_run_active_by_dataset_select, plan_run_by_step_run_select,
+        plan_run_data_product_upsert, plan_run_data_products_by_run_select,
+        plan_run_dependencies_by_run_select, plan_run_dependency_insert, plan_run_insert,
+        plan_run_select, plan_run_state_counts_select, plan_run_status_update,
+        plan_runs_by_dataset_select, search_plans_select,
+    },
     error::{Error, Result},
     model::{
-        DataProduct, DataProductId, DatasetId, Edge, Plan, PlanParam, SearchReturn, SearchRow,
-        State, StateParam,
+        DataProduct, DataProductId, DatasetId, Edge, ExecutionLog, ExecutionLogParam, Plan,
+        PlanParam, PlanRun, RunPlan, SearchReturn, SearchRow, State, StateParam,
     },
+    worker::extract_worker_spec,
 };
 use chrono::{DateTime, Utc};
 use petgraph::graph::DiGraph;
 use sqlx::{Postgres, Transaction};
-use std::collections::HashSet;
-use tracing::warn;
+use std::{collections::HashSet, env::current_exe, process::Command};
+use tracing::{info, warn};
+use uuid::Uuid;
 
 /// How much do we want to paginate by
 const PAGE_SIZE: u32 = 50;
@@ -81,8 +91,20 @@ fn validate_plan_param(param: &PlanParam, plan: &Option<Plan>) -> Result<()> {
 }
 
 /// Add a Plan Dag to the DB
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn plan_add(
     tx: &mut Transaction<'_, Postgres>,
+    param: &PlanParam,
+    username: &str,
+) -> Result<Plan> {
+    let config = crate::load_config()?;
+    plan_add_with_config(tx, &config, param, username).await
+}
+
+/// Add a Plan Dag to the DB using an explicit runtime config
+pub async fn plan_add_with_config(
+    tx: &mut Transaction<'_, Postgres>,
+    config: &Config,
     param: &PlanParam,
     username: &str,
 ) -> Result<Plan> {
@@ -105,7 +127,7 @@ pub async fn plan_add(
     let mut plan: Plan = param.upsert(tx, username, modified_date).await?;
 
     // Triger the next batch of data products
-    trigger_next_batch(tx, &mut plan, username, modified_date).await?;
+    trigger_next_batch_with_config(tx, config, &mut plan, username, modified_date).await?;
 
     Ok(plan)
 }
@@ -116,8 +138,21 @@ pub async fn plan_read(tx: &mut Transaction<'_, Postgres>, id: DatasetId) -> Res
 }
 
 /// Set the pause state of a plan
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn plan_pause_edit(
     tx: &mut Transaction<'_, Postgres>,
+    id: DatasetId,
+    paused: bool,
+    username: &str,
+) -> Result<Plan> {
+    let config = crate::load_config()?;
+    plan_pause_edit_with_config(tx, &config, id, paused, username).await
+}
+
+/// Set the pause state of a plan using an explicit runtime config
+pub async fn plan_pause_edit_with_config(
+    tx: &mut Transaction<'_, Postgres>,
+    config: &Config,
     id: DatasetId,
     paused: bool,
     username: &str,
@@ -133,7 +168,7 @@ pub async fn plan_pause_edit(
 
     // If unpaused, lets run the next batch
     if !paused {
-        trigger_next_batch(tx, &mut plan, username, modified_date).await?;
+        trigger_next_batch_with_config(tx, config, &mut plan, username, modified_date).await?;
     }
 
     Ok(plan)
@@ -173,6 +208,25 @@ async fn state_update(
     data_product
         .state_update(tx, dataset_id, state, username, modified_date)
         .await?;
+
+    let plan_run = if let Some(step_run_id) = state.run_id {
+        plan_run_by_step_run_select(tx, dataset_id, state.id, step_run_id).await?
+    } else {
+        plan_run_active_by_dataset_select(tx, dataset_id).await?
+    };
+
+    if let Some(run) = plan_run {
+        snapshot_plan_run_data_product(
+            tx,
+            dataset_id,
+            run.id,
+            data_product,
+            username,
+            modified_date,
+        )
+        .await?;
+        refresh_plan_run_status(tx, dataset_id, run.id, username, modified_date).await?;
+    }
 
     Ok(())
 }
@@ -214,6 +268,9 @@ async fn clear_downstream_nodes(
         let current_state: StateParam = data_product.into();
         let new_state = StateParam {
             state: State::Waiting,
+            run_id: None,
+            link: None,
+            passback: None,
             ..current_state
         };
 
@@ -226,9 +283,175 @@ async fn clear_downstream_nodes(
     Ok(())
 }
 
+/// Append a worker log entry
+pub async fn execution_log_add(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    data_product_id: DataProductId,
+    param: &ExecutionLogParam,
+    username: &str,
+) -> Result<ExecutionLog> {
+    execution_log_insert(tx, dataset_id, data_product_id, param, username, Utc::now()).await
+}
+
+async fn snapshot_plan_run_data_product(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+    data_product: &DataProduct,
+    username: &str,
+    modified_date: DateTime<Utc>,
+) -> Result<()> {
+    plan_run_data_product_upsert(
+        tx,
+        dataset_id,
+        plan_run_id,
+        data_product.id,
+        data_product.compute,
+        &data_product.name,
+        &data_product.version,
+        data_product.eager,
+        data_product.state,
+        data_product.run_id,
+        data_product.link.as_deref(),
+        data_product.passback.clone(),
+        username,
+        modified_date,
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn refresh_plan_run_status(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+    username: &str,
+    modified_date: DateTime<Utc>,
+) -> Result<PlanRun> {
+    let (failed_count, success_count, running_count, queued_count, waiting_count) =
+        plan_run_state_counts_select(tx, plan_run_id).await?;
+    let total_count = failed_count + success_count + running_count + queued_count + waiting_count;
+
+    let status = if failed_count > 0 {
+        State::Failed
+    } else if total_count > 0 && success_count == total_count {
+        State::Success
+    } else if running_count > 0 {
+        State::Running
+    } else if queued_count > 0 || waiting_count > 0 {
+        State::Queued
+    } else {
+        State::Queued
+    };
+
+    plan_run_status_update(tx, dataset_id, plan_run_id, status, username, modified_date).await
+}
+
+async fn ensure_active_plan_run(
+    tx: &mut Transaction<'_, Postgres>,
+    plan: &Plan,
+    username: &str,
+    modified_date: DateTime<Utc>,
+) -> Result<PlanRun> {
+    if let Some(run) = plan_run_active_by_dataset_select(tx, plan.dataset.id).await? {
+        return Ok(run);
+    }
+
+    let plan_run_id = Uuid::new_v4();
+    let run = plan_run_insert(
+        tx,
+        plan.dataset.id,
+        plan_run_id,
+        State::Queued,
+        username,
+        modified_date,
+    )
+    .await?;
+
+    for data_product in plan
+        .data_products
+        .iter()
+        .filter(|dp| dp.state != State::Disabled)
+    {
+        snapshot_plan_run_data_product(
+            tx,
+            plan.dataset.id,
+            plan_run_id,
+            data_product,
+            username,
+            modified_date,
+        )
+        .await?;
+    }
+
+    for dependency in &plan.dependencies {
+        let parent = plan.data_product(dependency.parent_id);
+        let child = plan.data_product(dependency.child_id);
+        if matches!(parent, Some(dp) if dp.state != State::Disabled)
+            && matches!(child, Some(dp) if dp.state != State::Disabled)
+        {
+            plan_run_dependency_insert(
+                tx,
+                plan.dataset.id,
+                plan_run_id,
+                dependency.parent_id,
+                dependency.child_id,
+            )
+            .await?;
+        }
+    }
+
+    Ok(run)
+}
+
+pub async fn plan_runs_read(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+) -> Result<Vec<PlanRun>> {
+    plan_runs_by_dataset_select(tx, dataset_id).await
+}
+
+pub async fn plan_run_read(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+) -> Result<RunPlan> {
+    let run = plan_run_select(tx, dataset_id, plan_run_id).await?;
+    let data_products = plan_run_data_products_by_run_select(tx, dataset_id, plan_run_id).await?;
+    let dependencies = plan_run_dependencies_by_run_select(tx, dataset_id, plan_run_id).await?;
+    Ok(RunPlan {
+        run,
+        data_products,
+        dependencies,
+    })
+}
+
+pub async fn plan_run_step_logs_read(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+    data_product_id: DataProductId,
+) -> Result<Vec<ExecutionLog>> {
+    execution_logs_by_run_data_product_select(tx, dataset_id, plan_run_id, data_product_id).await
+}
+
 /// Triger the next batch of data products
+#[cfg_attr(not(test), allow(dead_code))]
 async fn trigger_next_batch(
     tx: &mut Transaction<'_, Postgres>,
+    plan: &mut Plan,
+    username: &str,
+    modified_date: DateTime<Utc>,
+) -> Result<()> {
+    let config = crate::load_config()?;
+    trigger_next_batch_with_config(tx, &config, plan, username, modified_date).await
+}
+
+async fn trigger_next_batch_with_config(
+    tx: &mut Transaction<'_, Postgres>,
+    config: &Config,
     plan: &mut Plan,
     username: &str,
     modified_date: DateTime<Utc>,
@@ -254,8 +477,13 @@ async fn trigger_next_batch(
         })
         .collect();
 
+    if waiting_ids.is_empty() {
+        return Ok(());
+    }
+
     // Generate Dag representation of the plan (Disabled nodes are not part of the dag.)
     let dag: DiGraph<DataProductId, u32> = plan.to_dag()?;
+    let mut active_plan_run: Option<PlanRun> = None;
 
     // Check each data product's parents to see if any of them are blocking
     for waiting_id in waiting_ids {
@@ -271,17 +499,37 @@ async fn trigger_next_batch(
 
         // If the waiting node is ready to run, trigger it
         if ready {
-            warn!(
-                "This is where I would trigger the data product with the OaaS Wrapper... IF I HAD ONE!!!"
-            );
+            let plan_run_id = if let Some(run) = &active_plan_run {
+                run.id
+            } else {
+                let run = ensure_active_plan_run(tx, plan, username, modified_date).await?;
+                let run_id = run.id;
+                active_plan_run = Some(run);
+                run_id
+            };
 
             // Representation of the current data product
             let data_product: &mut DataProduct = plan
                 .data_product_mut(waiting_id)
                 .ok_or(Error::Unreachable)?;
 
+            let worker_spec = extract_worker_spec(&data_product.passthrough)?;
+            let run_id = Uuid::new_v4();
+
             // Params for the current and new state. Make our change and dump the current state to fill the rest.
             let new_state = StateParam {
+                run_id: Some(run_id),
+                link: worker_spec
+                    .as_ref()
+                    .map(|spec| spec.script.clone())
+                    .or_else(|| data_product.link.clone()),
+                passback: worker_spec.as_ref().map(|spec| {
+                    serde_json::json!({
+                        "worker_mode": "local",
+                        "runner": spec.runner,
+                        "script": spec.script,
+                    })
+                }),
                 state: State::Queued,
                 ..data_product.into()
             };
@@ -290,6 +538,53 @@ async fn trigger_next_batch(
             data_product
                 .state_update(tx, dataset_id, &new_state, username, modified_date)
                 .await?;
+            snapshot_plan_run_data_product(
+                tx,
+                dataset_id,
+                plan_run_id,
+                data_product,
+                username,
+                modified_date,
+            )
+            .await?;
+            refresh_plan_run_status(tx, dataset_id, plan_run_id, username, modified_date).await?;
+
+            if let Some(spec) = worker_spec {
+                if let Err(err) = launch_local_worker(config, dataset_id, waiting_id, run_id, &spec)
+                {
+                    let failed_state = StateParam {
+                        id: waiting_id,
+                        state: State::Failed,
+                        run_id: Some(run_id),
+                        link: Some(spec.script.clone()),
+                        passback: Some(serde_json::json!({
+                            "worker_mode": "local",
+                            "runner": spec.runner,
+                            "script": spec.script,
+                            "launch_error": err.to_string(),
+                        })),
+                    };
+
+                    data_product
+                        .state_update(tx, dataset_id, &failed_state, username, modified_date)
+                        .await?;
+                    snapshot_plan_run_data_product(
+                        tx,
+                        dataset_id,
+                        plan_run_id,
+                        data_product,
+                        username,
+                        modified_date,
+                    )
+                    .await?;
+                    refresh_plan_run_status(tx, dataset_id, plan_run_id, username, modified_date)
+                        .await?;
+                }
+            } else {
+                warn!(
+                    "Data product '{waiting_id}' reached queued state but has no local worker definition"
+                );
+            }
         }
     }
 
@@ -297,14 +592,29 @@ async fn trigger_next_batch(
 }
 
 /// Edit the state of a Data Product
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn states_edit(
     tx: &mut Transaction<'_, Postgres>,
     id: DatasetId,
     states: &[StateParam],
     username: &str,
 ) -> Result<Plan> {
+    let config = crate::load_config()?;
+    states_edit_with_config(tx, &config, id, states, username).await
+}
+
+/// Edit the state of a Data Product using an explicit runtime config
+pub async fn states_edit_with_config(
+    tx: &mut Transaction<'_, Postgres>,
+    config: &Config,
+    id: DatasetId,
+    states: &[StateParam],
+    username: &str,
+) -> Result<Plan> {
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
+
+    dataset_lock(tx, id).await?;
 
     // Check the new state to update to, and make sure is valid.
     for state in states {
@@ -329,20 +639,35 @@ pub async fn states_edit(
     clear_downstream_nodes(tx, &mut plan, &nodes, username, modified_date).await?;
 
     // Trigger the next batch of data products
-    trigger_next_batch(tx, &mut plan, username, modified_date).await?;
+    trigger_next_batch_with_config(tx, config, &mut plan, username, modified_date).await?;
 
     Ok(plan)
 }
 
 /// Clear Data Products so then can be rerun
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn clear_edit(
     tx: &mut Transaction<'_, Postgres>,
     id: DatasetId,
     data_product_ids: &[DataProductId],
     username: &str,
 ) -> Result<Plan> {
+    let config = crate::load_config()?;
+    clear_edit_with_config(tx, &config, id, data_product_ids, username).await
+}
+
+/// Clear Data Products so then can be rerun using an explicit runtime config
+pub async fn clear_edit_with_config(
+    tx: &mut Transaction<'_, Postgres>,
+    config: &Config,
+    id: DatasetId,
+    data_product_ids: &[DataProductId],
+    username: &str,
+) -> Result<Plan> {
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
+
+    dataset_lock(tx, id).await?;
 
     // Pull the Plan so we know what we are working with
     let mut plan = Plan::from_db(tx, id).await?;
@@ -355,6 +680,9 @@ pub async fn clear_edit(
         // Build new cleared state
         let state = StateParam {
             state: State::Waiting,
+            run_id: None,
+            link: None,
+            passback: None,
             ..data_product.into()
         };
 
@@ -366,9 +694,70 @@ pub async fn clear_edit(
     clear_downstream_nodes(tx, &mut plan, data_product_ids, username, modified_date).await?;
 
     // Trigger the next batch of data products
-    trigger_next_batch(tx, &mut plan, username, modified_date).await?;
+    trigger_next_batch_with_config(tx, config, &mut plan, username, modified_date).await?;
 
     Ok(plan)
+}
+
+fn launch_local_worker(
+    config: &Config,
+    dataset_id: DatasetId,
+    data_product_id: DataProductId,
+    run_id: Uuid,
+    spec: &crate::worker::LocalWorkerSpec,
+) -> Result<()> {
+    let executable = current_exe()?;
+    let command_line = format!(
+        "{} worker --remote {} --dataset-id {} --data-product-id {} --run-id {} --runner {} --script {} --service {}",
+        executable.display(),
+        config.base_url,
+        dataset_id,
+        data_product_id,
+        run_id,
+        spec.runner.as_arg(),
+        spec.script,
+        config.worker_service,
+    );
+    let mut command = Command::new(&executable);
+    command
+        .arg("worker")
+        .arg("--remote")
+        .arg(&config.base_url)
+        .arg("--dataset-id")
+        .arg(dataset_id.to_string())
+        .arg("--data-product-id")
+        .arg(data_product_id.to_string())
+        .arg("--run-id")
+        .arg(run_id.to_string())
+        .arg("--runner")
+        .arg(spec.runner.as_arg())
+        .arg("--script")
+        .arg(&spec.script)
+        .arg("--service")
+        .arg(&config.worker_service)
+        .env("FLETCHER_WORKER_KEY", &config.worker_key);
+
+    info!(
+        dataset_id = %dataset_id,
+        data_product_id = %data_product_id,
+        run_id = %run_id,
+        runner = %spec.runner.as_arg(),
+        script = %spec.script,
+        remote = %config.base_url,
+        command_line = %command_line,
+        "launching fletcher worker"
+    );
+
+    let child = command.spawn()?;
+    info!(
+        dataset_id = %dataset_id,
+        data_product_id = %data_product_id,
+        run_id = %run_id,
+        pid = child.id(),
+        "fletcher worker launched"
+    );
+
+    Ok(())
 }
 
 /// Mark a Data Product as Disabled
@@ -378,8 +767,11 @@ pub async fn disable_drop(
     data_product_ids: &[DataProductId],
     username: &str,
 ) -> Result<Plan> {
+    let config = crate::load_config()?;
     // Timestamp of the transaction
     let modified_date: DateTime<Utc> = Utc::now();
+
+    dataset_lock(tx, id).await?;
 
     // Pull the Plan so we know what we are working with
     let mut plan = Plan::from_db(tx, id).await?;
@@ -399,7 +791,7 @@ pub async fn disable_drop(
     }
 
     // Triger the next batch of data products
-    trigger_next_batch(tx, &mut plan, username, modified_date).await?;
+    trigger_next_batch_with_config(tx, &config, &mut plan, username, modified_date).await?;
 
     Ok(plan)
 }
@@ -1452,6 +1844,12 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(plan.data_product(dp2_id).unwrap().state, State::Waiting);
         assert_eq!(plan.data_product(dp3_id).unwrap().state, State::Waiting);
+        assert_eq!(plan.data_product(dp2_id).unwrap().run_id, None);
+        assert_eq!(plan.data_product(dp2_id).unwrap().link, None);
+        assert_eq!(plan.data_product(dp2_id).unwrap().passback, None);
+        assert_eq!(plan.data_product(dp3_id).unwrap().run_id, None);
+        assert_eq!(plan.data_product(dp3_id).unwrap().link, None);
+        assert_eq!(plan.data_product(dp3_id).unwrap().passback, None);
     }
 
     /// Test clear_downstream_nodes skips nodes already in Waiting or Disabled state
@@ -2046,6 +2444,12 @@ mod tests {
             updated_plan.data_product(dp3_id).unwrap().state,
             State::Waiting
         );
+        assert_eq!(updated_plan.data_product(dp2_id).unwrap().run_id, None);
+        assert_eq!(updated_plan.data_product(dp2_id).unwrap().link, None);
+        assert_eq!(updated_plan.data_product(dp2_id).unwrap().passback, None);
+        assert_eq!(updated_plan.data_product(dp3_id).unwrap().run_id, None);
+        assert_eq!(updated_plan.data_product(dp3_id).unwrap().link, None);
+        assert_eq!(updated_plan.data_product(dp3_id).unwrap().passback, None);
     }
 
     /// Test clear_edit returns error for non-existent data product
@@ -3200,6 +3604,123 @@ mod tests {
             updated_data_product.state,
             State::Success,
             "Data product state should be updated to Success"
+        );
+    }
+
+    /// Test state_update snapshots the run identified by the step run id, not just the latest active run.
+    #[sqlx::test]
+    async fn test_state_update_targets_matching_plan_run(pool: PgPool) {
+        let mut tx = pool.begin().await.unwrap();
+        let param = create_test_plan_param();
+        let username = "test_user";
+        let modified_date = Utc::now();
+
+        let mut plan = plan_add(&mut tx, &param, username).await.unwrap();
+        let data_product_id = plan.data_products[0].id;
+
+        let older_run_id = Uuid::new_v4();
+        let newer_run_id = Uuid::new_v4();
+        let older_created_at = modified_date;
+        let newer_created_at = modified_date + chrono::Duration::seconds(1);
+        let older_step_run_id = Uuid::new_v4();
+        let newer_step_run_id = Uuid::new_v4();
+
+        plan_run_insert(
+            &mut tx,
+            plan.dataset.id,
+            older_run_id,
+            State::Queued,
+            username,
+            older_created_at,
+        )
+        .await
+        .unwrap();
+        plan_run_insert(
+            &mut tx,
+            plan.dataset.id,
+            newer_run_id,
+            State::Queued,
+            username,
+            newer_created_at,
+        )
+        .await
+        .unwrap();
+
+        for data_product in &plan.data_products {
+            let mut older_snapshot = data_product.clone();
+            if older_snapshot.id == data_product_id {
+                older_snapshot.run_id = Some(older_step_run_id);
+            }
+            snapshot_plan_run_data_product(
+                &mut tx,
+                plan.dataset.id,
+                older_run_id,
+                &older_snapshot,
+                username,
+                older_created_at,
+            )
+            .await
+            .unwrap();
+
+            let mut newer_snapshot = data_product.clone();
+            if newer_snapshot.id == data_product_id {
+                newer_snapshot.run_id = Some(newer_step_run_id);
+            }
+            snapshot_plan_run_data_product(
+                &mut tx,
+                plan.dataset.id,
+                newer_run_id,
+                &newer_snapshot,
+                username,
+                newer_created_at,
+            )
+            .await
+            .unwrap();
+        }
+
+        let state_param = StateParam {
+            id: data_product_id,
+            state: State::Success,
+            run_id: Some(older_step_run_id),
+            link: Some("http://test-link.com".to_string()),
+            passback: None,
+        };
+
+        state_update(&mut tx, &mut plan, &state_param, username, modified_date)
+            .await
+            .unwrap();
+
+        let older_run = plan_run_read(&mut tx, plan.dataset.id, older_run_id)
+            .await
+            .unwrap();
+        let newer_run = plan_run_read(&mut tx, plan.dataset.id, newer_run_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            older_run
+                .data_products
+                .iter()
+                .find(|dp| dp.data_product_id == data_product_id)
+                .unwrap()
+                .state,
+            State::Success,
+            "The run matching the worker step run id should receive the success snapshot"
+        );
+        let newer_snapshot = newer_run
+            .data_products
+            .iter()
+            .find(|dp| dp.data_product_id == data_product_id)
+            .unwrap();
+        assert_eq!(
+            newer_snapshot.step_run_id,
+            Some(newer_step_run_id),
+            "A newer active run should keep its own step run id"
+        );
+        assert_ne!(
+            newer_snapshot.state,
+            State::Success,
+            "A newer active run should not be updated by an older worker callback"
         );
     }
 

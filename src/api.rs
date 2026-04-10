@@ -2,11 +2,15 @@ use crate::{
     Config,
     auth::{Authenticated, JwtAuth, RemoteLogin, Role, authenticate},
     core::{
-        clear_edit, data_product_read, disable_drop, plan_add, plan_pause_edit, plan_read,
-        plan_search_read, states_edit,
+        clear_edit_with_config, data_product_read, disable_drop, execution_log_add,
+        plan_add_with_config, plan_pause_edit_with_config, plan_read, plan_search_read,
+        states_edit_with_config,
     },
     error::into_poem_error,
-    model::{DataProduct, DataProductId, DatasetId, Plan, PlanParam, SearchReturn, StateParam},
+    model::{
+        DataProduct, DataProductId, DatasetId, ExecutionLog, ExecutionLogParam, Plan, PlanParam,
+        SearchReturn, StateParam,
+    },
 };
 use poem::{error::InternalServerError, web::Data};
 use poem_openapi::{
@@ -47,6 +51,7 @@ impl Api {
     async fn plan_post(
         &self,
         auth: JwtAuth,
+        Data(config): Data<&Config>,
         Data(pool): Data<&PgPool>,
         Json(plan): Json<PlanParam>,
     ) -> poem::Result<Json<Plan>> {
@@ -56,7 +61,7 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Add the plan to the DB
-        let plan: Plan = plan_add(&mut tx, &plan, auth.service())
+        let plan: Plan = plan_add_with_config(&mut tx, config, &plan, auth.service())
             .await
             .map_err(into_poem_error)?;
 
@@ -114,6 +119,7 @@ impl Api {
     async fn plan_pause_put(
         &self,
         auth: JwtAuth,
+        Data(config): Data<&Config>,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
     ) -> poem::Result<Json<Plan>> {
@@ -123,9 +129,10 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Pause a Plan
-        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, true, auth.service())
-            .await
-            .map_err(into_poem_error)?;
+        let plan: Plan =
+            plan_pause_edit_with_config(&mut tx, config, dataset_id, true, auth.service())
+                .await
+                .map_err(into_poem_error)?;
 
         // Commit transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -138,6 +145,7 @@ impl Api {
     async fn plan_unpause_put(
         &self,
         auth: JwtAuth,
+        Data(config): Data<&Config>,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
     ) -> poem::Result<Json<Plan>> {
@@ -147,9 +155,10 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Unpause a Plan
-        let plan: Plan = plan_pause_edit(&mut tx, dataset_id, false, auth.service())
-            .await
-            .map_err(into_poem_error)?;
+        let plan: Plan =
+            plan_pause_edit_with_config(&mut tx, config, dataset_id, false, auth.service())
+                .await
+                .map_err(into_poem_error)?;
 
         // Commit transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -184,6 +193,7 @@ impl Api {
     async fn state_put(
         &self,
         auth: JwtAuth,
+        Data(config): Data<&Config>,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
         Json(states): Json<Vec<StateParam>>,
@@ -194,9 +204,10 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Update data product states and return the updated plan
-        let plan: Plan = states_edit(&mut tx, dataset_id, &states, auth.service())
-            .await
-            .map_err(into_poem_error)?;
+        let plan: Plan =
+            states_edit_with_config(&mut tx, config, dataset_id, &states, auth.service())
+                .await
+                .map_err(into_poem_error)?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -209,6 +220,7 @@ impl Api {
     async fn clear_put(
         &self,
         auth: JwtAuth,
+        Data(config): Data<&Config>,
         Data(pool): Data<&PgPool>,
         Path(dataset_id): Path<DatasetId>,
         Json(data_product_ids): Json<Vec<DataProductId>>,
@@ -219,9 +231,15 @@ impl Api {
         let mut tx = pool.begin().await.map_err(InternalServerError)?;
 
         // Clear Data Products and clear all downsteam data products.
-        let plan: Plan = clear_edit(&mut tx, dataset_id, &data_product_ids, auth.service())
-            .await
-            .map_err(into_poem_error)?;
+        let plan: Plan = clear_edit_with_config(
+            &mut tx,
+            config,
+            dataset_id,
+            &data_product_ids,
+            auth.service(),
+        )
+        .await
+        .map_err(into_poem_error)?;
 
         // Commit Transaction
         tx.commit().await.map_err(InternalServerError)?;
@@ -252,6 +270,27 @@ impl Api {
         tx.commit().await.map_err(InternalServerError)?;
 
         Ok(Json(plan))
+    }
+
+    /// Append a worker log entry for a data product
+    #[oai(path = "/data_product/:dataset_id/:data_product_id/log", method = "post", tag = Tag::DataProduct)]
+    async fn data_product_log_post(
+        &self,
+        auth: JwtAuth,
+        Data(pool): Data<&PgPool>,
+        Path(dataset_id): Path<DatasetId>,
+        Path(data_product_id): Path<DataProductId>,
+        Json(log): Json<ExecutionLogParam>,
+    ) -> poem::Result<Json<ExecutionLog>> {
+        auth.check_role(Role::Update).map_err(into_poem_error)?;
+
+        let mut tx = pool.begin().await.map_err(InternalServerError)?;
+        let log = execution_log_add(&mut tx, dataset_id, data_product_id, &log, auth.service())
+            .await
+            .map_err(into_poem_error)?;
+        tx.commit().await.map_err(InternalServerError)?;
+
+        Ok(Json(log))
     }
 }
 
@@ -346,7 +385,7 @@ mod tests {
             .get("test")
             .assert_string("passthrough1");
         dp1.get("state").assert_string("queued");
-        dp1.get("run_id").assert_null();
+        assert!(!dp1.get("run_id").string().is_empty());
         dp1.get("link").assert_null();
         dp1.get("passback").assert_null();
         dp1.get("extra")
@@ -667,7 +706,7 @@ mod tests {
             .get("test")
             .assert_string("passthrough1");
         json_value.object().get("state").assert_string("queued");
-        json_value.object().get("run_id").assert_null();
+        assert!(!json_value.object().get("run_id").string().is_empty());
         json_value.object().get("link").assert_null();
         json_value.object().get("passback").assert_null();
         json_value
@@ -798,17 +837,9 @@ mod tests {
             .unwrap();
         dp2.get("id").assert_string(&dp2_id.to_string());
         dp2.get("state").assert_string("queued");
-        dp2.get("run_id")
-            .assert_string("12345678-1234-1234-1234-123456789def");
+        assert!(!dp2.get("run_id").string().is_empty());
         dp2.get("link").assert_string("https://example.com/run-456");
-        dp2.get("passback")
-            .object()
-            .get("status")
-            .assert_string("finished");
-        dp2.get("passback")
-            .object()
-            .get("result")
-            .assert_string("failed");
+        dp2.get("passback").assert_null();
     }
 
     /// Test State Put - Dataset Not Found Case

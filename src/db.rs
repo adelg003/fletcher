@@ -2,12 +2,14 @@ use crate::{
     error::Result,
     model::{
         Compute, DataProduct, DataProductId, DataProductParam, Dataset, DatasetId, DatasetParam,
-        Dependency, DependencyParam, SearchRow, State, StateParam,
+        Dependency, DependencyParam, ExecutionLog, ExecutionLogParam, PlanRun, PlanRunDataProduct,
+        PlanRunDependency, SearchRow, State, StateParam,
     },
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use sqlx::{Postgres, Transaction, query_as};
+use sqlx::{Postgres, Transaction, query, query_as};
+use uuid::Uuid;
 
 /// Insert up Update a Dataset
 pub async fn dataset_upsert(
@@ -77,6 +79,24 @@ pub async fn dataset_select(
     .await?;
 
     Ok(dataset)
+}
+
+/// Lock a dataset row for the duration of the current transaction
+pub async fn dataset_lock(tx: &mut Transaction<'_, Postgres>, dataset_id: DatasetId) -> Result<()> {
+    query!(
+        r#"SELECT
+            dataset_id
+        FROM
+            dataset
+        WHERE
+            dataset_id = $1
+        FOR UPDATE"#,
+        dataset_id,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(())
 }
 
 /// Pause / Un-pause a dataset
@@ -317,6 +337,577 @@ pub async fn data_products_by_dataset_select(
     .await?;
 
     Ok(data_products)
+}
+
+/// Append a log entry for a running worker
+pub async fn execution_log_insert(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    data_product_id: DataProductId,
+    param: &ExecutionLogParam,
+    username: &str,
+    created_at: DateTime<Utc>,
+) -> Result<ExecutionLog> {
+    let log = query_as!(
+        ExecutionLog,
+        r#"INSERT INTO execution_log (
+            dataset_id,
+            data_product_id,
+            run_id,
+            stream,
+            message,
+            created_by,
+            created_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7
+        ) RETURNING
+            log_id AS id,
+            data_product_id,
+            run_id,
+            stream,
+            message,
+            created_by,
+            created_at"#,
+        dataset_id,
+        data_product_id,
+        param.run_id,
+        param.stream,
+        param.message,
+        username,
+        created_at,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(log)
+}
+
+/// Retrieve logs for the latest run of each data product in a dataset
+#[cfg_attr(not(test), allow(dead_code))]
+pub async fn execution_logs_by_dataset_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+) -> Result<Vec<ExecutionLog>> {
+    let logs = query_as!(
+        ExecutionLog,
+        r#"SELECT
+            log.log_id AS id,
+            log.data_product_id,
+            log.run_id,
+            log.stream,
+            log.message,
+            log.created_by,
+            log.created_at
+        FROM
+            execution_log log
+        JOIN
+            data_product dp
+        ON
+            log.dataset_id = dp.dataset_id
+            AND log.data_product_id = dp.data_product_id
+            AND log.run_id = dp.run_id
+        WHERE
+            log.dataset_id = $1
+        ORDER BY
+            log.created_at,
+            log.log_id"#,
+        dataset_id,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    Ok(logs)
+}
+
+/// Insert a new plan execution run
+pub async fn plan_run_insert(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+    status: State,
+    username: &str,
+    created_at: DateTime<Utc>,
+) -> Result<PlanRun> {
+    let run = query_as!(
+        PlanRun,
+        r#"INSERT INTO plan_run (
+            plan_run_id,
+            dataset_id,
+            status,
+            created_by,
+            created_at,
+            modified_by,
+            modified_date
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $4,
+            $5
+        ) RETURNING
+            plan_run_id AS id,
+            dataset_id,
+            status AS "status: State",
+            created_by,
+            created_at,
+            modified_by,
+            modified_date"#,
+        plan_run_id,
+        dataset_id,
+        status as State,
+        username,
+        created_at,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(run)
+}
+
+/// Select the most recent active plan run for a dataset
+pub async fn plan_run_active_by_dataset_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+) -> Result<Option<PlanRun>> {
+    let run = query_as!(
+        PlanRun,
+        r#"SELECT
+            plan_run_id AS id,
+            dataset_id,
+            status AS "status: State",
+            created_by,
+            created_at,
+            modified_by,
+            modified_date
+        FROM
+            plan_run
+        WHERE
+            dataset_id = $1
+            AND status IN ('queued'::state, 'running'::state)
+        ORDER BY
+            created_at DESC,
+            plan_run_id DESC
+        LIMIT 1"#,
+        dataset_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    Ok(run)
+}
+
+/// Select the plan run owning a specific worker step run
+pub async fn plan_run_by_step_run_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    data_product_id: DataProductId,
+    step_run_id: Uuid,
+) -> Result<Option<PlanRun>> {
+    let run = query_as!(
+        PlanRun,
+        r#"SELECT
+            run.plan_run_id AS id,
+            run.dataset_id,
+            run.status AS "status: State",
+            run.created_by,
+            run.created_at,
+            run.modified_by,
+            run.modified_date
+        FROM
+            plan_run run
+        JOIN
+            plan_run_data_product run_dp
+        ON
+            run.plan_run_id = run_dp.plan_run_id
+            AND run.dataset_id = run_dp.dataset_id
+        WHERE
+            run.dataset_id = $1
+            AND run_dp.data_product_id = $2
+            AND run_dp.step_run_id = $3
+        ORDER BY
+            run.created_at DESC,
+            run.plan_run_id DESC
+        LIMIT 1"#,
+        dataset_id,
+        data_product_id,
+        step_run_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    Ok(run)
+}
+
+/// Select all plan runs for a dataset
+pub async fn plan_runs_by_dataset_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+) -> Result<Vec<PlanRun>> {
+    let runs = query_as!(
+        PlanRun,
+        r#"SELECT
+            plan_run_id AS id,
+            dataset_id,
+            status AS "status: State",
+            created_by,
+            created_at,
+            modified_by,
+            modified_date
+        FROM
+            plan_run
+        WHERE
+            dataset_id = $1
+        ORDER BY
+            created_at DESC,
+            plan_run_id DESC"#,
+        dataset_id,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    Ok(runs)
+}
+
+/// Select a plan run by id
+pub async fn plan_run_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+) -> Result<PlanRun> {
+    let run = query_as!(
+        PlanRun,
+        r#"SELECT
+            plan_run_id AS id,
+            dataset_id,
+            status AS "status: State",
+            created_by,
+            created_at,
+            modified_by,
+            modified_date
+        FROM
+            plan_run
+        WHERE
+            dataset_id = $1
+            AND plan_run_id = $2"#,
+        dataset_id,
+        plan_run_id,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(run)
+}
+
+/// Update a plan run's status
+pub async fn plan_run_status_update(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+    status: State,
+    username: &str,
+    modified_date: DateTime<Utc>,
+) -> Result<PlanRun> {
+    let run = query_as!(
+        PlanRun,
+        r#"UPDATE
+            plan_run
+        SET
+            status = $3,
+            modified_by = $4,
+            modified_date = $5
+        WHERE
+            dataset_id = $1
+            AND plan_run_id = $2
+        RETURNING
+            plan_run_id AS id,
+            dataset_id,
+            status AS "status: State",
+            created_by,
+            created_at,
+            modified_by,
+            modified_date"#,
+        dataset_id,
+        plan_run_id,
+        status as State,
+        username,
+        modified_date,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(run)
+}
+
+/// Upsert a plan run's data product snapshot
+#[allow(clippy::too_many_arguments)]
+pub async fn plan_run_data_product_upsert(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+    data_product_id: DataProductId,
+    compute: Compute,
+    name: &str,
+    version: &str,
+    eager: bool,
+    state: State,
+    step_run_id: Option<Uuid>,
+    link: Option<&str>,
+    passback: Option<Value>,
+    username: &str,
+    modified_date: DateTime<Utc>,
+) -> Result<PlanRunDataProduct> {
+    let row = query_as!(
+        PlanRunDataProduct,
+        r#"INSERT INTO plan_run_data_product (
+            plan_run_id,
+            dataset_id,
+            data_product_id,
+            compute,
+            name,
+            version,
+            eager,
+            state,
+            step_run_id,
+            link,
+            passback,
+            modified_by,
+            modified_date
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13
+        ) ON CONFLICT (plan_run_id, data_product_id) DO
+        UPDATE SET
+            compute = $4,
+            name = $5,
+            version = $6,
+            eager = $7,
+            state = $8,
+            step_run_id = $9,
+            link = $10,
+            passback = $11,
+            modified_by = $12,
+            modified_date = $13
+        RETURNING
+            data_product_id,
+            compute AS "compute: Compute",
+            name,
+            version,
+            eager,
+            state AS "state: State",
+            step_run_id,
+            link,
+            passback,
+            modified_by,
+            modified_date"#,
+        plan_run_id,
+        dataset_id,
+        data_product_id,
+        compute as Compute,
+        name,
+        version,
+        eager,
+        state as State,
+        step_run_id,
+        link,
+        passback,
+        username,
+        modified_date,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(row)
+}
+
+/// Insert a plan run dependency snapshot
+pub async fn plan_run_dependency_insert(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+    parent_id: DataProductId,
+    child_id: DataProductId,
+) -> Result<PlanRunDependency> {
+    let row = query_as!(
+        PlanRunDependency,
+        r#"INSERT INTO plan_run_dependency (
+            plan_run_id,
+            dataset_id,
+            parent_id,
+            child_id
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            $4
+        ) ON CONFLICT (plan_run_id, parent_id, child_id) DO NOTHING
+        RETURNING
+            parent_id,
+            child_id"#,
+        plan_run_id,
+        dataset_id,
+        parent_id,
+        child_id,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(row)
+}
+
+/// Select all run data product snapshots for a plan run
+pub async fn plan_run_data_products_by_run_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+) -> Result<Vec<PlanRunDataProduct>> {
+    let rows = query_as!(
+        PlanRunDataProduct,
+        r#"SELECT
+            data_product_id,
+            compute AS "compute: Compute",
+            name,
+            version,
+            eager,
+            state AS "state: State",
+            step_run_id,
+            link,
+            passback,
+            modified_by,
+            modified_date
+        FROM
+            plan_run_data_product
+        WHERE
+            dataset_id = $1
+            AND plan_run_id = $2
+        ORDER BY
+            modified_date,
+            data_product_id"#,
+        dataset_id,
+        plan_run_id,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    Ok(rows)
+}
+
+/// Select all run dependency snapshots for a plan run
+pub async fn plan_run_dependencies_by_run_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+) -> Result<Vec<PlanRunDependency>> {
+    let rows = query_as!(
+        PlanRunDependency,
+        r#"SELECT
+            parent_id,
+            child_id
+        FROM
+            plan_run_dependency
+        WHERE
+            dataset_id = $1
+            AND plan_run_id = $2
+        ORDER BY
+            parent_id,
+            child_id"#,
+        dataset_id,
+        plan_run_id,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    Ok(rows)
+}
+
+/// Select logs for a step within a historical plan run
+pub async fn execution_logs_by_run_data_product_select(
+    tx: &mut Transaction<'_, Postgres>,
+    dataset_id: DatasetId,
+    plan_run_id: Uuid,
+    data_product_id: DataProductId,
+) -> Result<Vec<ExecutionLog>> {
+    let logs = query_as!(
+        ExecutionLog,
+        r#"SELECT
+            log.log_id AS id,
+            log.data_product_id,
+            log.run_id,
+            log.stream,
+            log.message,
+            log.created_by,
+            log.created_at
+        FROM
+            execution_log log
+        JOIN
+            plan_run_data_product run_dp
+        ON
+            log.run_id = run_dp.step_run_id
+            AND log.data_product_id = run_dp.data_product_id
+        WHERE
+            log.dataset_id = $1
+            AND run_dp.plan_run_id = $2
+            AND run_dp.dataset_id = $1
+            AND run_dp.data_product_id = $3
+        ORDER BY
+            log.created_at,
+            log.log_id"#,
+        dataset_id,
+        plan_run_id,
+        data_product_id,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    Ok(logs)
+}
+
+/// Count run step states for a historical plan run
+pub async fn plan_run_state_counts_select(
+    tx: &mut Transaction<'_, Postgres>,
+    plan_run_id: Uuid,
+) -> Result<(i64, i64, i64, i64, i64)> {
+    let row = query!(
+        r#"SELECT
+            COUNT(*) FILTER (WHERE state = 'failed'::state) AS "failed_count!",
+            COUNT(*) FILTER (WHERE state = 'success'::state) AS "success_count!",
+            COUNT(*) FILTER (WHERE state = 'running'::state) AS "running_count!",
+            COUNT(*) FILTER (WHERE state = 'queued'::state) AS "queued_count!",
+            COUNT(*) FILTER (WHERE state = 'waiting'::state) AS "waiting_count!"
+        FROM
+            plan_run_data_product
+        WHERE
+            plan_run_id = $1"#,
+        plan_run_id,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok((
+        row.failed_count,
+        row.success_count,
+        row.running_count,
+        row.queued_count,
+        row.waiting_count,
+    ))
 }
 
 /// Upsert a new Dependency between Data Products

@@ -53,6 +53,19 @@ fn main() {
     )
     .expect("Failed to copy viz-global.js from node_modules");
 
+    // Populate Assets directory with Nice-DAG core
+    fs::create_dir_all("assets/nice-dag").expect("Failed to create assets/nice-dag directory");
+    fs::copy(
+        "node_modules/@ebay/nice-dag-core/lib/index.umd.cjs",
+        "assets/nice-dag/nice-dag-core.js",
+    )
+    .expect("Failed to copy nice-dag-core.js from node_modules");
+
+    // Populate Assets directory with Fletcher JS helpers
+    fs::create_dir_all("assets/js").expect("Failed to create assets/js directory");
+    fs::copy("scripts/plan-dag.js", "assets/js/plan-dag.js")
+        .expect("Failed to copy plan-dag.js into assets");
+
     // Populate Assets directory with Prism.js
     fs::create_dir_all("assets/prism").expect("Failed to create assets/prism directory");
     fs::copy("node_modules/prismjs/prism.js", "assets/prism/prism.js")

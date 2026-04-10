@@ -8,7 +8,10 @@ use petgraph::graph::GraphError;
 use poem::error::{
     BadRequest, Forbidden, InternalServerError, NotFound, Unauthorized, UnprocessableEntity,
 };
-use std::num::ParseIntError;
+use reqwest::Error as ReqwestError;
+use std::{io::Error as IoError, num::ParseIntError};
+use tokio::task::JoinError;
+use uuid::Error as UuidError;
 
 /// Crate-wide result alias.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -60,6 +63,14 @@ pub enum Error {
     #[error(transparent)]
     Jwt(#[from] JwtError),
 
+    /// Error from std::io
+    #[error(transparent)]
+    Io(#[from] IoError),
+
+    /// Error from joining async tasks
+    #[error(transparent)]
+    Join(#[from] JoinError),
+
     /// Data Product not found
     #[error("Data product not found for: '{0}'")]
     Missing(DataProductId),
@@ -71,6 +82,10 @@ pub enum Error {
     /// Error from ParseInt
     #[error(transparent)]
     ParseInt(#[from] ParseIntError),
+
+    /// Error from reqwest
+    #[error(transparent)]
+    Reqwest(#[from] ReqwestError),
 
     /// Missing the needed role access
     #[error("Service account '{0}' is missing the following role: '{1}'")]
@@ -84,9 +99,17 @@ pub enum Error {
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 
+    /// Error from UUID parsing
+    #[error(transparent)]
+    Uuid(#[from] UuidError),
+
     /// This error should never be reachable
     #[error("This error should not have been reachable")]
     Unreachable,
+
+    /// Worker exited with non-zero status
+    #[error("Worker exited with non-zero exit code: {0}")]
+    WorkerExit(i32),
 }
 
 impl Error {
@@ -103,10 +126,13 @@ impl Error {
             Error::Graph(err) => InternalServerError(err),
             Error::InvalidKey => Unauthorized(self),
             Error::InvalidService(_) => Unauthorized(self),
+            Error::Io(err) => InternalServerError(err),
+            Error::Join(err) => InternalServerError(err),
             Error::Jwt(err) => Forbidden(err),
             Error::Missing(_) => NotFound(self),
             Error::Pause(_, _) => BadRequest(self),
             Error::ParseInt(err) => InternalServerError(err),
+            Error::Reqwest(err) => InternalServerError(err),
             Error::Role(_, _) => Forbidden(self),
             Error::SerdeJson(err) => InternalServerError(err),
             Error::Sqlx(sqlx::Error::RowNotFound) => NotFound(sqlx::Error::RowNotFound),
@@ -115,6 +141,8 @@ impl Error {
             }
             Error::Sqlx(err) => InternalServerError(err),
             Error::Unreachable => InternalServerError(self),
+            Error::Uuid(err) => BadRequest(err),
+            Error::WorkerExit(_) => InternalServerError(self),
         }
     }
 }
